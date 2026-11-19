@@ -29,7 +29,7 @@ import (
 // (dependency_direction_test.go and friends), so it carries the
 // `integration` build tag (bead pg2-bkwi41; it runs go vet and go test -c over the
 // whole module, minutes of work) and runs inside
-// checks.<system>.pg-connector-integration-tests, not the unit tier.
+// integration-checks.pg-connector-integration-tests, not the unit tier.
 
 // crossCompileFailure is one step of the gate that failed.
 type crossCompileFailure struct {

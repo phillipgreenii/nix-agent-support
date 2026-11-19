@@ -14,7 +14,7 @@ import (
 // against both the old and the new statement. Under the race detector it costs
 // about 160 G instructions (the old statements are quadratic in the lines per
 // session), far over the unit-test budget, so it sits behind the integration tag
-// and runs in checks.<system>.pg-ccaudit-integration-tests, not in the unit gate.
+// and runs in integration-checks.pg-ccaudit-integration-tests, not in the unit gate.
 // The unit tier keeps the plan assertions, the boundary cases and the
 // hand-computed counts that do not need the old statements.
 

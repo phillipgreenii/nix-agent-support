@@ -692,7 +692,7 @@ origin and two clones), with only `nix`, `claude` and `pg-connector` faked:
   answers `declined`), then deferred by `p1-later`: the run exits `21`, the repository is left
   mid-rebase, and the run log records `declined, declined, deferred`.
 
-They run in their own check, `nix build .#checks.<system>.pg-rescue-integration-tests`, so they stay
+They run in their own check, `nix build .#integration-checks.pg-rescue-integration-tests`, so they stay
 off the deploy path. Locally: `go test -tags integration ./internal/integration/`. Without the
 binaries on `PATH` the tests build them with `go build`.
 

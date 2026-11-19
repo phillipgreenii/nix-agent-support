@@ -15,7 +15,7 @@ import (
 )
 
 // The client logic under a real `node --test` process is an integration test:
-// checks.<system>.pg-task-focus-integration-tests runs it.
+// integration-checks.pg-task-focus-integration-tests runs it.
 
 // ---- the client logic, under node ----
 

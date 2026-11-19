@@ -15,7 +15,7 @@
 //
 // The file is `integration`-tagged (ADR 0111, ADR 0024): the 20 subtests are
 // real wrapper runs that wait on real timeouts, about half the package's
-// unit-run time. They run under checks.<system>.pg-rescue-integration-tests.
+// unit-run time. They run under integration-checks.pg-rescue-integration-tests.
 // installScripts and script, which display_e2e_test.go also uses, stay in the
 // untagged display_e2e_test.go.
 package runner_test

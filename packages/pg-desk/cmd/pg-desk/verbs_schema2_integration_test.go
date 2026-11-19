@@ -16,7 +16,7 @@ import (
 
 // Integration tier: the daemon verb runs as a re-executed child of this test
 // binary (see runVerbChildIfRequested), a whole process, so it is not a unit
-// test. Run through checks.<system>.pg-desk-integration-tests.
+// test. Run through integration-checks.pg-desk-integration-tests.
 
 // start launches the verb as its own process (a re-execution of this test
 // binary, see runVerbChildIfRequested). Only the daemon verb still runs this

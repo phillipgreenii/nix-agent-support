@@ -22,7 +22,7 @@ package main
 //
 // It builds the real binaries and execs them, so it carries the `integration`
 // build tag (bead pg2-bkwi41) and runs through
-// checks.<system>.pg-connector-integration-tests, not the unit tier, like
+// integration-checks.pg-connector-integration-tests, not the unit tier, like
 // cmd/pg-connector-thread-slack's conformance test.
 
 import (

@@ -12,7 +12,7 @@
 // hermetic (a fake claude script, no network, no real credential), but it
 // builds the binary and execs it as a subprocess, so it carries the
 // `integration` build tag (bead pg2-bkwi41) and runs through
-// checks.<system>.pg-connector-integration-tests, not the unit tier (unlike
+// integration-checks.pg-connector-integration-tests, not the unit tier (unlike
 // cmd/pg-connector/e2e_contract_test.go's `contract`-tagged real-external-
 // credential suite, which needs real credentials as well).
 package main

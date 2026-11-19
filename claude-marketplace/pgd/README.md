@@ -525,6 +525,6 @@ needed:
 - `test-pgd-multiprocess` runs `scripts/run-pgd-multiprocess-check.sh` (`PGD_MULTIPROCESS=1`): several headless
   `claude -p` sessions sharing `$.store`.
 
-Run one with `nix build .#checks.<system>.test-pgd-links-e2e -L` (or `.test-pgd-multiprocess`), in the background.
+Run one with `nix build .#integration-checks.test-pgd-links-e2e -L` (or `.test-pgd-multiprocess`), in the background.
 By hand, set the switch and run the script (the e2e needs `tmux`, `node` and `claude` on PATH; the multi-process one
 needs `claude` and credentials).

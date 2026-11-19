@@ -980,7 +980,7 @@ package test by test, which a package-level `TestMain` gate cannot.
 Run it when the daemon, the umbrella or a connector's wire contract changes:
 
 ```bash
-nix build .#checks.<system>.pg-connector-integration-tests   # runs exactly the tagged tests, under -race, 60m; not part of any hook or land gate
+nix build .#integration-checks.pg-connector-integration-tests   # runs exactly the tagged tests, under -race, 60m; not part of any hook or land gate
 # or, from packages/pg-connector (all tests of every package, tagged ones included):
 nice -n 10 go test -p 4 -count=1 -tags integration ./...
 # or one package:
@@ -1045,7 +1045,7 @@ and `pg-connector-go-tests` leave it out (as they do the integration tier above)
 engine changes:
 
 ```bash
-nix build .#checks.<system>.pg-connector-load-test     # fails if a scenario fails; not part of any hook or land gate
+nix build .#integration-checks.pg-connector-load-test     # fails if a scenario fails; not part of any hook or land gate
 # or, from packages/pg-connector:
 PG_CONNECTOR_LOAD_TEST=1 nice -n 10 go test -p 4 -count=1 -race -timeout 60m ./cmd/pg-connector-github/internal/loadtest/
 ```

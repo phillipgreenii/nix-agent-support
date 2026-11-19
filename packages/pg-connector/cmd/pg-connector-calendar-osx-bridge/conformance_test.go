@@ -13,7 +13,7 @@
 // fully hermetic (a fake, hand-rolled Unix-socket listener, no network, no real
 // EventKit/TCC), but it builds the binary and execs it as a subprocess, so it
 // carries the `integration` build tag (bead pg2-bkwi41) and runs through
-// checks.<system>.pg-connector-integration-tests, not the unit tier.
+// integration-checks.pg-connector-integration-tests, not the unit tier.
 package main
 
 import (

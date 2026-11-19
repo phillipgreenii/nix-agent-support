@@ -39,4 +39,4 @@ reports `--- SKIP`. Piping the output through `grep -c '^SKIPPED integration: '`
 - The suite uses absolute paths (`/bin/sleep`, `/bin/sh`, `/usr/bin/pmset`, `/usr/bin/caffeinate`)
   so it also runs in the nix sandbox, where `PATH` is empty. Where the sandbox cannot run
   `caffeinate` or list its assertion, the check log carries the `SKIPPED integration:` line instead
-  (`checks.<system>.pg-keep-awake-integration-tests` runs `go test -tags integration -v`; it is not part of the unit gate `checks.<system>.pg-keep-awake-go-tests`, because every file here carries `//go:build integration`).
+  (`integration-checks.pg-keep-awake-integration-tests` runs `go test -tags integration -v`; it is not part of the unit gate `checks.<system>.pg-keep-awake-go-tests`, because every file here carries `//go:build integration`).

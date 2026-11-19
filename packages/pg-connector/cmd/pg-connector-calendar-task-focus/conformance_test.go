@@ -11,7 +11,7 @@
 // daemon's Go packages. The suite is hermetic
 // (loopback only, no real daemon), but it builds the binary and execs it, so it
 // carries the `integration` build tag (bead pg2-bkwi41) and runs through
-// checks.<system>.pg-connector-integration-tests, not the unit tier.
+// integration-checks.pg-connector-integration-tests, not the unit tier.
 package main
 
 import (

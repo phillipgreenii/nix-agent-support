@@ -5,7 +5,7 @@
 // ignores TERM). Each spends 0.7 s to 3 s of wall clock, which together with
 // TestDisplayGolden is about three quarters of this package's unit run, so
 // they carry the `integration` tag and run under
-// checks.<system>.pg-rescue-integration-tests (ADR 0111, ADR 0024). Their
+// integration-checks.pg-rescue-integration-tests (ADR 0111, ADR 0024). Their
 // helpers (newE2E, helperArgv, waitForFile, ...) stay in the untagged files.
 package runner_test
 

@@ -44,7 +44,7 @@ import (
 // uses are listed by path, each with its reason, in unitReexecAllowed until it is
 // migrated or tagged; a new one is a violation.
 //
-// Integration tests run on demand: `nix build .#checks.<system>.pg-connector-integration-tests`
+// Integration tests run on demand: `nix build .#integration-checks.pg-connector-integration-tests`
 // or `go test -tags integration ./...` (see README.md, "Integration tier"). Files tagged
 // `contract` (real bd, real credentials) are a separate on-demand tier and are excluded
 // from the default build the same way.
@@ -264,7 +264,7 @@ func evaluateUnitTierPurity(root string, reexecAllowed map[string]string) (viola
 				continue
 			}
 			violations = append(violations, fmt.Sprintf(
-				"%s: %s; a test like this MUST live in a file tagged //go:build integration (it runs through checks.<system>.pg-connector-integration-tests, not the unit tier)",
+				"%s: %s; a test like this MUST live in a file tagged //go:build integration (it runs through integration-checks.pg-connector-integration-tests, not the unit tier)",
 				filepath.ToSlash(rel), r,
 			))
 		}

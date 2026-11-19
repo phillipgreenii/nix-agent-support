@@ -35,7 +35,7 @@ the `-linux-cross-compile` check (`GOOS=linux CGO_ENABLED=0 go vet ./...`) keeps
 | none          | unit (fast, hermetic, `-timeout 120s` per package)                                                                  | `pg-claude-code-recorder-go-tests`                                            |
 | `integration` | daemon, subprocess, real external tool                                                                              | `pg-claude-code-recorder-integration-tests` (on demand, `-race`, 60m timeout) |
 | `faults`      | fault injection                                                                                                     | guarded by `-integration-tests-gating`                                        |
-| `soak`        | soak (`checks.<system>.pg-claude-code-recorder-soak`, budgets in `internal/parser/testdata/soak-budgets.json`)      | guarded by `-integration-tests-gating`                                        |
+| `soak`        | soak (`integration-checks.pg-claude-code-recorder-soak`, budgets in `internal/parser/testdata/soak-budgets.json`)   | guarded by `-integration-tests-gating`                                        |
 | `crashsweep`  | crash injection after every file-system operation of the settle scenarios (`internal/settle`)                       | `pg-claude-code-recorder-crashsweep-tests` (on demand, 30m timeout)           |
 | `lockorder`   | go-deadlock lock-order checks on the settler run lock and the copier lock (`internal/settle`, `internal/lockcheck`) | `pg-claude-code-recorder-lockorder-tests` (on demand, `-race`, 10m timeout)   |
 
@@ -527,7 +527,7 @@ budget is exact and not partial. `limit` and `more` behave as for word search.
 
 A substring query under three characters returns no hits and `too_short: true`. Config key
 `parse.maxLineBytes` bounds a line (longer lines are bad lines). The soak check
-(`nix build .#checks.<system>.pg-claude-code-recorder-soak -L`, on demand) fails at 1.5 times the
+(`nix build .#integration-checks.pg-claude-code-recorder-soak -L`, on demand) fails at 1.5 times the
 committed baseline.
 
 ## Remaining sources, links, the change feed and the Go client (phase 3)

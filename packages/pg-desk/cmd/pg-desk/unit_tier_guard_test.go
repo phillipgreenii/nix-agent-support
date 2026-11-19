@@ -20,7 +20,7 @@ import (
 // fast and hermetic (V-4). A test that runs the test binary or a built binary
 // as a subprocess, builds a Go program or needs a real external tool is
 // integration tier: its file MUST carry `//go:build integration`, and
-// checks.<system>.pg-desk-integration-tests runs it. Only fast single-process
+// integration-checks.pg-desk-integration-tests runs it. Only fast single-process
 // real-tool tests (git, sh) stay unit.
 
 // unitExecAllowed lists programs a unit-tier test may exec by literal name.

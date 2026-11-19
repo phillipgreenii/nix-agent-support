@@ -20,7 +20,7 @@ import (
 // stay fast and hermetic (V-4). A test that re-executes the test binary, starts
 // a handler binary, drives the real ccpool or tmux or builds a Go program is integration tier: its file MUST
 // carry `//go:build integration`, and it runs in
-// checks.<system>.pg-router-handlers-integration-tests. Only fast single-process
+// integration-checks.pg-router-handlers-integration-tests. Only fast single-process
 // real-tool tests (git, a /bin/sh stub handler) stay unit.
 
 // unitExecAllowed lists programs a unit-tier test may exec by literal name.

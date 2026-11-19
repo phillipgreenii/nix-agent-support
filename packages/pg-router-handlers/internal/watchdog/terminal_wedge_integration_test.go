@@ -22,7 +22,7 @@ import (
 // bound in real time (about 3 s) regardless of how fast the stubs are. A
 // wall-clock timeout bound is the point of the test, so it cannot be trimmed
 // without weakening it; the tests therefore run in
-// checks.<system>.pg-router-handlers-integration-tests, not the unit tier.
+// integration-checks.pg-router-handlers-integration-tests, not the unit tier.
 
 // wedgeSleepDuration matches the fixed sleep inside the wrapper script
 // writeWedgedGit generates below: how long the fake wedged git process

@@ -19,7 +19,7 @@ import (
 
 // Integration tier: every test here runs the plugin as its own process (the
 // test binary re-executed under the plugin name), so none belongs in the unit
-// tier. Run through checks.<system>.pg-desk-integration-tests.
+// tier. Run through integration-checks.pg-desk-integration-tests.
 
 // pluginName is the bare name the umbrella registry uses for this plugin.
 const pluginName = "pg-desk-attention"

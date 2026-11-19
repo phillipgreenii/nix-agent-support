@@ -87,7 +87,7 @@ that run does not compile. The integration tier includes the Linux cross-compile
 for every package, so a `_linux.go` file or `_linux_test.go` that stops compiling fails the gate on a
 darwin host; Linux-only tests are only compiled there, pg2-opk5g first runs them) and the `env -i`
 independence tests (`cmd/pg-connector-github/envindependence_test.go`). It runs on demand, not on
-commit or land: `nix build .#checks.<system>.pg-connector-integration-tests` (exactly the tagged
+commit or land: `nix build .#integration-checks.pg-connector-integration-tests` (exactly the tagged
 tests, under `-race`, 60m), or `go test -tags integration ./...` from `packages/pg-connector`. Run it
 when the daemon, the umbrella or a connector's wire contract changes (and before relying on the
 Linux cross-compile gate). It MUST NOT be wired into any hook, `run-unit-tests` or pre-land gate, and
@@ -109,7 +109,7 @@ runs those packages over the first registration only. Run it with
 excluded from `go test ./...` and from `pg-connector-go-tests` (operator ruling 2026-10-25, bead
 `pg2-7r19vr`): its `TestMain` skips the whole package unless `PG_CONNECTOR_LOAD_TEST=1`, so a test
 file added to it later is covered automatically. Run it by hand when the scheduler, governor or
-change engine changes: `nix build .#checks.<system>.pg-connector-load-test` (sets the variable, runs
+change engine changes: `nix build .#integration-checks.pg-connector-load-test` (sets the variable, runs
 only that package under `-race` with a 60m timeout, fails if a scenario fails). That check MUST NOT be
 wired into any hook, `run-unit-tests` or pre-land gate. `pg-connector-load-test-gating` is its cheap
 regression guard.

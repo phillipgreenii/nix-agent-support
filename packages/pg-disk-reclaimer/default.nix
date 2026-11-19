@@ -25,12 +25,17 @@ in
       else
         pg-disk-reclaimer.check;
 
-    # Opt-in tier (PGDR_INTEGRATION=1): cases that need a real go or a real
-    # OpenTelemetry collector. Built on demand
-    # (nix build .#checks.<system>.test-pg-disk-reclaimer-integration), in no
-    # hook and no run-unit-tests/pre-land gate (the pg-connector-integration-tests
-    # precedent). The collector is nixpkgs', which MAY differ from the one the
-    # observability stack pins; the fixture config records both versions.
+  };
+
+  # Opt-in tier (PGDR_INTEGRATION=1): cases that need a real go or a real
+  # OpenTelemetry collector. NOT a check: it is exposed separately so the flake
+  # can publish it under `legacyPackages.<system>.integration-checks` (ADR 0024 in
+  # nix-repo-base) and `nix flake check` never builds it. Build by name:
+  # `nix build .#integration-checks.test-pg-disk-reclaimer-integration`. It is in no
+  # hook and no run-unit-tests/pre-land gate (global rule V-4). The collector is
+  # nixpkgs', which MAY differ from the one the observability stack pins; the
+  # fixture config records both versions.
+  integration-checks = {
     test-pg-disk-reclaimer-integration = pg-disk-reclaimer.check.overrideAttrs (old: {
       PGDR_INTEGRATION = "1";
       nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [

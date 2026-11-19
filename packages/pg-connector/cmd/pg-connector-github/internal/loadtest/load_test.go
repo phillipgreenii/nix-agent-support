@@ -78,7 +78,7 @@
 // 2026-10-25: a load test is called as needed, not as a blocker every time).
 // Run it by hand when the scheduler, governor or change engine changes:
 //
-//	nix build .#checks.<system>.pg-connector-load-test
+//	nix build .#integration-checks.pg-connector-load-test
 //
 // or directly, from packages/pg-connector:
 //

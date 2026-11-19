@@ -185,7 +185,7 @@ stubs() {
 }
 
 @test "integration: the packaged go wipes a real cache directory" {
-  [[ ${PGDR_INTEGRATION:-} == 1 ]] || skip "needs PGDR_INTEGRATION=1 (checks.<system>.test-pg-disk-reclaimer-integration)"
+  [[ ${PGDR_INTEGRATION:-} == 1 ]] || skip "needs PGDR_INTEGRATION=1 (integration-checks.test-pg-disk-reclaimer-integration)"
   mkreadme
   entry old-a 100
   mkdir -p "$TEST_DIR/gopath"

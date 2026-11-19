@@ -13,7 +13,7 @@ import (
 
 // Integration tier (V-4): needs real APFS cloning, which the nix build sandbox
 // makes very slow, so it stays out of the unit gate and runs under
-// checks.<system>.pg-claude-code-recorder-integration-tests, or directly on a
+// integration-checks.pg-claude-code-recorder-integration-tests, or directly on a
 // host with `go test -tags integration -run Clonefile ./internal/settle`.
 //
 // A real clonefile: a copy that diverged from its original (the copier appended

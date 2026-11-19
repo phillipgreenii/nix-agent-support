@@ -16,7 +16,7 @@ import (
 
 // The real serve process (this test binary re-executed as main, with real
 // signals and a real port) is a multi-process test, so it sits in the
-// integration tier: checks.<system>.pg-task-focus-integration-tests.
+// integration tier: integration-checks.pg-task-focus-integration-tests.
 
 func freePort(t *testing.T) int {
 	t.Helper()

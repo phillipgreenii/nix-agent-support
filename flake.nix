@@ -1107,7 +1107,7 @@
         # versus the ~46 binary-exec tests the full integration-tests check
         # adds), so the cost is paid only on diffs touching these paths.
         # The thorough tier stays
-        # `checks.<system>.claude-extended-tool-approver-integration-tests`.
+        # `integration-checks.claude-extended-tool-approver-integration-tests`.
         # `go` resolves from PATH exactly as pg-test-runner's does for
         # `run-unit-tests`; a missing `go` is a LOUD failure, never a skip.
         ceta-agreement-test = {
@@ -7359,106 +7359,6 @@
                     '';
                   });
 
-              # pg-router-handlers INTEGRATION tier. ON DEMAND ONLY: build it by hand
-              # when the handlers' process wiring, the real-ccpool adoption or the
-              # conformance wire changes
-              # (`nix build .#checks.<system>.pg-router-handlers-integration-tests`).
-              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
-              # gate (operator ruling, Phillip, 2026-10-26: "the integration tests are
-              # taking way too long. they should not be running as typical unit tests
-              # and in typical unit test situations like commit or landing").
-              #
-              # It runs EXACTLY the tests in files tagged `//go:build integration`
-              # (the tagged package's test list minus its untagged list) with the REAL
-              # ccpool and tmux (and bd for internal/beads), builds the handler
-              # binaries with go, and re-executes the test binaries. It fails when the
-              # listing is empty, when a test does not report PASS, or when any test
-              # is skipped, so a gate that silently ran nothing cannot pass. The
-              # unit-tier guard is internal/unittier (TestUnitTierHasNoIntegrationTests).
-              pg-router-handlers-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-router-handlers-integration-tests";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
-                      ./packages/pg-router
-                      ./packages/ccpool
-                      ./packages/pg-claude-code-recorder
-                      ./packages/pg-sqlite
-                      ./packages/claude-transcript
-                      ./packages/pg-failsig
-                    ];
-                  };
-                  modRoot = "pg-router-handlers";
-                  gomod2nixToml = ./packages/pg-router-handlers/gomod2nix.toml;
-                  testDeps = [
-                    pkgs.git
-                    pkgs.ccpool
-                    pkgs.tmux
-                    (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
-                    pkgs.coreutils
-                    pkgs.jq
-                    pkgs.lsof
-                    # ps: TestSampleProcessTree_realPsSeesAChildOfThisProcess runs the
-                    # real `ps`, which the sandbox PATH does not otherwise carry.
-                    pkgs.procps
-                  ];
-                }).overrideAttrs
-                  (_: {
-                    PG_ROUTER_CCPOOL_HANDLER_REQUIRE_CCPOOL = "1";
-                    # The module-rendered specs and pool config the strict-spec
-                    # end-to-end test (spec_e2e_realccpool_test.go) reads.
-                    PG_ROUTER_CCPOOL_HANDLER_SPEC_FIXTURE =
-                      self.checks.${system}.pg-router-ccpool-handler-spec-fixtures;
-                    # tmux serves each sandboxed pool over a unix socket.
-                    __darwinAllowLocalNetworking = true;
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      log="$TMPDIR/integration.log"
-                      : > "$log"
-                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
-                      if [ -z "$pkgs" ]; then
-                        echo "pg-router-handlers-integration-tests: no test file carries //go:build integration" >&2
-                        exit 1
-                      fi
-                      total=0
-                      for dir in $pkgs; do
-                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        names=$(comm -23 <(echo "$tagged") <(echo "$plain") | grep -v '^TestHelper' || true)
-                        if [ -z "$names" ]; then
-                          echo "pg-router-handlers-integration-tests: $dir lists no integration-only tests" >&2
-                          exit 1
-                        fi
-                        regex="^($(echo "$names" | paste -sd'|' -))\$"
-                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
-                        if ! go test -tags integration -count=1 -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
-                          cat "$log"
-                          echo "pg-router-handlers-integration-tests: $dir FAILED" >&2
-                          exit 1
-                        fi
-                        for t in $names; do
-                          if ! grep -q -- "^--- PASS: $t " "$log"; then
-                            cat "$log"
-                            echo "pg-router-handlers-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
-                            exit 1
-                          fi
-                        done
-                        total=$((total + $(echo "$names" | wc -l)))
-                      done
-                      if grep -q -- '^--- SKIP' "$log"; then
-                        cat "$log"
-                        echo "pg-router-handlers-integration-tests: a test was SKIPPED" >&2
-                        exit 1
-                      fi
-                      echo "pg-router-handlers-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
-                      runHook postBuild
-                    '';
-                  });
-
               # ceta — the finding's primary motivation: internal rule / engine /
               # patheval security tests. git on PATH for the primary-commit
               # resolver's real-git contract test (builds fixtures only; the
@@ -7527,96 +7427,6 @@
                 # git: the remote resolver test runs real git.
                 testDeps = [ pkgs.git ];
               };
-
-              # pg-origin-guard integration tier (`//go:build integration`, V-4: never in
-              # the unit gate above). Real OpenSSH ssh-agent and ssh-keygen with a
-              # throwaway CA, the real binary under real git and ssh, process groups and
-              # multi-process lock races; no network, no real origin, no browser. The
-              # pty-driven cases need a pseudo-terminal; the tests skip (not fail) when
-              # none can be opened, so a green check proves only what ran: read the log
-              # (-v) for SKIP lines. -p 1 and -count=1 keep the timing-sensitive cases
-              # from competing for the sandbox's CPU.
-              pg-origin-guard-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-origin-guard-integration-tests";
-                src = lib.fileset.toSource {
-                  root = ./packages;
-                  fileset = lib.fileset.unions [
-                    (lib.fileset.difference ./packages/pg-origin-guard ./packages/pg-origin-guard/docs)
-                    ./packages/pg-failsig
-                  ];
-                };
-                modRoot = "pg-origin-guard";
-                gomod2nixToml = ./packages/pg-origin-guard/gomod2nix.toml;
-                # ps: the login-holder start-time token reads `ps -o lstart=`; the sandbox
-                # PATH has no /bin, so ps comes from procps (Linux) or adv_cmds (darwin).
-                testDeps = [
-                  pkgs.git
-                  pkgs.openssh
-                ]
-                ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps
-                ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.darwin.adv_cmds;
-                testFlags = [
-                  "-tags"
-                  "integration"
-                  "-count=1"
-                  "-v"
-                ];
-              };
-
-              # ceta integration suite — the `//go:build integration` tests in
-              # cmd/claude-extended-tool-approver, which EXEC the compiled binary
-              # and drive a real SQLite ask log through it. They are tagged OFF
-              # the default `go test ./...` so they cannot reach a package build:
-              # mkGoApp scopes gomod2nix's check hook to `subPackages`, so before
-              # the tag those ~46 tests, and NOT the ~1,020 internal/* unit tests,
-              # were what a monorepod nixosConfiguration build ran. On 2026-08-16
-              # they took 559.33s with ZERO failures and tripped `go test`'s 10m
-              # alarm, failing the whole deploy — the wall clock was (fsync count)
-              # x (an unbounded HOST property), so no -timeout can be chosen that a
-              # slower disk cannot blow through (tc-fqu7, and its recurrence).
-              #
-              # Reinstating them HERE keeps the coverage while moving it off the
-              # deploy path: this check is reached by `nix flake check`, never by a
-              # package or nixosConfiguration build, so a degraded disk can delay
-              # CI but can no longer block an activation.
-              #
-              # It is a SUPERSET of claude-extended-tool-approver-go-tests, not a
-              # replacement: mkGoTest deliberately takes no `subPackages`, so
-              # `-tags integration` re-runs every untagged suite alongside the
-              # tagged ones. Both are kept — the plain one is the fast gate that
-              # must stay green on its own.
-              #
-              # rtk (pg2-jwilh): the real-rtk regression test for the worktree-
-              # isolation drop rule (rtk_worktree_isolation_integration_test.go)
-              # drives the REAL rtk. It skips when rtk is missing; the REQUIRE
-              # variable turns that skip into a failure here, so a green check
-              # means it ran. rtk is resolved like the spec-drift check does (no
-              # top-level rtk overlay attr in this standalone flake).
-              claude-extended-tool-approver-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "claude-extended-tool-approver-integration-tests";
-                  src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
-                  gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
-                  testDeps = [
-                    pkgs.git
-                    (pkgs.llm-agentsPkgs.rtk or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.rtk)
-                  ]
-                  # procps: see claude-extended-tool-approver-go-tests above.
-                  ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
-                  testFlags = [
-                    "-tags"
-                    "integration"
-                    # internal/effectpolicy (-race, TestVerdictMonotonicity) alone
-                    # runs ~10 min on a loaded host and tripped go test's default
-                    # 10m alarm (pg2-xk3cu), failing the package before later tests
-                    # ran. 30m keeps a hang bounded while clearing that headroom.
-                    "-timeout"
-                    "30m"
-                  ];
-                }).overrideAttrs
-                  (_: {
-                    CETA_REQUIRE_RTK = "1";
-                  });
 
               # claude-extended-tool-approver-spec-lint — Phase 1 packet 1.3
               # (tc-o14i5.2.3): runs the new `lint --embedded` CLI subcommand
@@ -7941,44 +7751,6 @@
                 gomod2nixToml = ./packages/claude-hook-router/gomod2nix.toml;
               };
 
-              # claude-hook-router-e2e — B3 (ADR 0071 Phase B, packet tc-rjzd3.8): the
-              # bats end-to-end suite (tests/test-claude-hook-router-e2e.bats) driving
-              # the REAL built router binary as a subprocess against stub shell
-              # delegates. The bats file itself documents this exact wiring ("ROUTER_BIN
-              # may already be set by a caller that built the binary itself ... it would
-              # inject a package's own built exe path rather than have the check sandbox
-              # invoke `go build`") -- so ROUTER_BIN is set to the claude-hook-router
-              # overlay package's own built binary (added to the overlay by this same
-              # packet, B5, since B1 landed the package's default.nix but never actually
-              # wired it into the overlay) rather than letting bats invoke `go build`
-              # itself a second time.
-              #
-              # The whole `tests/` dir (not just the .bats file) must be copied as ONE
-              # store path: the suite resolves its stub delegates via
-              # `$(dirname BATS_TEST_FILENAME)/fixtures/delegates` (mirrors the
-              # claude-settings/behavior-docs-conformance bats checks' own
-              # "sibling would be absent" note above) -- a bare `.bats` interpolation
-              # would copy only that one file and leave DELEGATES_DIR empty.
-              claude-hook-router-e2e =
-                let
-                  e2eTestsSrc = lib.fileset.toSource {
-                    root = ./packages/claude-hook-router/tests;
-                    fileset = ./packages/claude-hook-router/tests;
-                  };
-                in
-                pkgs.runCommand "check-claude-hook-router-e2e"
-                  {
-                    nativeBuildInputs = [
-                      pkgs.bats
-                      pkgs.jq
-                    ];
-                  }
-                  ''
-                    export ROUTER_BIN=${pkgs.claude-hook-router}/bin/claude-hook-router
-                    bats ${e2eTestsSrc}/test-claude-hook-router-e2e.bats
-                    touch $out
-                  '';
-
               # pb — the internal suites (gate, bd, pn, patchid, discover, duration, run,
               # unstick). git on PATH for the real-git unit tests; bd/pn
               # tests t.Skip when their tool is absent (matches pb/default.nix
@@ -8036,39 +7808,6 @@
                 };
                 modRoot = "pg-ccaudit";
                 gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
-              };
-
-              # pg-ccaudit integration tier (`//go:build integration`, V-4: never in the
-              # unit gate above). internal/query's old-SQL oracle runs the pre-change
-              # interruptions and error-rate-by-tool statements, which are quadratic in
-              # the lines per session, over every window and flag combination and
-              # compares rows with the new statements: about 160 G instructions under
-              # -race, far over the unit-test budget. ON DEMAND: build it when those two
-              # statements, `scoped()` or `prevToolAgg` change. It MUST NOT be wired into
-              # any hook, run-unit-tests or pre-land gate. The `-run` filter names exactly
-              # the tagged tests, so the unit tests do not run a second time; the
-              # opt-in big-fixture timing test inside it skips itself without
-              # PG_CCAUDIT_BIGFIXTURE.
-              pg-ccaudit-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-ccaudit-integration-tests";
-                src = lib.fileset.toSource {
-                  root = ./packages;
-                  fileset = lib.fileset.unions [
-                    ./packages/pg-ccaudit
-                    ./packages/pg-claude-code-recorder
-                    ./packages/pg-sqlite
-                  ];
-                };
-                modRoot = "pg-ccaudit";
-                gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
-                testFlags = [
-                  "-tags"
-                  "integration"
-                  "-count=1"
-                  "-v"
-                  "-run"
-                  "^(TestWindowDrivenQueriesEqualTheirOldSQL|TestOldSQLScannedEveryToolCall|TestWindowBoundariesAgreeWithOldSQL)$"
-                ];
               };
 
               # pg-router-source-pg-connector — the changes/sweep/list golden
@@ -8133,44 +7872,6 @@
                     __darwinAllowLocalNetworking = true;
                   });
 
-              # pg-task-focus INTEGRATION tier (V-4): exactly the `integration`-tagged
-              # tests, each spawning a real process (node --test, or the test binary
-              # re-executed as the real `serve` with real signals and a port). ON
-              # DEMAND ONLY: no hook, run-unit-tests, pre-land or land gate. nodejs is a
-              # test dependency and PG_TASK_FOCUS_REQUIRE_NODE=1 turns "node is not on
-              # PATH" from a skip into a failure, so a green check means the node tests
-              # ran. The check also fails if any of the three named tests did not report
-              # PASS. Run it when the web UI, the daemon's HTTP surface or `serve`'s
-              # signal handling changes: `nix build .#checks.<system>.pg-task-focus-integration-tests`.
-              pg-task-focus-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-task-focus-integration-tests";
-                  src = lib.cleanSource ./packages/pg-task-focus;
-                  gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
-                  testDeps = [ pkgs.nodejs ];
-                }).overrideAttrs
-                  (_: {
-                    PG_TASK_FOCUS_REQUIRE_NODE = "1";
-                    __darwinAllowLocalNetworking = true;
-                    buildPhase = ''
-                      runHook preBuild
-                      set -o pipefail
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      go vet -tags integration ./...
-                      go test -tags integration -count=1 -race -v -timeout 30m \
-                        -run '^(TestClientLogicUnderNode|TestWebUIAgainstARealDaemon|TestServeReloadsOnSIGHUPAndStopsOnSIGTERM)$' \
-                        ./... | tee "$TMPDIR/ptf-integration.log"
-                      for t in TestClientLogicUnderNode TestWebUIAgainstARealDaemon TestServeReloadsOnSIGHUPAndStopsOnSIGTERM; do
-                        if ! grep -q -- "^--- PASS: $t " "$TMPDIR/ptf-integration.log"; then
-                          echo "pg-task-focus-integration-tests: $t did not report PASS (skipped or not run)" >&2
-                          exit 1
-                        fi
-                      done
-                      runHook postBuild
-                    '';
-                  });
-
               # pg-task-focus PROPERTY tier (V-4): the rapid property tests of testgen,
               # store and projection run in the unit gate at a capped count (25 for testgen
               # and projection, 50 for store; internal/rapidtier, a
@@ -8228,120 +7929,6 @@
                 ];
               };
 
-              # pg-assistants INTEGRATION tier (V-4): the `integration`-tagged real-tool
-              # tests (a real tmux server on a private socket; the real pg-claude-control
-              # against a temp registry and an inbox FIFO the test answers). ON DEMAND
-              # ONLY: no hook, run-unit-tests, pre-land or land gate. REQUIRE_TOOLS makes
-              # a missing tool fail instead of skip; TMUX_TMPDIR keeps the socket inside
-              # the sandbox; PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL names the binary built
-              # from packages/pg-claude-control (the control client's contract test).
-              # zsh is for the launch chain's login-shell case (/bin/sh is the other).
-              pg-assistants-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-assistants-integration-tests";
-                  src = lib.cleanSource ./packages/pg-assistants; # matches default.nix
-                  gomod2nixToml = ./packages/pg-assistants/gomod2nix.toml;
-                  testDeps = [
-                    pkgs.tmux
-                    pkgs.pg-claude-control
-                    pkgs.zsh
-                  ];
-                }).overrideAttrs
-                  (_: {
-                    PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL = "${pkgs.pg-claude-control}/bin/pg-claude-control";
-                    # tmux serves its socket over a unix socket, which the
-                    # darwin sandbox only permits with local networking.
-                    __darwinAllowLocalNetworking = true;
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      export PG_ASSISTANTS_REQUIRE_TOOLS=1
-                      go vet -tags integration ./...
-                      go test -race -tags integration -count=1 -v -timeout 20m ./...
-                      runHook postBuild
-                    '';
-                  });
-
-              # pg-keep-awake INTEGRATION tier (V-4): internal/integration, every file
-              # `//go:build integration`, so the unit gate above never builds or runs it.
-              # It drives the real keeper, anchor, CLI, shim and /usr/bin/caffeinate,
-              # observed through pmset. ON DEMAND ONLY: no hook, run-unit-tests, pre-land
-              # or land gate. Runs only that package (mkGoTest's `./...` with the tag would
-              # re-run the whole unit suite), so the buildPhase is replaced. The suite
-              # skips itself with one visible "SKIPPED integration:" line when the host
-              # (or the nix sandbox) cannot run caffeinate and list it through pmset; a
-              # green check then proves only that the package compiles and vets with the
-              # tag. Read the log for that line: its absence plus the "--- PASS" lines
-              # is what proves the scenarios ran.
-              pg-keep-awake-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-keep-awake-integration-tests";
-                  src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
-                  gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
-                }).overrideAttrs
-                  (_: {
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      go vet -tags integration ./internal/integration/
-                      go test -tags integration -count=1 -race -v -timeout 30m ./internal/integration/
-                      runHook postBuild
-                    '';
-                  });
-
-              # pg-keep-awake SHIM integration tier (V-4): the `integration`-tagged
-              # files of cmd/pg-caffeinate-shim: the golden parity run against the real
-              # /usr/bin/caffeinate and the timed-lease / watch scenarios that wait real
-              # seconds. ON DEMAND ONLY: no hook, run-unit-tests, pre-land or land gate.
-              # Runs only that package with the tag (the untagged shim tests run again
-              # alongside, which is cheap). Real-caffeinate use may skip itself in the
-              # nix sandbox: TestParityWithRealCaffeinate then logs one visible
-              # "--- SKIP" line (pmset refused), so read the -v log for it; its absence
-              # plus the "--- PASS" lines is what proves the parity rows ran.
-              pg-keep-awake-shim-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-keep-awake-shim-integration-tests";
-                  src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
-                  gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
-                }).overrideAttrs
-                  (_: {
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      go vet -tags integration ./cmd/pg-caffeinate-shim/
-                      go test -tags integration -count=1 -race -v -timeout 30m ./cmd/pg-caffeinate-shim/
-                      runHook postBuild
-                    '';
-                  });
-
-              # pg-keep-awake KEEPER integration tier (V-4): the `integration`-tagged
-              # TestRealProcs_* tests in internal/keeper (claude_holders_darwin_test.go).
-              # Each starts several real child processes (copies of the race-built test
-              # binary standing in for claude and caffeinate) and costs about a second
-              # under -race, so they are not unit tests. ON DEMAND ONLY: no hook,
-              # run-unit-tests, pre-land or land gate. `-run` limits the run to them (the
-              # untagged tests of the package already run in pg-keep-awake-go-tests). The
-              # tests are darwin-only; on another platform the run selects nothing.
-              pg-keep-awake-keeper-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-keep-awake-keeper-integration-tests";
-                  src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
-                  gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
-                }).overrideAttrs
-                  (_: {
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      go vet -tags integration ./internal/keeper/
-                      go test -tags integration -count=1 -race -v -run '^TestRealProcs_' -timeout 30m ./internal/keeper/
-                      runHook postBuild
-                    '';
-                  });
-
               # pg-git-lander - whole-module Go test gate (unit tier). Pattern A, flat
               # src. Never compiles the `integration` build tag.
               pg-git-lander-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
@@ -8357,72 +7944,6 @@
                 ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps
                 ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.darwin.adv_cmds;
               };
-
-              # pg-git-lander INTEGRATION tier. ON DEMAND ONLY (same shape as
-              # pg-connector-integration-tests): it MUST NOT be wired into any hook,
-              # run-unit-tests, pre-land or land gate. Runs exactly the tests in files
-              # tagged `//go:build integration` (tagged list minus untagged list). The
-              # tier is empty at first and MUST pass empty; unlike the connector's
-              # check it does not fail when no file carries the tag (the harness packet
-              # tightens that later).
-              pg-git-lander-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-git-lander-integration-tests";
-                  src = ./packages/pg-git-lander;
-                  gomod2nixToml = ./packages/pg-git-lander/gomod2nix.toml;
-                  # mergiraf: the tier 2 real-merge-driver scenario must run in this
-                  # gate, not skip (the buildPhase below fails on any SKIP).
-                  testDeps = [
-                    pkgs.bash
-                    pkgs.git
-                    pkgs.mergiraf
-                  ];
-                }).overrideAttrs
-                  (_: {
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      log="$TMPDIR/integration.log"
-                      : > "$log"
-                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -r -n1 dirname | sort -u || true)
-                      if [ -z "$pkgs" ]; then
-                        echo "pg-git-lander-integration-tests: the integration tier is empty; nothing to run"
-                      fi
-                      total=0
-                      for dir in $pkgs; do
-                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
-                        if [ -z "$names" ]; then
-                          echo "pg-git-lander-integration-tests: $dir lists no integration-only tests" >&2
-                          exit 1
-                        fi
-                        regex="^($(echo "$names" | paste -sd'|' -))\$"
-                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
-                        if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
-                          cat "$log"
-                          echo "pg-git-lander-integration-tests: $dir FAILED" >&2
-                          exit 1
-                        fi
-                        for t in $names; do
-                          if ! grep -q -- "^--- PASS: $t " "$log"; then
-                            cat "$log"
-                            echo "pg-git-lander-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
-                            exit 1
-                          fi
-                        done
-                        total=$((total + $(echo "$names" | wc -l)))
-                      done
-                      if grep -q -- '^--- SKIP' "$log"; then
-                        cat "$log"
-                        echo "pg-git-lander-integration-tests: a test was SKIPPED" >&2
-                        exit 1
-                      fi
-                      echo "pg-git-lander-integration-tests: $total integration tests passed"
-                      runHook postBuild
-                    '';
-                  });
 
               # pg-review - whole-module Go test gate (unit tier). Pattern A, flat src.
               pg-review-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
@@ -8480,126 +8001,6 @@
                   "120s"
                 ];
               };
-
-              # pg-claude-code-recorder INTEGRATION tier. ON DEMAND ONLY: build it by hand
-              # (`nix build .#checks.<system>.pg-claude-code-recorder-integration-tests`).
-              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land gate
-              # (V-4; docs/adr/0111). Runs EXACTLY the tests of files tagged
-              # `//go:build integration` (the tagged list minus the untagged list) under
-              # -race with a 60m timeout; fails when none exist, when one does not report
-              # PASS, or when one is skipped. Same shape as pg-connector-integration-tests.
-              pg-claude-code-recorder-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-claude-code-recorder-integration-tests";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      ./packages/pg-claude-code-recorder
-                      ./packages/pg-sqlite
-                    ];
-                  };
-                  modRoot = "pg-claude-code-recorder";
-                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
-                }).overrideAttrs
-                  (old: {
-                    # ps for internal/proc's real-ps agreement test (the sandbox PATH has none).
-                    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.procps ];
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      log="$TMPDIR/integration.log"
-                      : > "$log"
-                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
-                      if [ -z "$pkgs" ]; then
-                        echo "pg-claude-code-recorder-integration-tests: no test file carries //go:build integration" >&2
-                        exit 1
-                      fi
-                      total=0
-                      failed=""
-                      for dir in $pkgs; do
-                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
-                        if [ -z "$names" ]; then
-                          echo "pg-claude-code-recorder-integration-tests: $dir lists no integration-only tests" >&2
-                          exit 1
-                        fi
-                        regex="^($(echo "$names" | paste -sd'|' -))\$"
-                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
-                        # One package failing must not hide the rest: record and go on.
-                        if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
-                          echo "pg-claude-code-recorder-integration-tests: $dir FAILED" >&2
-                          failed="$failed $dir"
-                          continue
-                        fi
-                        for t in $names; do
-                          if ! grep -q -- "^--- PASS: $t " "$log"; then
-                            echo "pg-claude-code-recorder-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
-                            failed="$failed $dir"
-                          fi
-                        done
-                        total=$((total + $(echo "$names" | wc -l)))
-                      done
-                      if [ -n "$failed" ]; then
-                        cat "$log"
-                        echo "pg-claude-code-recorder-integration-tests: failing packages:$failed" >&2
-                        exit 1
-                      fi
-                      if grep -q -- '^--- SKIP' "$log"; then
-                        cat "$log"
-                        echo "pg-claude-code-recorder-integration-tests: a test was SKIPPED" >&2
-                        exit 1
-                      fi
-                      echo "pg-claude-code-recorder-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
-                      runHook postBuild
-                    '';
-                  });
-
-              # pg-claude-code-recorder SOAK tier (docket pg2-v77tsx, phase 2). ON DEMAND
-              # ONLY: build it by hand
-              # (`nix build .#checks.<system>.pg-claude-code-recorder-soak -L`). It MUST NOT be
-              # wired into any hook, run-unit-tests, pre-land or land gate (V-4). Runs the
-              # `//go:build soak` tests (a generated tree: first-run parse throughput, memory
-              # ceiling, WAL growth, trigram index size) and fails when a measure exceeds 1.5
-              # times the baseline committed in internal/parser/testdata/soak-budgets.json (parse time is
-              # budgeted as process CPU time, not wall clock; see the comment in soak_test.go).
-              pg-claude-code-recorder-soak =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-claude-code-recorder-soak";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      ./packages/pg-claude-code-recorder
-                      ./packages/pg-sqlite
-                    ];
-                  };
-                  modRoot = "pg-claude-code-recorder";
-                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
-                }).overrideAttrs
-                  (_: {
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      log="$TMPDIR/soak.log"
-                      if ! go test -tags soak -run 'TestSoak' -count=1 -v -timeout 30m ./... > "$log" 2>&1; then
-                        cat "$log"
-                        echo "pg-claude-code-recorder-soak: a soak test FAILED or a budget was exceeded" >&2
-                        exit 1
-                      fi
-                      cat "$log"
-                      grep -q -- '^--- PASS: TestSoakFirstRunParse ' "$log" || {
-                        echo "pg-claude-code-recorder-soak: TestSoakFirstRunParse did not report PASS" >&2
-                        exit 1
-                      }
-                      if grep -q -- '^--- SKIP' "$log"; then
-                        echo "pg-claude-code-recorder-soak: a soak test was SKIPPED" >&2
-                        exit 1
-                      fi
-                      runHook postBuild
-                    '';
-                  });
 
               # pg-claude-code-recorder CRASH-SWEEP tier. ON DEMAND ONLY: build it by hand
               # (`nix build .#checks.<system>.pg-claude-code-recorder-crashsweep-tests -L`).
@@ -8710,56 +8111,6 @@
                       done
                       if grep -q -- '--- SKIP' "$log"; then
                         echo "pg-claude-code-recorder-lockorder-tests: a test was SKIPPED" >&2
-                        exit 1
-                      fi
-                      runHook postBuild
-                    '';
-                  });
-
-              # pg-claude-code-recorder LOAD tier (bead pg2-yme5i5; phillipg-nix-repo-base ADR
-              # 0024, V-4). ON DEMAND ONLY: build it by hand
-              # (`nix build .#checks.<system>.pg-claude-code-recorder-load-tests -L`). It MUST
-              # NOT be wired into any hook, run-unit-tests, pre-land or land gate, and is not
-              # part of pg-claude-code-recorder-go-tests. Runs the `//go:build loadtest`
-              # TestBackfillRate: first-copy files/s for the single-file and the batched (64)
-              # ingest paths over 3000 fixture files, printed in the log, and fails unless
-              # batched is faster than single-file. A RATIO assertion only, never an absolute
-              # rate, because host load varies (reference: 54.1 vs 148.5 files/s, about 2.7x).
-              pg-claude-code-recorder-load-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-claude-code-recorder-load-tests";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      ./packages/pg-claude-code-recorder
-                      ./packages/pg-sqlite
-                    ];
-                  };
-                  modRoot = "pg-claude-code-recorder";
-                  gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
-                }).overrideAttrs
-                  (_: {
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      log="$TMPDIR/load.log"
-                      if ! nice -n 10 go test -p 4 -tags loadtest -run 'TestBackfillRate' -count=1 -v -timeout 30m ./internal/copier/ > "$log" 2>&1; then
-                        cat "$log"
-                        echo "pg-claude-code-recorder-load-tests: TestBackfillRate FAILED (batched ingest not faster than single-file, or the run broke)" >&2
-                        exit 1
-                      fi
-                      cat "$log"
-                      grep -q -- '^--- PASS: TestBackfillRate ' "$log" || {
-                        echo "pg-claude-code-recorder-load-tests: TestBackfillRate did not report PASS" >&2
-                        exit 1
-                      }
-                      grep -q -- 'SUMMARY files=3000 single=' "$log" || {
-                        echo "pg-claude-code-recorder-load-tests: no files/s summary line for the 3000-file fixture" >&2
-                        exit 1
-                      }
-                      if grep -q -- '^--- SKIP' "$log"; then
-                        echo "pg-claude-code-recorder-load-tests: the load test was SKIPPED" >&2
                         exit 1
                       fi
                       runHook postBuild
@@ -9281,35 +8632,6 @@
                 # The provision tests drive real git in temp dirs.
                 testDeps = [ pkgs.git ];
               };
-
-              # pg-gwm INTEGRATION tier (V-4): runs the built binary across
-              # processes (a lease killed mid-create, a reap that outruns its
-              # deadline, a git that ignores SIGTERM). ON DEMAND ONLY: it MUST NOT
-              # be wired into any hook, run-unit-tests, pre-land or land gate, and
-              # the unit check above never compiles it (the tests carry
-              # `//go:build integration`). One test waits out the real 30-second
-              # SIGTERM grace. It also runs the 50-iteration renew-versus-reap soak
-              # in internal/manager (TestRenewRacesReapSoak).
-              pg-gwm-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-gwm-integration-tests";
-                  src = lib.cleanSource ./packages/pg-gwm; # matches default.nix
-                  gomod2nixToml = ./packages/pg-gwm/gomod2nix.toml;
-                  testDeps = [
-                    pkgs.git
-                    pkgs.coreutils
-                  ];
-                }).overrideAttrs
-                  (_: {
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      go test -tags integration -race -count=1 -v -timeout 10m ./integration_test
-                      go test -tags integration -race -count=1 -v -timeout 10m -run '^TestRenewRacesReapSoak$' ./internal/manager
-                      runHook postBuild
-                    '';
-                  });
 
               # pg-router-heartbeat: unit suite over the pure sleep-aware decision, the
               # run loop with fake clock/probe/notifier, and the probe against httptest.
@@ -10574,95 +9896,6 @@
                 ];
               };
 
-              # pg-rescue-integration-tests (bead pg2-04jgw, design section
-              # 14.4): the `integration`-tagged end-to-end scenarios in
-              # internal/integration, in their own check so they stay off the
-              # deploy path (the precedent is
-              # claude-extended-tool-approver-integration-tests). They drive
-              # the BUILT binaries -- `pkgs.pg-rescue` supplies pg-rescue,
-              # pg-rescue-claude and pg-rescue-bead; the bash handler comes
-              # from its own package -- against real git, with only nix,
-              # claude and pg-connector faked. Like that precedent it is a
-              # superset of pg-rescue-go-tests (mkGoTest takes no
-              # subPackages, so `-tags integration` re-runs the untagged
-              # suites); the plain check stays the fast gate.
-              #
-              # Gating guard (bead pg2-pxmq64, ADR 0111 and ADR 0024, shaped like
-              # pg-connector-integration-tests-gating): the five wall-clock-bound
-              # end-to-end tests of internal/runner (TestDisplayGolden,
-              # TestVerifyTimeoutFailsTheAttempt, TestTheFirstSignalWins,
-              # TestCommandOutputThatArrivesAfterItExitsIsStillCaptured,
-              # TestHandlerTimeoutIsTermThenKill) live in `integration`-tagged files
-              # and run in no other gate, so they MUST NOT silently stop running.
-              # Before the suite runs, the buildPhase (1) lists each tagged package
-              # with and without the tag and fails when the tag moves nothing, when
-              # one of the five is missing from the tagged listing or present in
-              # the default one; (2) vets the module with and without the tag; then
-              # runs the whole module under `-tags integration -race -v` and fails
-              # when any tagged-only test, the five included, has no `--- PASS`
-              # line (skipped or not run). The guard is part of this check, not a
-              # sibling check, so building this check is the only way to run it.
-              pg-rescue-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-rescue-integration-tests";
-                  src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
-                  gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
-                  testDeps = [
-                    pkgs.bash
-                    pkgs.git
-                    pkgs.jq
-                    pkgs.pg-rescue
-                    pkgs.pg-rescue-flake-lock-conflict
-                  ];
-                  testFlags = [
-                    "-tags"
-                    "integration"
-                  ];
-                }).overrideAttrs
-                  (_: {
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      fail() { echo "pg-rescue-integration-tests: $*" >&2; exit 1; }
-                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | grep -v '^./vendor/' | xargs -n1 dirname | sort -u)
-                      [ -n "$pkgs" ] || fail "no test file carries //go:build integration"
-                      expected="TestDisplayGolden TestVerifyTimeoutFailsTheAttempt TestTheFirstSignalWins TestCommandOutputThatArrivesAfterItExitsIsStillCaptured TestHandlerTimeoutIsTermThenKill"
-                      only=""
-                      for dir in $pkgs; do
-                        # The listings go to variables first: `grep -q` closing the
-                        # pipe early would fail a pipefail pipeline on SIGPIPE.
-                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
-                        [ -n "$names" ] || fail "$dir: the tagged build lists no test the default build lacks; the tag moves nothing"
-                        only="$only $names"
-                        if [ "$dir" = "./internal/runner" ]; then
-                          for t in $expected; do
-                            echo "$tagged" | grep -qx "$t" || fail "$dir: the tagged build does not list $t"
-                            echo "$plain" | grep -qx "$t" && fail "$dir: the default build lists $t; it must stay behind the tag"
-                          done
-                        fi
-                      done
-                      echo "$pkgs" | grep -qx './internal/runner' || fail "./internal/runner has no integration-tagged file"
-                      go vet ./... || fail "go vet of the default build failed"
-                      go vet -tags integration ./... || fail "go vet of the integration build failed"
-                      log="$TMPDIR/integration.log"
-                      if ! go test -tags integration -race -count=1 -v ./... > "$log" 2>&1; then
-                        cat "$log"
-                        fail "go test -tags integration failed"
-                      fi
-                      grep -E '^(ok|FAIL|---|panic)' "$log" | grep -v '^--- PASS' || true
-                      total=0
-                      for t in $only; do
-                        grep -q -- "^--- PASS: $t " "$log" || { cat "$log"; fail "$t did not report PASS (skipped or not run)"; }
-                        total=$((total + 1))
-                      done
-                      echo "pg-rescue-integration-tests: $total integration-only tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line; both builds vet clean"
-                      runHook postBuild
-                    '';
-                  });
-
               # T-14 enforcement, mechanical rather than aspirational: the
               # pg-ccaudit plugin MUST NOT ship a hooks manifest.
               #
@@ -10735,7 +9968,7 @@
               #
               # Tests that start the daemon, build or run a binary, or need a real
               # external tool carry `//go:build integration` and are NOT run here:
-              # they run on demand as checks.<system>.pg-connector-integration-tests
+              # they run on demand as integration-checks.pg-connector-integration-tests
               # below (the Linux cross-compile gate and the `env -i` independence
               # tests live there now). No `-timeout` override: the 20m one existed
               # for those tests (bead pg2-7r19vr measured them at 461s to 552s per
@@ -10763,94 +9996,6 @@
                   pkgs.diffutils
                 ];
               };
-
-              # pg-connector INTEGRATION tier (bead pg2-bkwi41). ON DEMAND ONLY: build
-              # it by hand when the daemon, the umbrella or a connector's wire contract
-              # changes (`nix build .#checks.<system>.pg-connector-integration-tests`).
-              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
-              # gate (operator ruling, Phillip, 2026-10-26: "the integration tests are
-              # taking way too long. they should not be running as typical unit tests
-              # and in typical unit test situations like commit or landing").
-              #
-              # The tests are the ones in files tagged `//go:build integration`: they
-              # start the real daemon through the servetest harness, build and run the
-              # connector binaries as subprocesses, or run the whole-module Linux
-              # cross-compile gate. The buildPhase runs EXACTLY those tests (the tagged
-              # package's test list minus its untagged list, so the unit tests are not
-              # run a second time) under -race with a 60m timeout, and fails when the
-              # listing is empty, when a test does not report PASS, or when any test is
-              # skipped, so a gate that silently ran nothing cannot pass.
-              # pg-connector-integration-tests-gating is the cheap regression guard
-              # for the split itself.
-              pg-connector-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-connector-integration-tests";
-                  src = ./packages/pg-connector;
-                  gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
-                  testDeps = [
-                    pkgs.bash
-                    pkgs.git
-                    pkgs.diffutils
-                    # cmd/pg-connector-github's adapter_e2e_test.go chains the real
-                    # daemon, the real umbrella and the pg-router source adapter. The
-                    # adapter is a module of its own that this check's source does not
-                    # contain, so the built binary rides on PATH; the test fails (it
-                    # never skips) when it is absent here.
-                    pkgs.pg-router-source-pg-connector
-                    # cmd/pg-connector-issue-jira's realpjira_integration_test.go
-                    # runs the REAL pjira (a repo-base package) from PATH.
-                    phillipgreenii-nix-base.packages.${system}.pjira
-                  ];
-                }).overrideAttrs
-                  (_: {
-                    # realpjira_integration_test.go serves a stub Jira on loopback.
-                    __darwinAllowLocalNetworking = true;
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      log="$TMPDIR/integration.log"
-                      : > "$log"
-                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
-                      if [ -z "$pkgs" ]; then
-                        echo "pg-connector-integration-tests: no test file carries //go:build integration" >&2
-                        exit 1
-                      fi
-                      total=0
-                      failed=""
-                      for dir in $pkgs; do
-                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
-                        if [ -z "$names" ]; then
-                          echo "pg-connector-integration-tests: $dir lists no integration-only tests" >&2
-                          exit 1
-                        fi
-                        regex="^($(echo "$names" | paste -sd'|' -))\$"
-                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
-                        if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
-                          cat "$log"
-                          echo "pg-connector-integration-tests: $dir FAILED" >&2
-                          exit 1
-                        fi
-                        for t in $names; do
-                          if ! grep -q -- "^--- PASS: $t " "$log"; then
-                            cat "$log"
-                            echo "pg-connector-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
-                            exit 1
-                          fi
-                        done
-                        total=$((total + $(echo "$names" | wc -l)))
-                      done
-                      if grep -q -- '^--- SKIP' "$log"; then
-                        cat "$log"
-                        echo "pg-connector-integration-tests: a test was SKIPPED" >&2
-                        exit 1
-                      fi
-                      echo "pg-connector-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
-                      runHook postBuild
-                    '';
-                  });
 
               # Real-pjira token-handoff check. ON DEMAND ONLY (same rules as
               # pg-connector-integration-tests above: no hook, run-unit-tests,
@@ -10996,58 +10141,6 @@
                         fail "a test was SKIPPED"
                       fi
                       echo "pg-connector-second-registration: 5 packages, each with a PASS line, none skipped"
-                      runHook postBuild
-                    '';
-                  });
-
-              # pg-connector-github load test (bead pg2-7r19vr). ON DEMAND ONLY: build it
-              # by hand when the scheduler, governor or change engine changes
-              # (`nix build .#checks.<system>.pg-connector-load-test`). It MUST NOT be
-              # wired into any hook, run-unit-tests, pre-land or land gate (operator
-              # ruling, Phillip, 2026-10-25: "it can stay, but not as unit test. it
-              # should be called as needed, not all of the time."). The package
-              # cmd/pg-connector-github/internal/loadtest skips itself (TestMain)
-              # unless PG_CONNECTOR_LOAD_TEST=1, which this check sets. Under -race it
-              # takes tens of minutes, so the timeout is 60m. The buildPhase fails when
-              # any scenario fails, and ALSO when a test the package lists did not
-              # report PASS or any test was skipped, so a package that silently ran
-              # nothing cannot pass vacuously. Only the buildPhase is replaced.
-              pg-connector-load-test =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-connector-load-test";
-                  src = ./packages/pg-connector;
-                  gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
-                }).overrideAttrs
-                  (_: {
-                    PG_CONNECTOR_LOAD_TEST = "1";
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      pkg=./cmd/pg-connector-github/internal/loadtest/
-                      log="$TMPDIR/load-test.log"
-                      names=$(go test -list '.*' "$pkg" | grep '^Test' || true)
-                      if [ -z "$names" ]; then
-                        echo "pg-connector-load-test: the package lists no tests" >&2
-                        exit 1
-                      fi
-                      if ! go test -count=1 -race -v -timeout 60m "$pkg" > "$log" 2>&1; then
-                        cat "$log"
-                        echo "pg-connector-load-test: a load scenario FAILED" >&2
-                        exit 1
-                      fi
-                      cat "$log"
-                      for t in $names; do
-                        if ! grep -q -- "^--- PASS: $t " "$log"; then
-                          echo "pg-connector-load-test: $t did not report PASS (skipped or not run)" >&2
-                          exit 1
-                        fi
-                      done
-                      if grep -q -- '--- SKIP\|loadtest: skipped' "$log"; then
-                        echo "pg-connector-load-test: a test or the package was SKIPPED" >&2
-                        exit 1
-                      fi
-                      echo "pg-connector-load-test: $(echo "$names" | wc -l) tests, each with a PASS line, none skipped"
                       runHook postBuild
                     '';
                   });
@@ -11440,91 +10533,6 @@
                     '';
                   });
 
-              # pg-desk INTEGRATION tier. ON DEMAND ONLY: build it by hand when the
-              # heartbeat probe or the pg-connector client path changes
-              # (`nix build .#checks.<system>.pg-desk-integration-tests`). It MUST
-              # NOT be wired into any hook, run-unit-tests, pre-land or land gate.
-              # It runs EVERY `//go:build integration` test of the module (the tagged
-              # list minus the untagged list, per package: the re-executed verb and
-              # serve children, the plugin processes, the real pg-connector umbrella
-              # and GitHub backend client against a socket with no daemon behind it);
-              # the built binaries are handed over by env var because the sandbox
-              # cannot build a sibling module. Fails when none exist, when a test
-              # does not report PASS, or when one is skipped. Same shape as
-              # pg-connector-integration-tests. The unit-tier guard is
-              # TestUnitTierHasNoIntegrationTests in cmd/pg-desk.
-              pg-desk-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-desk-integration-tests";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      ./packages/pg-desk
-                      ./packages/pg-connector
-                      ./packages/pg-sqlite
-                      ./packages/pg-router/cmd/pg-router-probe
-                      # pg-desk/internal/store imports pg-sqlite via a local replace.
-                      ./packages/pg-sqlite
-                    ];
-                  };
-                  modRoot = "pg-desk";
-                  gomod2nixToml = ./packages/pg-desk/gomod2nix.toml;
-                }).overrideAttrs
-                  (_: {
-                    PG_DESK_E2E_PG_CONNECTOR = "${pkgs.pg-connector}/bin/pg-connector";
-                    PG_DESK_E2E_PG_CONNECTOR_GITHUB = "${pkgs.pg-connector-github}/bin/pg-connector-github";
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      log="$TMPDIR/integration.log"
-                      : > "$log"
-                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
-                      if [ -z "$pkgs" ]; then
-                        echo "pg-desk-integration-tests: no test file carries //go:build integration" >&2
-                        exit 1
-                      fi
-                      total=0
-                      failed=""
-                      for dir in $pkgs; do
-                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
-                        if [ -z "$names" ]; then
-                          echo "pg-desk-integration-tests: $dir lists no integration-only tests" >&2
-                          exit 1
-                        fi
-                        regex="^($(echo "$names" | paste -sd'|' -))\$"
-                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
-                        # One package failing must not hide the rest: record and go on.
-                        if ! go test -tags integration -count=1 -v -timeout 30m -run "$regex" "$dir" >> "$log" 2>&1; then
-                          echo "pg-desk-integration-tests: $dir FAILED" >&2
-                          failed="$failed $dir"
-                          continue
-                        fi
-                        for t in $names; do
-                          if ! grep -q -- "^--- PASS: $t " "$log"; then
-                            echo "pg-desk-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
-                            failed="$failed $dir"
-                          fi
-                        done
-                        total=$((total + $(echo "$names" | wc -l)))
-                      done
-                      if [ -n "$failed" ]; then
-                        cat "$log"
-                        echo "pg-desk-integration-tests: failing packages:$failed" >&2
-                        exit 1
-                      fi
-                      if grep -q -- '^--- SKIP' "$log"; then
-                        cat "$log"
-                        echo "pg-desk-integration-tests: a test was SKIPPED" >&2
-                        exit 1
-                      fi
-                      echo "pg-desk-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
-                      runHook postBuild
-                    '';
-                  });
-
               # work-report: whole-module Go test gate, same Pattern-B shape as
               # pg-desk-go-tests above (go.mod `replace => ../pg-connector`).
               work-report-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
@@ -11672,99 +10680,6 @@
                     postBuild = (old.postBuild or "") + ''
                       echo "=== pg-router per-package statement-coverage gate (bead pg2-hvlyj.19) ==="
                       bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
-                    '';
-                  });
-
-              # pg-router INTEGRATION tier (`//go:build integration`, V-4: never in
-              # the unit gate above). ON DEMAND ONLY: build it by hand when the
-              # router's process lifecycle, the wire client or the command adapter
-              # changes (`nix build .#checks.<system>.pg-router-integration-tests`).
-              # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
-              # gate.
-              #
-              # The tests are the ones in files tagged `//go:build integration`: they
-              # re-execute the test binary as a real router or helper process, build
-              # and run the real router binary (the level-source test, formerly
-              # tagged `smoke`), or run the real command adapter
-              # binary (built by pg-router-ccpool-handler, a sibling module whose
-              # binary cannot be imported) under wireclient.OSRunner. The buildPhase
-              # runs EXACTLY those tests (the tagged package's test list minus its
-              # untagged list, so the unit tests are not run a second time; the
-              # `TestHelper*` names are helper-process entry points that skip unless
-              # re-executed, so they are not listed) and fails when the listing is
-              # empty, when a test does not report PASS, or when any test is skipped,
-              # so a gate that silently ran nothing cannot pass.
-              # PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER turns the adapter tests' skip
-              # into a failure. The unit-tier guard that keeps these tests out of the
-              # unit gate is TestUnitTierHasNoIntegrationTests in cmd/pg-router.
-              # cmd/pg-router/e2e_test.go keeps its `smoke` tag and is NOT run here:
-              # its test skips unconditionally (its premise was removed), so a
-              # fail-on-skip check could never pass it.
-              pg-router-integration-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-router-integration-tests";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
-                      ./packages/ccpool
-                      ./packages/claude-transcript
-                    ];
-                  };
-                  modRoot = "pg-router";
-                  gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
-                  # coreutils: the payload runs `sleep`; the sandbox PATH has none.
-                  testDeps = [
-                    pkgs.git
-                    pkgs.coreutils
-                  ];
-                }).overrideAttrs
-                  (_: {
-                    PG_ROUTER_TEST_COMMAND_ADAPTER = "${pkgs.pg-router-ccpool-handler}/bin/pg-router-handler-command";
-                    PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER = "1";
-                    buildPhase = ''
-                      runHook preBuild
-                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
-                      export GOFLAGS=''${GOFLAGS//-trimpath/}
-                      log="$TMPDIR/integration.log"
-                      : > "$log"
-                      pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
-                      if [ -z "$pkgs" ]; then
-                        echo "pg-router-integration-tests: no test file carries //go:build integration" >&2
-                        exit 1
-                      fi
-                      total=0
-                      for dir in $pkgs; do
-                        tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
-                        names=$(comm -23 <(echo "$tagged") <(echo "$plain") | grep -v '^TestHelper' || true)
-                        if [ -z "$names" ]; then
-                          echo "pg-router-integration-tests: $dir lists no integration-only tests" >&2
-                          exit 1
-                        fi
-                        regex="^($(echo "$names" | paste -sd'|' -))\$"
-                        echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
-                        if ! go test -tags integration -count=1 -v -timeout 30m -run "$regex" "$dir" >> "$log" 2>&1; then
-                          cat "$log"
-                          echo "pg-router-integration-tests: $dir FAILED" >&2
-                          exit 1
-                        fi
-                        for t in $names; do
-                          if ! grep -q -- "^--- PASS: $t " "$log"; then
-                            cat "$log"
-                            echo "pg-router-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
-                            exit 1
-                          fi
-                        done
-                        total=$((total + $(echo "$names" | wc -l)))
-                      done
-                      if grep -q -- '^--- SKIP' "$log"; then
-                        cat "$log"
-                        echo "pg-router-integration-tests: a test was SKIPPED" >&2
-                        exit 1
-                      fi
-                      echo "pg-router-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
-                      runHook postBuild
                     '';
                   });
 
@@ -20690,92 +19605,6 @@
                   touch $out
                 '';
 
-              # pgd opt-in e2e and multi-process checks. Operator standard V-4 applies: both
-              # spawn real claude processes, so neither is in the unit gate (test-pgd-mod skips
-              # *.multiprocess.test.ts) nor in any commit or pre-land hook; each runs only when
-              # built by name: `nix build .#checks.<system>.test-pgd-links-e2e` (or
-              # `.test-pgd-multiprocess`). The real claude binary talks to a local stub Messages
-              # API server (scripts/pgd-stub-messages-server.mjs) on 127.0.0.1, so no credential
-              # and no outside network is involved.
-              test-pgd-links-e2e =
-                let
-                  src = lib.fileset.toSource {
-                    root = ./.;
-                    fileset = lib.fileset.unions [
-                      ./claude-marketplace/pgd
-                      ./scripts/run-pgd-links-e2e.sh
-                      ./scripts/pgd-stub-messages-server.mjs
-                    ];
-                  };
-                  claude = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
-                in
-                pkgs.runCommand "test-pgd-links-e2e"
-                  {
-                    nativeBuildInputs = [
-                      claude
-                      pkgs.nodejs
-                      pkgs.tmux
-                      pkgs.coreutils
-                      pkgs.gnugrep
-                      pkgs.gnused
-                      pkgs.gawk
-                      pkgs.procps
-                      pkgs.bash
-                    ];
-                    __darwinAllowLocalNetworking = true;
-                  }
-                  ''
-                    set -euo pipefail
-                    export HOME="$TMPDIR/home" TMUX_TMPDIR="$TMPDIR"
-                    mkdir -p "$HOME"
-                    PGD_E2E=1 bash ${src}/scripts/run-pgd-links-e2e.sh
-                    touch $out
-                  '';
-
-              test-pgd-multiprocess =
-                let
-                  src = lib.fileset.toSource {
-                    root = ./.;
-                    fileset = lib.fileset.unions [
-                      ./claude-marketplace/pgd
-                      ./scripts/run-pgd-multiprocess-check.sh
-                      ./scripts/pgd-stub-messages-server.mjs
-                    ];
-                  };
-                  claude = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
-                in
-                pkgs.runCommand "test-pgd-multiprocess"
-                  {
-                    nativeBuildInputs = [
-                      claude
-                      pkgs.nodejs
-                      pkgs.coreutils
-                      pkgs.gnused
-                      pkgs.bash
-                    ];
-                    __darwinAllowLocalNetworking = true;
-                  }
-                  ''
-                    set -euo pipefail
-                    export HOME="$TMPDIR/home"
-                    mkdir -p "$HOME"
-                    node ${src}/scripts/pgd-stub-messages-server.mjs >stub.out 2>stub.err &
-                    stub=$!
-                    trap 'kill $stub 2>/dev/null || true' EXIT
-                    port=""
-                    for _ in $(seq 1 50); do
-                      port="$(sed -n 's/^PORT //p' stub.out)"
-                      [ -n "$port" ] && break
-                      sleep 0.2
-                    done
-                    [ -n "$port" ] || { echo "FAIL: stub did not start" >&2; cat stub.err >&2; exit 1; }
-                    export ANTHROPIC_BASE_URL="http://127.0.0.1:$port" ANTHROPIC_API_KEY=sk-ant-pgd-mp-stub-key-0001
-                    export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-                    export CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1
-                    PGD_MULTIPROCESS=1 bash ${src}/scripts/run-pgd-multiprocess-check.sh
-                    touch $out
-                  '';
-
               # pg2-klusl: every `*-go-tests` check goes through the load-bounded mkGoTest
               # wrapper in the overlay (`loadBoundedMkGoTest`). Pure eval guard that the
               # wrapper's bounds are really on a built check and are additive to the
@@ -22166,6 +20995,1192 @@
             # why.
             // lib.listToAttrs (map (module: goLintTagged { inherit module; }) taggedGoLintModules)
             // lib.listToAttrs patternBTaggedGoLints;
+
+          # Opt-in integration, load, soak and end-to-end suites (ADR 0024 in
+          # nix-repo-base): built by name, `nix build .#integration-checks.<name>`,
+          # but NOT under `checks`, so a plain `nix flake check` neither builds nor
+          # recursively evaluates them (it does not descend into legacyPackages).
+          # Operator ruling (Phillip, 2026-11-18): "there isn't supposed to be
+          # integration or load tests as part of nix flake check". None of them is
+          # wired into a hook, the run-unit-tests gate or a land gate (global rule V-4).
+          legacyPackages.integration-checks = {
+            # pg-router-handlers INTEGRATION tier. ON DEMAND ONLY: build it by hand
+            # when the handlers' process wiring, the real-ccpool adoption or the
+            # conformance wire changes
+            # (`nix build .#integration-checks.pg-router-handlers-integration-tests`).
+            # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
+            # gate (operator ruling, Phillip, 2026-10-26: "the integration tests are
+            # taking way too long. they should not be running as typical unit tests
+            # and in typical unit test situations like commit or landing").
+            #
+            # It runs EXACTLY the tests in files tagged `//go:build integration`
+            # (the tagged package's test list minus its untagged list) with the REAL
+            # ccpool and tmux (and bd for internal/beads), builds the handler
+            # binaries with go, and re-executes the test binaries. It fails when the
+            # listing is empty, when a test does not report PASS, or when any test
+            # is skipped, so a gate that silently ran nothing cannot pass. The
+            # unit-tier guard is internal/unittier (TestUnitTierHasNoIntegrationTests).
+            pg-router-handlers-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-handlers-integration-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
+                    ./packages/pg-router
+                    ./packages/ccpool
+                    ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
+                    ./packages/claude-transcript
+                    ./packages/pg-failsig
+                  ];
+                };
+                modRoot = "pg-router-handlers";
+                gomod2nixToml = ./packages/pg-router-handlers/gomod2nix.toml;
+                testDeps = [
+                  pkgs.git
+                  pkgs.ccpool
+                  pkgs.tmux
+                  (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+                  pkgs.coreutils
+                  pkgs.jq
+                  pkgs.lsof
+                  # ps: TestSampleProcessTree_realPsSeesAChildOfThisProcess runs the
+                  # real `ps`, which the sandbox PATH does not otherwise carry.
+                  pkgs.procps
+                ];
+              }).overrideAttrs
+                (_: {
+                  PG_ROUTER_CCPOOL_HANDLER_REQUIRE_CCPOOL = "1";
+                  # The module-rendered specs and pool config the strict-spec
+                  # end-to-end test (spec_e2e_realccpool_test.go) reads.
+                  PG_ROUTER_CCPOOL_HANDLER_SPEC_FIXTURE =
+                    self.checks.${system}.pg-router-ccpool-handler-spec-fixtures;
+                  # tmux serves each sandboxed pool over a unix socket.
+                  __darwinAllowLocalNetworking = true;
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/integration.log"
+                    : > "$log"
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                    if [ -z "$pkgs" ]; then
+                      echo "pg-router-handlers-integration-tests: no test file carries //go:build integration" >&2
+                      exit 1
+                    fi
+                    total=0
+                    for dir in $pkgs; do
+                      tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      names=$(comm -23 <(echo "$tagged") <(echo "$plain") | grep -v '^TestHelper' || true)
+                      if [ -z "$names" ]; then
+                        echo "pg-router-handlers-integration-tests: $dir lists no integration-only tests" >&2
+                        exit 1
+                      fi
+                      regex="^($(echo "$names" | paste -sd'|' -))\$"
+                      echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                      if ! go test -tags integration -count=1 -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-router-handlers-integration-tests: $dir FAILED" >&2
+                        exit 1
+                      fi
+                      for t in $names; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          cat "$log"
+                          echo "pg-router-handlers-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                          exit 1
+                        fi
+                      done
+                      total=$((total + $(echo "$names" | wc -l)))
+                    done
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      cat "$log"
+                      echo "pg-router-handlers-integration-tests: a test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    echo "pg-router-handlers-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-origin-guard integration tier (`//go:build integration`, V-4: never in
+            # the unit gate above). Real OpenSSH ssh-agent and ssh-keygen with a
+            # throwaway CA, the real binary under real git and ssh, process groups and
+            # multi-process lock races; no network, no real origin, no browser. The
+            # pty-driven cases need a pseudo-terminal; the tests skip (not fail) when
+            # none can be opened, so a green check proves only what ran: read the log
+            # (-v) for SKIP lines. -p 1 and -count=1 keep the timing-sensitive cases
+            # from competing for the sandbox's CPU.
+            pg-origin-guard-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+              pname = "pg-origin-guard-integration-tests";
+              src = lib.fileset.toSource {
+                root = ./packages;
+                fileset = lib.fileset.unions [
+                  (lib.fileset.difference ./packages/pg-origin-guard ./packages/pg-origin-guard/docs)
+                  ./packages/pg-failsig
+                ];
+              };
+              modRoot = "pg-origin-guard";
+              gomod2nixToml = ./packages/pg-origin-guard/gomod2nix.toml;
+              # ps: the login-holder start-time token reads `ps -o lstart=`; the sandbox
+              # PATH has no /bin, so ps comes from procps (Linux) or adv_cmds (darwin).
+              testDeps = [
+                pkgs.git
+                pkgs.openssh
+              ]
+              ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps
+              ++ lib.optional pkgs.stdenv.hostPlatform.isDarwin pkgs.darwin.adv_cmds;
+              testFlags = [
+                "-tags"
+                "integration"
+                "-count=1"
+                "-v"
+              ];
+            };
+
+            # ceta integration suite — the `//go:build integration` tests in
+            # cmd/claude-extended-tool-approver, which EXEC the compiled binary
+            # and drive a real SQLite ask log through it. They are tagged OFF
+            # the default `go test ./...` so they cannot reach a package build:
+            # mkGoApp scopes gomod2nix's check hook to `subPackages`, so before
+            # the tag those ~46 tests, and NOT the ~1,020 internal/* unit tests,
+            # were what a monorepod nixosConfiguration build ran. On 2026-08-16
+            # they took 559.33s with ZERO failures and tripped `go test`'s 10m
+            # alarm, failing the whole deploy — the wall clock was (fsync count)
+            # x (an unbounded HOST property), so no -timeout can be chosen that a
+            # slower disk cannot blow through (tc-fqu7, and its recurrence).
+            #
+            # Reinstating them HERE keeps the coverage while moving it off the
+            # deploy path: this check is reached by `nix flake check`, never by a
+            # package or nixosConfiguration build, so a degraded disk can delay
+            # CI but can no longer block an activation.
+            #
+            # It is a SUPERSET of claude-extended-tool-approver-go-tests, not a
+            # replacement: mkGoTest deliberately takes no `subPackages`, so
+            # `-tags integration` re-runs every untagged suite alongside the
+            # tagged ones. Both are kept — the plain one is the fast gate that
+            # must stay green on its own.
+            #
+            # rtk (pg2-jwilh): the real-rtk regression test for the worktree-
+            # isolation drop rule (rtk_worktree_isolation_integration_test.go)
+            # drives the REAL rtk. It skips when rtk is missing; the REQUIRE
+            # variable turns that skip into a failure here, so a green check
+            # means it ran. rtk is resolved like the spec-drift check does (no
+            # top-level rtk overlay attr in this standalone flake).
+            claude-extended-tool-approver-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "claude-extended-tool-approver-integration-tests";
+                src = lib.cleanSource ./packages/claude-extended-tool-approver; # matches default.nix
+                gomod2nixToml = ./packages/claude-extended-tool-approver/gomod2nix.toml;
+                testDeps = [
+                  pkgs.git
+                  (pkgs.llm-agentsPkgs.rtk or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.rtk)
+                ]
+                # procps: see claude-extended-tool-approver-go-tests above.
+                ++ lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.procps;
+                testFlags = [
+                  "-tags"
+                  "integration"
+                  # internal/effectpolicy (-race, TestVerdictMonotonicity) alone
+                  # runs ~10 min on a loaded host and tripped go test's default
+                  # 10m alarm (pg2-xk3cu), failing the package before later tests
+                  # ran. 30m keeps a hang bounded while clearing that headroom.
+                  "-timeout"
+                  "30m"
+                ];
+              }).overrideAttrs
+                (_: {
+                  CETA_REQUIRE_RTK = "1";
+                });
+
+            # claude-hook-router-e2e — B3 (ADR 0071 Phase B, packet tc-rjzd3.8): the
+            # bats end-to-end suite (tests/test-claude-hook-router-e2e.bats) driving
+            # the REAL built router binary as a subprocess against stub shell
+            # delegates. The bats file itself documents this exact wiring ("ROUTER_BIN
+            # may already be set by a caller that built the binary itself ... it would
+            # inject a package's own built exe path rather than have the check sandbox
+            # invoke `go build`") -- so ROUTER_BIN is set to the claude-hook-router
+            # overlay package's own built binary (added to the overlay by this same
+            # packet, B5, since B1 landed the package's default.nix but never actually
+            # wired it into the overlay) rather than letting bats invoke `go build`
+            # itself a second time.
+            #
+            # The whole `tests/` dir (not just the .bats file) must be copied as ONE
+            # store path: the suite resolves its stub delegates via
+            # `$(dirname BATS_TEST_FILENAME)/fixtures/delegates` (mirrors the
+            # claude-settings/behavior-docs-conformance bats checks' own
+            # "sibling would be absent" note above) -- a bare `.bats` interpolation
+            # would copy only that one file and leave DELEGATES_DIR empty.
+            claude-hook-router-e2e =
+              let
+                e2eTestsSrc = lib.fileset.toSource {
+                  root = ./packages/claude-hook-router/tests;
+                  fileset = ./packages/claude-hook-router/tests;
+                };
+              in
+              pkgs.runCommand "check-claude-hook-router-e2e"
+                {
+                  nativeBuildInputs = [
+                    pkgs.bats
+                    pkgs.jq
+                  ];
+                }
+                ''
+                  export ROUTER_BIN=${pkgs.claude-hook-router}/bin/claude-hook-router
+                  bats ${e2eTestsSrc}/test-claude-hook-router-e2e.bats
+                  touch $out
+                '';
+
+            # pg-ccaudit integration tier (`//go:build integration`, V-4: never in the
+            # unit gate above). internal/query's old-SQL oracle runs the pre-change
+            # interruptions and error-rate-by-tool statements, which are quadratic in
+            # the lines per session, over every window and flag combination and
+            # compares rows with the new statements: about 160 G instructions under
+            # -race, far over the unit-test budget. ON DEMAND: build it when those two
+            # statements, `scoped()` or `prevToolAgg` change. It MUST NOT be wired into
+            # any hook, run-unit-tests or pre-land gate. The `-run` filter names exactly
+            # the tagged tests, so the unit tests do not run a second time; the
+            # opt-in big-fixture timing test inside it skips itself without
+            # PG_CCAUDIT_BIGFIXTURE.
+            pg-ccaudit-integration-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+              pname = "pg-ccaudit-integration-tests";
+              src = lib.fileset.toSource {
+                root = ./packages;
+                fileset = lib.fileset.unions [
+                  ./packages/pg-ccaudit
+                  ./packages/pg-claude-code-recorder
+                  ./packages/pg-sqlite
+                ];
+              };
+              modRoot = "pg-ccaudit";
+              gomod2nixToml = ./packages/pg-ccaudit/gomod2nix.toml;
+              testFlags = [
+                "-tags"
+                "integration"
+                "-count=1"
+                "-v"
+                "-run"
+                "^(TestWindowDrivenQueriesEqualTheirOldSQL|TestOldSQLScannedEveryToolCall|TestWindowBoundariesAgreeWithOldSQL)$"
+              ];
+            };
+
+            # pg-task-focus INTEGRATION tier (V-4): exactly the `integration`-tagged
+            # tests, each spawning a real process (node --test, or the test binary
+            # re-executed as the real `serve` with real signals and a port). ON
+            # DEMAND ONLY: no hook, run-unit-tests, pre-land or land gate. nodejs is a
+            # test dependency and PG_TASK_FOCUS_REQUIRE_NODE=1 turns "node is not on
+            # PATH" from a skip into a failure, so a green check means the node tests
+            # ran. The check also fails if any of the three named tests did not report
+            # PASS. Run it when the web UI, the daemon's HTTP surface or `serve`'s
+            # signal handling changes: `nix build .#integration-checks.pg-task-focus-integration-tests`.
+            pg-task-focus-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-task-focus-integration-tests";
+                src = lib.cleanSource ./packages/pg-task-focus;
+                gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
+                testDeps = [ pkgs.nodejs ];
+              }).overrideAttrs
+                (_: {
+                  PG_TASK_FOCUS_REQUIRE_NODE = "1";
+                  __darwinAllowLocalNetworking = true;
+                  buildPhase = ''
+                    runHook preBuild
+                    set -o pipefail
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    go vet -tags integration ./...
+                    go test -tags integration -count=1 -race -v -timeout 30m \
+                      -run '^(TestClientLogicUnderNode|TestWebUIAgainstARealDaemon|TestServeReloadsOnSIGHUPAndStopsOnSIGTERM)$' \
+                      ./... | tee "$TMPDIR/ptf-integration.log"
+                    for t in TestClientLogicUnderNode TestWebUIAgainstARealDaemon TestServeReloadsOnSIGHUPAndStopsOnSIGTERM; do
+                      if ! grep -q -- "^--- PASS: $t " "$TMPDIR/ptf-integration.log"; then
+                        echo "pg-task-focus-integration-tests: $t did not report PASS (skipped or not run)" >&2
+                        exit 1
+                      fi
+                    done
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-assistants INTEGRATION tier (V-4): the `integration`-tagged real-tool
+            # tests (a real tmux server on a private socket; the real pg-claude-control
+            # against a temp registry and an inbox FIFO the test answers). ON DEMAND
+            # ONLY: no hook, run-unit-tests, pre-land or land gate. REQUIRE_TOOLS makes
+            # a missing tool fail instead of skip; TMUX_TMPDIR keeps the socket inside
+            # the sandbox; PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL names the binary built
+            # from packages/pg-claude-control (the control client's contract test).
+            # zsh is for the launch chain's login-shell case (/bin/sh is the other).
+            pg-assistants-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-assistants-integration-tests";
+                src = lib.cleanSource ./packages/pg-assistants; # matches default.nix
+                gomod2nixToml = ./packages/pg-assistants/gomod2nix.toml;
+                testDeps = [
+                  pkgs.tmux
+                  pkgs.pg-claude-control
+                  pkgs.zsh
+                ];
+              }).overrideAttrs
+                (_: {
+                  PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL = "${pkgs.pg-claude-control}/bin/pg-claude-control";
+                  # tmux serves its socket over a unix socket, which the
+                  # darwin sandbox only permits with local networking.
+                  __darwinAllowLocalNetworking = true;
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    export PG_ASSISTANTS_REQUIRE_TOOLS=1
+                    go vet -tags integration ./...
+                    go test -race -tags integration -count=1 -v -timeout 20m ./...
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-keep-awake INTEGRATION tier (V-4): internal/integration, every file
+            # `//go:build integration`, so the unit gate above never builds or runs it.
+            # It drives the real keeper, anchor, CLI, shim and /usr/bin/caffeinate,
+            # observed through pmset. ON DEMAND ONLY: no hook, run-unit-tests, pre-land
+            # or land gate. Runs only that package (mkGoTest's `./...` with the tag would
+            # re-run the whole unit suite), so the buildPhase is replaced. The suite
+            # skips itself with one visible "SKIPPED integration:" line when the host
+            # (or the nix sandbox) cannot run caffeinate and list it through pmset; a
+            # green check then proves only that the package compiles and vets with the
+            # tag. Read the log for that line: its absence plus the "--- PASS" lines
+            # is what proves the scenarios ran.
+            pg-keep-awake-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-keep-awake-integration-tests";
+                src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
+                gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    go vet -tags integration ./internal/integration/
+                    go test -tags integration -count=1 -race -v -timeout 30m ./internal/integration/
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-keep-awake SHIM integration tier (V-4): the `integration`-tagged
+            # files of cmd/pg-caffeinate-shim: the golden parity run against the real
+            # /usr/bin/caffeinate and the timed-lease / watch scenarios that wait real
+            # seconds. ON DEMAND ONLY: no hook, run-unit-tests, pre-land or land gate.
+            # Runs only that package with the tag (the untagged shim tests run again
+            # alongside, which is cheap). Real-caffeinate use may skip itself in the
+            # nix sandbox: TestParityWithRealCaffeinate then logs one visible
+            # "--- SKIP" line (pmset refused), so read the -v log for it; its absence
+            # plus the "--- PASS" lines is what proves the parity rows ran.
+            pg-keep-awake-shim-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-keep-awake-shim-integration-tests";
+                src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
+                gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    go vet -tags integration ./cmd/pg-caffeinate-shim/
+                    go test -tags integration -count=1 -race -v -timeout 30m ./cmd/pg-caffeinate-shim/
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-keep-awake KEEPER integration tier (V-4): the `integration`-tagged
+            # TestRealProcs_* tests in internal/keeper (claude_holders_darwin_test.go).
+            # Each starts several real child processes (copies of the race-built test
+            # binary standing in for claude and caffeinate) and costs about a second
+            # under -race, so they are not unit tests. ON DEMAND ONLY: no hook,
+            # run-unit-tests, pre-land or land gate. `-run` limits the run to them (the
+            # untagged tests of the package already run in pg-keep-awake-go-tests). The
+            # tests are darwin-only; on another platform the run selects nothing.
+            pg-keep-awake-keeper-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-keep-awake-keeper-integration-tests";
+                src = lib.cleanSource ./packages/pg-keep-awake; # matches default.nix
+                gomod2nixToml = ./packages/pg-keep-awake/gomod2nix.toml;
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    go vet -tags integration ./internal/keeper/
+                    go test -tags integration -count=1 -race -v -run '^TestRealProcs_' -timeout 30m ./internal/keeper/
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-git-lander INTEGRATION tier. ON DEMAND ONLY (same shape as
+            # pg-connector-integration-tests): it MUST NOT be wired into any hook,
+            # run-unit-tests, pre-land or land gate. Runs exactly the tests in files
+            # tagged `//go:build integration` (tagged list minus untagged list). The
+            # tier is empty at first and MUST pass empty; unlike the connector's
+            # check it does not fail when no file carries the tag (the harness packet
+            # tightens that later).
+            pg-git-lander-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-git-lander-integration-tests";
+                src = ./packages/pg-git-lander;
+                gomod2nixToml = ./packages/pg-git-lander/gomod2nix.toml;
+                # mergiraf: the tier 2 real-merge-driver scenario must run in this
+                # gate, not skip (the buildPhase below fails on any SKIP).
+                testDeps = [
+                  pkgs.bash
+                  pkgs.git
+                  pkgs.mergiraf
+                ];
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/integration.log"
+                    : > "$log"
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -r -n1 dirname | sort -u || true)
+                    if [ -z "$pkgs" ]; then
+                      echo "pg-git-lander-integration-tests: the integration tier is empty; nothing to run"
+                    fi
+                    total=0
+                    for dir in $pkgs; do
+                      tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                      if [ -z "$names" ]; then
+                        echo "pg-git-lander-integration-tests: $dir lists no integration-only tests" >&2
+                        exit 1
+                      fi
+                      regex="^($(echo "$names" | paste -sd'|' -))\$"
+                      echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                      if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-git-lander-integration-tests: $dir FAILED" >&2
+                        exit 1
+                      fi
+                      for t in $names; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          cat "$log"
+                          echo "pg-git-lander-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                          exit 1
+                        fi
+                      done
+                      total=$((total + $(echo "$names" | wc -l)))
+                    done
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      cat "$log"
+                      echo "pg-git-lander-integration-tests: a test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    echo "pg-git-lander-integration-tests: $total integration tests passed"
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-claude-code-recorder INTEGRATION tier. ON DEMAND ONLY: build it by hand
+            # (`nix build .#integration-checks.pg-claude-code-recorder-integration-tests`).
+            # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land gate
+            # (V-4; docs/adr/0111). Runs EXACTLY the tests of files tagged
+            # `//go:build integration` (the tagged list minus the untagged list) under
+            # -race with a 60m timeout; fails when none exist, when one does not report
+            # PASS, or when one is skipped. Same shape as pg-connector-integration-tests.
+            pg-claude-code-recorder-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-claude-code-recorder-integration-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
+                  ];
+                };
+                modRoot = "pg-claude-code-recorder";
+                gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+              }).overrideAttrs
+                (old: {
+                  # ps for internal/proc's real-ps agreement test (the sandbox PATH has none).
+                  nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.procps ];
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/integration.log"
+                    : > "$log"
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                    if [ -z "$pkgs" ]; then
+                      echo "pg-claude-code-recorder-integration-tests: no test file carries //go:build integration" >&2
+                      exit 1
+                    fi
+                    total=0
+                    failed=""
+                    for dir in $pkgs; do
+                      tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                      if [ -z "$names" ]; then
+                        echo "pg-claude-code-recorder-integration-tests: $dir lists no integration-only tests" >&2
+                        exit 1
+                      fi
+                      regex="^($(echo "$names" | paste -sd'|' -))\$"
+                      echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                      # One package failing must not hide the rest: record and go on.
+                      if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
+                        echo "pg-claude-code-recorder-integration-tests: $dir FAILED" >&2
+                        failed="$failed $dir"
+                        continue
+                      fi
+                      for t in $names; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          echo "pg-claude-code-recorder-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                          failed="$failed $dir"
+                        fi
+                      done
+                      total=$((total + $(echo "$names" | wc -l)))
+                    done
+                    if [ -n "$failed" ]; then
+                      cat "$log"
+                      echo "pg-claude-code-recorder-integration-tests: failing packages:$failed" >&2
+                      exit 1
+                    fi
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      cat "$log"
+                      echo "pg-claude-code-recorder-integration-tests: a test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    echo "pg-claude-code-recorder-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-claude-code-recorder SOAK tier (docket pg2-v77tsx, phase 2). ON DEMAND
+            # ONLY: build it by hand
+            # (`nix build .#integration-checks.pg-claude-code-recorder-soak -L`). It MUST NOT be
+            # wired into any hook, run-unit-tests, pre-land or land gate (V-4). Runs the
+            # `//go:build soak` tests (a generated tree: first-run parse throughput, memory
+            # ceiling, WAL growth, trigram index size) and fails when a measure exceeds 1.5
+            # times the baseline committed in internal/parser/testdata/soak-budgets.json (parse time is
+            # budgeted as process CPU time, not wall clock; see the comment in soak_test.go).
+            pg-claude-code-recorder-soak =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-claude-code-recorder-soak";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
+                  ];
+                };
+                modRoot = "pg-claude-code-recorder";
+                gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/soak.log"
+                    if ! go test -tags soak -run 'TestSoak' -count=1 -v -timeout 30m ./... > "$log" 2>&1; then
+                      cat "$log"
+                      echo "pg-claude-code-recorder-soak: a soak test FAILED or a budget was exceeded" >&2
+                      exit 1
+                    fi
+                    cat "$log"
+                    grep -q -- '^--- PASS: TestSoakFirstRunParse ' "$log" || {
+                      echo "pg-claude-code-recorder-soak: TestSoakFirstRunParse did not report PASS" >&2
+                      exit 1
+                    }
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      echo "pg-claude-code-recorder-soak: a soak test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-claude-code-recorder LOAD tier (bead pg2-yme5i5; phillipg-nix-repo-base ADR
+            # 0024, V-4). ON DEMAND ONLY: build it by hand
+            # (`nix build .#integration-checks.pg-claude-code-recorder-load-tests -L`). It MUST
+            # NOT be wired into any hook, run-unit-tests, pre-land or land gate, and is not
+            # part of pg-claude-code-recorder-go-tests. Runs the `//go:build loadtest`
+            # TestBackfillRate: first-copy files/s for the single-file and the batched (64)
+            # ingest paths over 3000 fixture files, printed in the log, and fails unless
+            # batched is faster than single-file. A RATIO assertion only, never an absolute
+            # rate, because host load varies (reference: 54.1 vs 148.5 files/s, about 2.7x).
+            pg-claude-code-recorder-load-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-claude-code-recorder-load-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
+                  ];
+                };
+                modRoot = "pg-claude-code-recorder";
+                gomod2nixToml = ./packages/pg-claude-code-recorder/gomod2nix.toml;
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/load.log"
+                    if ! nice -n 10 go test -p 4 -tags loadtest -run 'TestBackfillRate' -count=1 -v -timeout 30m ./internal/copier/ > "$log" 2>&1; then
+                      cat "$log"
+                      echo "pg-claude-code-recorder-load-tests: TestBackfillRate FAILED (batched ingest not faster than single-file, or the run broke)" >&2
+                      exit 1
+                    fi
+                    cat "$log"
+                    grep -q -- '^--- PASS: TestBackfillRate ' "$log" || {
+                      echo "pg-claude-code-recorder-load-tests: TestBackfillRate did not report PASS" >&2
+                      exit 1
+                    }
+                    grep -q -- 'SUMMARY files=3000 single=' "$log" || {
+                      echo "pg-claude-code-recorder-load-tests: no files/s summary line for the 3000-file fixture" >&2
+                      exit 1
+                    }
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      echo "pg-claude-code-recorder-load-tests: the load test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-gwm INTEGRATION tier (V-4): runs the built binary across
+            # processes (a lease killed mid-create, a reap that outruns its
+            # deadline, a git that ignores SIGTERM). ON DEMAND ONLY: it MUST NOT
+            # be wired into any hook, run-unit-tests, pre-land or land gate, and
+            # the unit check above never compiles it (the tests carry
+            # `//go:build integration`). One test waits out the real 30-second
+            # SIGTERM grace. It also runs the 50-iteration renew-versus-reap soak
+            # in internal/manager (TestRenewRacesReapSoak).
+            pg-gwm-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-gwm-integration-tests";
+                src = lib.cleanSource ./packages/pg-gwm; # matches default.nix
+                gomod2nixToml = ./packages/pg-gwm/gomod2nix.toml;
+                testDeps = [
+                  pkgs.git
+                  pkgs.coreutils
+                ];
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    go test -tags integration -race -count=1 -v -timeout 10m ./integration_test
+                    go test -tags integration -race -count=1 -v -timeout 10m -run '^TestRenewRacesReapSoak$' ./internal/manager
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-rescue-integration-tests (bead pg2-04jgw, design section
+            # 14.4): the `integration`-tagged end-to-end scenarios in
+            # internal/integration, in their own check so they stay off the
+            # deploy path (the precedent is
+            # claude-extended-tool-approver-integration-tests). They drive
+            # the BUILT binaries -- `pkgs.pg-rescue` supplies pg-rescue,
+            # pg-rescue-claude and pg-rescue-bead; the bash handler comes
+            # from its own package -- against real git, with only nix,
+            # claude and pg-connector faked. Like that precedent it is a
+            # superset of pg-rescue-go-tests (mkGoTest takes no
+            # subPackages, so `-tags integration` re-runs the untagged
+            # suites); the plain check stays the fast gate.
+            #
+            # Gating guard (bead pg2-pxmq64, ADR 0111 and ADR 0024, shaped like
+            # pg-connector-integration-tests-gating): the five wall-clock-bound
+            # end-to-end tests of internal/runner (TestDisplayGolden,
+            # TestVerifyTimeoutFailsTheAttempt, TestTheFirstSignalWins,
+            # TestCommandOutputThatArrivesAfterItExitsIsStillCaptured,
+            # TestHandlerTimeoutIsTermThenKill) live in `integration`-tagged files
+            # and run in no other gate, so they MUST NOT silently stop running.
+            # Before the suite runs, the buildPhase (1) lists each tagged package
+            # with and without the tag and fails when the tag moves nothing, when
+            # one of the five is missing from the tagged listing or present in
+            # the default one; (2) vets the module with and without the tag; then
+            # runs the whole module under `-tags integration -race -v` and fails
+            # when any tagged-only test, the five included, has no `--- PASS`
+            # line (skipped or not run). The guard is part of this check, not a
+            # sibling check, so building this check is the only way to run it.
+            pg-rescue-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-rescue-integration-tests";
+                src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
+                gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
+                testDeps = [
+                  pkgs.bash
+                  pkgs.git
+                  pkgs.jq
+                  pkgs.pg-rescue
+                  pkgs.pg-rescue-flake-lock-conflict
+                ];
+                testFlags = [
+                  "-tags"
+                  "integration"
+                ];
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    fail() { echo "pg-rescue-integration-tests: $*" >&2; exit 1; }
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | grep -v '^./vendor/' | xargs -n1 dirname | sort -u)
+                    [ -n "$pkgs" ] || fail "no test file carries //go:build integration"
+                    expected="TestDisplayGolden TestVerifyTimeoutFailsTheAttempt TestTheFirstSignalWins TestCommandOutputThatArrivesAfterItExitsIsStillCaptured TestHandlerTimeoutIsTermThenKill"
+                    only=""
+                    for dir in $pkgs; do
+                      # The listings go to variables first: `grep -q` closing the
+                      # pipe early would fail a pipefail pipeline on SIGPIPE.
+                      tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                      [ -n "$names" ] || fail "$dir: the tagged build lists no test the default build lacks; the tag moves nothing"
+                      only="$only $names"
+                      if [ "$dir" = "./internal/runner" ]; then
+                        for t in $expected; do
+                          echo "$tagged" | grep -qx "$t" || fail "$dir: the tagged build does not list $t"
+                          echo "$plain" | grep -qx "$t" && fail "$dir: the default build lists $t; it must stay behind the tag"
+                        done
+                      fi
+                    done
+                    echo "$pkgs" | grep -qx './internal/runner' || fail "./internal/runner has no integration-tagged file"
+                    go vet ./... || fail "go vet of the default build failed"
+                    go vet -tags integration ./... || fail "go vet of the integration build failed"
+                    log="$TMPDIR/integration.log"
+                    if ! go test -tags integration -race -count=1 -v ./... > "$log" 2>&1; then
+                      cat "$log"
+                      fail "go test -tags integration failed"
+                    fi
+                    grep -E '^(ok|FAIL|---|panic)' "$log" | grep -v '^--- PASS' || true
+                    total=0
+                    for t in $only; do
+                      grep -q -- "^--- PASS: $t " "$log" || { cat "$log"; fail "$t did not report PASS (skipped or not run)"; }
+                      total=$((total + 1))
+                    done
+                    echo "pg-rescue-integration-tests: $total integration-only tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line; both builds vet clean"
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-connector INTEGRATION tier (bead pg2-bkwi41). ON DEMAND ONLY: build
+            # it by hand when the daemon, the umbrella or a connector's wire contract
+            # changes (`nix build .#integration-checks.pg-connector-integration-tests`).
+            # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
+            # gate (operator ruling, Phillip, 2026-10-26: "the integration tests are
+            # taking way too long. they should not be running as typical unit tests
+            # and in typical unit test situations like commit or landing").
+            #
+            # The tests are the ones in files tagged `//go:build integration`: they
+            # start the real daemon through the servetest harness, build and run the
+            # connector binaries as subprocesses, or run the whole-module Linux
+            # cross-compile gate. The buildPhase runs EXACTLY those tests (the tagged
+            # package's test list minus its untagged list, so the unit tests are not
+            # run a second time) under -race with a 60m timeout, and fails when the
+            # listing is empty, when a test does not report PASS, or when any test is
+            # skipped, so a gate that silently ran nothing cannot pass.
+            # pg-connector-integration-tests-gating is the cheap regression guard
+            # for the split itself.
+            pg-connector-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-connector-integration-tests";
+                src = ./packages/pg-connector;
+                gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+                testDeps = [
+                  pkgs.bash
+                  pkgs.git
+                  pkgs.diffutils
+                  # cmd/pg-connector-github's adapter_e2e_test.go chains the real
+                  # daemon, the real umbrella and the pg-router source adapter. The
+                  # adapter is a module of its own that this check's source does not
+                  # contain, so the built binary rides on PATH; the test fails (it
+                  # never skips) when it is absent here.
+                  pkgs.pg-router-source-pg-connector
+                  # cmd/pg-connector-issue-jira's realpjira_integration_test.go
+                  # runs the REAL pjira (a repo-base package) from PATH.
+                  phillipgreenii-nix-base.packages.${system}.pjira
+                ];
+              }).overrideAttrs
+                (_: {
+                  # realpjira_integration_test.go serves a stub Jira on loopback.
+                  __darwinAllowLocalNetworking = true;
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/integration.log"
+                    : > "$log"
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                    if [ -z "$pkgs" ]; then
+                      echo "pg-connector-integration-tests: no test file carries //go:build integration" >&2
+                      exit 1
+                    fi
+                    total=0
+                    failed=""
+                    for dir in $pkgs; do
+                      tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                      if [ -z "$names" ]; then
+                        echo "pg-connector-integration-tests: $dir lists no integration-only tests" >&2
+                        exit 1
+                      fi
+                      regex="^($(echo "$names" | paste -sd'|' -))\$"
+                      echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                      if ! go test -tags integration -count=1 -race -v -timeout 60m -run "$regex" "$dir" >> "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-connector-integration-tests: $dir FAILED" >&2
+                        exit 1
+                      fi
+                      for t in $names; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          cat "$log"
+                          echo "pg-connector-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                          exit 1
+                        fi
+                      done
+                      total=$((total + $(echo "$names" | wc -l)))
+                    done
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      cat "$log"
+                      echo "pg-connector-integration-tests: a test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    echo "pg-connector-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-connector-github load test (bead pg2-7r19vr). ON DEMAND ONLY: build it
+            # by hand when the scheduler, governor or change engine changes
+            # (`nix build .#integration-checks.pg-connector-load-test`). It MUST NOT be
+            # wired into any hook, run-unit-tests, pre-land or land gate (operator
+            # ruling, Phillip, 2026-10-25: "it can stay, but not as unit test. it
+            # should be called as needed, not all of the time."). The package
+            # cmd/pg-connector-github/internal/loadtest skips itself (TestMain)
+            # unless PG_CONNECTOR_LOAD_TEST=1, which this check sets. Under -race it
+            # takes tens of minutes, so the timeout is 60m. The buildPhase fails when
+            # any scenario fails, and ALSO when a test the package lists did not
+            # report PASS or any test was skipped, so a package that silently ran
+            # nothing cannot pass vacuously. Only the buildPhase is replaced.
+            pg-connector-load-test =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-connector-load-test";
+                src = ./packages/pg-connector;
+                gomod2nixToml = ./packages/pg-connector/gomod2nix.toml;
+              }).overrideAttrs
+                (_: {
+                  PG_CONNECTOR_LOAD_TEST = "1";
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    pkg=./cmd/pg-connector-github/internal/loadtest/
+                    log="$TMPDIR/load-test.log"
+                    names=$(go test -list '.*' "$pkg" | grep '^Test' || true)
+                    if [ -z "$names" ]; then
+                      echo "pg-connector-load-test: the package lists no tests" >&2
+                      exit 1
+                    fi
+                    if ! go test -count=1 -race -v -timeout 60m "$pkg" > "$log" 2>&1; then
+                      cat "$log"
+                      echo "pg-connector-load-test: a load scenario FAILED" >&2
+                      exit 1
+                    fi
+                    cat "$log"
+                    for t in $names; do
+                      if ! grep -q -- "^--- PASS: $t " "$log"; then
+                        echo "pg-connector-load-test: $t did not report PASS (skipped or not run)" >&2
+                        exit 1
+                      fi
+                    done
+                    if grep -q -- '--- SKIP\|loadtest: skipped' "$log"; then
+                      echo "pg-connector-load-test: a test or the package was SKIPPED" >&2
+                      exit 1
+                    fi
+                    echo "pg-connector-load-test: $(echo "$names" | wc -l) tests, each with a PASS line, none skipped"
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-desk INTEGRATION tier. ON DEMAND ONLY: build it by hand when the
+            # heartbeat probe or the pg-connector client path changes
+            # (`nix build .#integration-checks.pg-desk-integration-tests`). It MUST
+            # NOT be wired into any hook, run-unit-tests, pre-land or land gate.
+            # It runs EVERY `//go:build integration` test of the module (the tagged
+            # list minus the untagged list, per package: the re-executed verb and
+            # serve children, the plugin processes, the real pg-connector umbrella
+            # and GitHub backend client against a socket with no daemon behind it);
+            # the built binaries are handed over by env var because the sandbox
+            # cannot build a sibling module. Fails when none exist, when a test
+            # does not report PASS, or when one is skipped. Same shape as
+            # pg-connector-integration-tests. The unit-tier guard is
+            # TestUnitTierHasNoIntegrationTests in cmd/pg-desk.
+            pg-desk-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-desk-integration-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-desk
+                    ./packages/pg-connector
+                    ./packages/pg-sqlite
+                    ./packages/pg-router/cmd/pg-router-probe
+                    # pg-desk/internal/store imports pg-sqlite via a local replace.
+                    ./packages/pg-sqlite
+                  ];
+                };
+                modRoot = "pg-desk";
+                gomod2nixToml = ./packages/pg-desk/gomod2nix.toml;
+              }).overrideAttrs
+                (_: {
+                  PG_DESK_E2E_PG_CONNECTOR = "${pkgs.pg-connector}/bin/pg-connector";
+                  PG_DESK_E2E_PG_CONNECTOR_GITHUB = "${pkgs.pg-connector-github}/bin/pg-connector-github";
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/integration.log"
+                    : > "$log"
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                    if [ -z "$pkgs" ]; then
+                      echo "pg-desk-integration-tests: no test file carries //go:build integration" >&2
+                      exit 1
+                    fi
+                    total=0
+                    failed=""
+                    for dir in $pkgs; do
+                      tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      names=$(comm -23 <(echo "$tagged") <(echo "$plain"))
+                      if [ -z "$names" ]; then
+                        echo "pg-desk-integration-tests: $dir lists no integration-only tests" >&2
+                        exit 1
+                      fi
+                      regex="^($(echo "$names" | paste -sd'|' -))\$"
+                      echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                      # One package failing must not hide the rest: record and go on.
+                      if ! go test -tags integration -count=1 -v -timeout 30m -run "$regex" "$dir" >> "$log" 2>&1; then
+                        echo "pg-desk-integration-tests: $dir FAILED" >&2
+                        failed="$failed $dir"
+                        continue
+                      fi
+                      for t in $names; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          echo "pg-desk-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                          failed="$failed $dir"
+                        fi
+                      done
+                      total=$((total + $(echo "$names" | wc -l)))
+                    done
+                    if [ -n "$failed" ]; then
+                      cat "$log"
+                      echo "pg-desk-integration-tests: failing packages:$failed" >&2
+                      exit 1
+                    fi
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      cat "$log"
+                      echo "pg-desk-integration-tests: a test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    echo "pg-desk-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                    runHook postBuild
+                  '';
+                });
+
+            # pg-router INTEGRATION tier (`//go:build integration`, V-4: never in
+            # the unit gate above). ON DEMAND ONLY: build it by hand when the
+            # router's process lifecycle, the wire client or the command adapter
+            # changes (`nix build .#integration-checks.pg-router-integration-tests`).
+            # It MUST NOT be wired into any hook, run-unit-tests, pre-land or land
+            # gate.
+            #
+            # The tests are the ones in files tagged `//go:build integration`: they
+            # re-execute the test binary as a real router or helper process, build
+            # and run the real router binary (the level-source test, formerly
+            # tagged `smoke`), or run the real command adapter
+            # binary (built by pg-router-ccpool-handler, a sibling module whose
+            # binary cannot be imported) under wireclient.OSRunner. The buildPhase
+            # runs EXACTLY those tests (the tagged package's test list minus its
+            # untagged list, so the unit tests are not run a second time; the
+            # `TestHelper*` names are helper-process entry points that skip unless
+            # re-executed, so they are not listed) and fails when the listing is
+            # empty, when a test does not report PASS, or when any test is skipped,
+            # so a gate that silently ran nothing cannot pass.
+            # PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER turns the adapter tests' skip
+            # into a failure. The unit-tier guard that keeps these tests out of the
+            # unit gate is TestUnitTierHasNoIntegrationTests in cmd/pg-router.
+            # cmd/pg-router/e2e_test.go keeps its `smoke` tag and is NOT run here:
+            # its test skips unconditionally (its premise was removed), so a
+            # fail-on-skip check could never pass it.
+            pg-router-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-integration-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
+                    ./packages/ccpool
+                    ./packages/claude-transcript
+                  ];
+                };
+                modRoot = "pg-router";
+                gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
+                # coreutils: the payload runs `sleep`; the sandbox PATH has none.
+                testDeps = [
+                  pkgs.git
+                  pkgs.coreutils
+                ];
+              }).overrideAttrs
+                (_: {
+                  PG_ROUTER_TEST_COMMAND_ADAPTER = "${pkgs.pg-router-ccpool-handler}/bin/pg-router-handler-command";
+                  PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER = "1";
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/integration.log"
+                    : > "$log"
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                    if [ -z "$pkgs" ]; then
+                      echo "pg-router-integration-tests: no test file carries //go:build integration" >&2
+                      exit 1
+                    fi
+                    total=0
+                    for dir in $pkgs; do
+                      tagged=$(go test -tags integration -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      plain=$(go test -list '.*' "$dir" | grep '^Test' | sort -u || true)
+                      names=$(comm -23 <(echo "$tagged") <(echo "$plain") | grep -v '^TestHelper' || true)
+                      if [ -z "$names" ]; then
+                        echo "pg-router-integration-tests: $dir lists no integration-only tests" >&2
+                        exit 1
+                      fi
+                      regex="^($(echo "$names" | paste -sd'|' -))\$"
+                      echo "=== $dir ($(echo "$names" | wc -l) tests)" | tee -a "$log"
+                      if ! go test -tags integration -count=1 -v -timeout 30m -run "$regex" "$dir" >> "$log" 2>&1; then
+                        cat "$log"
+                        echo "pg-router-integration-tests: $dir FAILED" >&2
+                        exit 1
+                      fi
+                      for t in $names; do
+                        if ! grep -q -- "^--- PASS: $t " "$log"; then
+                          cat "$log"
+                          echo "pg-router-integration-tests: $dir: $t did not report PASS (skipped or not run)" >&2
+                          exit 1
+                        fi
+                      done
+                      total=$((total + $(echo "$names" | wc -l)))
+                    done
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      cat "$log"
+                      echo "pg-router-integration-tests: a test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    echo "pg-router-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                    runHook postBuild
+                  '';
+                });
+
+            # pgd opt-in e2e and multi-process checks. Operator standard V-4 applies: both
+            # spawn real claude processes, so neither is in the unit gate (test-pgd-mod skips
+            # *.multiprocess.test.ts) nor in any commit or pre-land hook; each runs only when
+            # built by name: `nix build .#integration-checks.test-pgd-links-e2e` (or
+            # `.test-pgd-multiprocess`). The real claude binary talks to a local stub Messages
+            # API server (scripts/pgd-stub-messages-server.mjs) on 127.0.0.1, so no credential
+            # and no outside network is involved.
+            test-pgd-links-e2e =
+              let
+                src = lib.fileset.toSource {
+                  root = ./.;
+                  fileset = lib.fileset.unions [
+                    ./claude-marketplace/pgd
+                    ./scripts/run-pgd-links-e2e.sh
+                    ./scripts/pgd-stub-messages-server.mjs
+                  ];
+                };
+                claude = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
+              in
+              pkgs.runCommand "test-pgd-links-e2e"
+                {
+                  nativeBuildInputs = [
+                    claude
+                    pkgs.nodejs
+                    pkgs.tmux
+                    pkgs.coreutils
+                    pkgs.gnugrep
+                    pkgs.gnused
+                    pkgs.gawk
+                    pkgs.procps
+                    pkgs.bash
+                  ];
+                  __darwinAllowLocalNetworking = true;
+                }
+                ''
+                  set -euo pipefail
+                  export HOME="$TMPDIR/home" TMUX_TMPDIR="$TMPDIR"
+                  mkdir -p "$HOME"
+                  PGD_E2E=1 bash ${src}/scripts/run-pgd-links-e2e.sh
+                  touch $out
+                '';
+
+            test-pgd-multiprocess =
+              let
+                src = lib.fileset.toSource {
+                  root = ./.;
+                  fileset = lib.fileset.unions [
+                    ./claude-marketplace/pgd
+                    ./scripts/run-pgd-multiprocess-check.sh
+                    ./scripts/pgd-stub-messages-server.mjs
+                  ];
+                };
+                claude = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
+              in
+              pkgs.runCommand "test-pgd-multiprocess"
+                {
+                  nativeBuildInputs = [
+                    claude
+                    pkgs.nodejs
+                    pkgs.coreutils
+                    pkgs.gnused
+                    pkgs.bash
+                  ];
+                  __darwinAllowLocalNetworking = true;
+                }
+                ''
+                  set -euo pipefail
+                  export HOME="$TMPDIR/home"
+                  mkdir -p "$HOME"
+                  node ${src}/scripts/pgd-stub-messages-server.mjs >stub.out 2>stub.err &
+                  stub=$!
+                  trap 'kill $stub 2>/dev/null || true' EXIT
+                  port=""
+                  for _ in $(seq 1 50); do
+                    port="$(sed -n 's/^PORT //p' stub.out)"
+                    [ -n "$port" ] && break
+                    sleep 0.2
+                  done
+                  [ -n "$port" ] || { echo "FAIL: stub did not start" >&2; cat stub.err >&2; exit 1; }
+                  export ANTHROPIC_BASE_URL="http://127.0.0.1:$port" ANTHROPIC_API_KEY=sk-ant-pgd-mp-stub-key-0001
+                  export DISABLE_AUTOUPDATER=1 DISABLE_TELEMETRY=1 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+                  export CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1
+                  PGD_MULTIPROCESS=1 bash ${src}/scripts/run-pgd-multiprocess-check.sh
+                  touch $out
+                '';
+          }
+          # pg-disk-reclaimer's opt-in tier (PGDR_INTEGRATION=1), defined in its own
+          # default.nix beside its unit check.
+          // (import ./packages/pg-disk-reclaimer {
+            inherit pkgs;
+            bashBuilders = pkgs._agentSupportBashBuilders;
+          }).integration-checks;
 
           packages = {
             # This repo's own Claude Code marketplace, bundled into the store with

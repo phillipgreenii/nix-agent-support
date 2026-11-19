@@ -134,7 +134,7 @@ MUST be published through an atomic or a lock, never read as a plain field.
 
 The web UI's logic is tested with `node --test` (no dependencies). `web/web_test.go` scans the
 sources for what the page must never do and stays in the unit tier. The three tests that spawn a
-process carry `//go:build integration` and run in `checks.<system>.pg-task-focus-integration-tests`
+process carry `//go:build integration` and run in `integration-checks.pg-task-focus-integration-tests`
 (on demand, not a hook or land gate; it supplies `nodejs` and sets `PG_TASK_FOCUS_REQUIRE_NODE=1`,
 so a missing `node` is a failure there): `web/node_integration_test.go` runs the unit tests of the
 page's modules (`web/test/*.test.mjs`), `internal/daemon/webui_e2e_test.go` runs the page's own store

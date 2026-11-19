@@ -27,7 +27,7 @@ mkGoApp {
 
   # This build is NOT the Go test gate (mkGoApp defaults doCheck = false): the
   # unit gate is checks.<system>.pg-origin-guard-go-tests and the integration
-  # tier is checks.<system>.pg-origin-guard-integration-tests, both in flake.nix.
+  # tier is integration-checks.pg-origin-guard-integration-tests, both in flake.nix.
 
   # Deliberately NO wrapProgram / PATH prefix: the binary runs the ProxyCommand
   # it is given and reads the ssh agent over a socket, and must not change the

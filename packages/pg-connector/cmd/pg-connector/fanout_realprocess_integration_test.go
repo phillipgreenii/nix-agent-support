@@ -16,7 +16,7 @@ import (
 // umbrella spawns through the real command runner, so the process boundary
 // (stdin pipe, stdout capture, concurrent exec) is covered too. Each script
 // coordinates through marker files in a shared directory, never through
-// wall-clock margins. They run in checks.<system>.pg-connector-integration-tests.
+// wall-clock margins. They run in integration-checks.pg-connector-integration-tests.
 
 // realProcessBackend installs a /bin/sh backend named name on PATH. body runs
 // after the request on stdin has been drained; dir is the shared marker

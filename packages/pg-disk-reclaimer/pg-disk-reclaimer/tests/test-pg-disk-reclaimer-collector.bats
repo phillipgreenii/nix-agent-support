@@ -1,13 +1,13 @@
 #!/usr/bin/env bats
 # bats file_tags=type:integration
-# Integration tier (PGDR_INTEGRATION=1; checks.<system>.test-pg-disk-reclaimer-integration):
+# Integration tier (PGDR_INTEGRATION=1; integration-checks.test-pg-disk-reclaimer-integration):
 # two spool files whose headers are identical except the file id both reach a
 # real collector, and no file_id label survives. Skipped in the unit gate.
 bats_require_minimum_version 1.5.0
 load 'hermetic'
 
 setup() {
-  [[ ${PGDR_INTEGRATION:-} == 1 ]] || skip "needs PGDR_INTEGRATION=1 (checks.<system>.test-pg-disk-reclaimer-integration)"
+  [[ ${PGDR_INTEGRATION:-} == 1 ]] || skip "needs PGDR_INTEGRATION=1 (integration-checks.test-pg-disk-reclaimer-integration)"
   [[ -n ${SCRIPT_UNDER_TEST:-} ]] || skip "SCRIPT_UNDER_TEST is set by the nix check"
   TEST_DIR="$(mktemp -d)"
   export TEST_DIR

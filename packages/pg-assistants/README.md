@@ -329,7 +329,7 @@ The whole-module test gate is `nix build .#checks.<system>.pg-assistants-go-test
 The real-tool tests (a real tmux server; the real launch chain, through `/bin/sh` and a `zsh`
 login shell to a stand-in `claude`; the real `pg-claude-control` against a temporary session
 registry and an inbox the test answers) are `integration`-tagged and run on demand in
-`nix build .#checks.<system>.pg-assistants-integration-tests`, never in the unit tier. To run them
+`nix build .#integration-checks.pg-assistants-integration-tests`, never in the unit tier. To run them
 by hand, point `PG_ASSISTANTS_TEST_PG_CLAUDE_CONTROL` at a `pg-claude-control` built from this
 repo (`go build -o <dir>/pg-claude-control ./cmd/pg-claude-control` in `packages/pg-claude-control`)
 and set `PG_ASSISTANTS_REQUIRE_TOOLS=1` so a missing tool fails instead of skipping:

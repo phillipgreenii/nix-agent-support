@@ -8,7 +8,7 @@
 // `integration` build tag (bead pg2-bkwi41): it compiles the binary and runs it
 // as a subprocess, so it stays out of the unit tier (see the package-versioning
 // rule's "integration tier" note) and runs through
-// checks.<system>.pg-connector-integration-tests.
+// integration-checks.pg-connector-integration-tests.
 package main
 
 import (

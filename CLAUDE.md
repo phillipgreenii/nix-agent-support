@@ -132,7 +132,7 @@ The daemon's web UI (bead `pg2-t7me1.3`, ADR 0092) is dependency-free ES modules
 `packages/pg-task-focus/web/assets/`, embedded in the binary: NO npm, bundler, lock file or network
 in the build, and a new view or control follows the rules in the package README ("The web UI"). Its
 logic is tested with `node --test`: the three tests that spawn node or a real `serve` process are
-`//go:build integration` and run in `checks.<system>.pg-task-focus-integration-tests` (on demand;
+`//go:build integration` and run in `integration-checks.pg-task-focus-integration-tests` (on demand;
 it carries `nodejs` and `PG_TASK_FOCUS_REQUIRE_NODE=1`), not in `pg-task-focus-go-tests`.
 
 `swiftbar.enable` (bead `pg2-t7me1.5`) installs the pg-task-focus SwiftBar plugin the same way
@@ -248,7 +248,7 @@ Setting it (with a supervisor, or `allowUnsupervised`) rewrites every registry l
 hash and path. A host MUST NOT set it before the cutover phase.
 
 **Checks** (build one with `nix build .#checks.<system>.<name>`, in the background): `pg-connector-go-tests` (the module's unit
-tier; the daemon, binary and Linux cross-compile tests are on demand in `pg-connector-integration-tests`), `test-pg-connector-issue-jira-hm-launchd`
+tier; the daemon, binary and Linux cross-compile tests are on demand in `integration-checks.pg-connector-integration-tests`), `test-pg-connector-issue-jira-hm-launchd`
 (`tests/pg-connector-issue-jira-hm-launchd.nix`, which also runs the entry under `env -i` against a fake binary),
 `test-pg-connector-home-rendering`, `test-pg-connector-issue-jira-daemon-capabilities`,
 `test-pg-connector-issue-jira-daemon-darwin-module`, `test-pg-connector-issue-jira-alert-rules`,

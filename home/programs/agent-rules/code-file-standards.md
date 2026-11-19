@@ -60,8 +60,9 @@ A fast, single-process test that runs the real tool against a hermetic fixture (
 as a real `git` in `x/gittest`) stays a unit test.
 
 Such a test MAY stay in the repo. It MUST sit behind a build tag or an opt-in switch AND have its
-own check that runs it (`phillipg-nix-repo-base` ADR 0024: a suite that nothing runs cannot fail,
-so it is not a gate). When a change warrants running it, the agent MUST file a bead gated on that
+own gate that runs it, an opt-in attribute OUTSIDE `checks` (`integration-checks.<name>`;
+`phillipg-nix-repo-base` ADR 0024: a suite that nothing runs cannot fail, so it is not a gate, and an
+integration, load, soak or end-to-end suite MUST NOT be a `checks` attribute, ruling Phillip 2026-11-18). When a change warrants running it, the agent MUST file a bead gated on that
 change being deployed (`pb:pb-gate-lifecycle`), whose work is to run the suite against `main`. An
 agent MUST NOT raise a package test timeout (`-timeout 30m`) to make a slow test fit the unit gate:
 the timeout is the sign the test is in the wrong place.
@@ -338,8 +339,9 @@ package runner
 ```
 
 - It MUST sit behind a build tag (`integration`, the tag `x` and this repo already use) or an
-  opt-in switch, AND have its own check that runs it (`phillipg-nix-repo-base` ADR 0024: a suite
-  nothing runs cannot fail). It MUST NOT run in the unit gate (`go test ./...`, a `*-go-tests`
+  opt-in switch, AND have its own gate that runs it, an opt-in attribute OUTSIDE
+  `checks` (`integration-checks.<name>`; `phillipg-nix-repo-base` ADR 0024: a suite nothing runs
+  cannot fail; it MUST NOT be a `checks` attribute, ruling Phillip 2026-11-18). It MUST NOT run in the unit gate (`go test ./...`, a `*-go-tests`
   check, the `run-unit-tests` hook, `pg-hooks run pre-commit|pre-land`) and MUST NOT block a commit
   or a land.
 - When a change to such a test or its subject warrants running it, the agent MUST file a bead gated
