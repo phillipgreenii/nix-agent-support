@@ -6,6 +6,12 @@
     "name": "ping",
     "provenance": "ping from iputils 20250605, ping -h / ping(8)",
     "citations": {
+      "dangerFlagInert:-c": {
+        "source": "ping from iputils 20250605, ping -h: \"-c <count>         stop after <count> replies\" -- a bounding count (value restricted to the closed set ping-bound 1..120), not a config/command flag despite the spelling"
+      },
+      "dangerFlagInert:-v": {
+        "source": "ping from iputils 20250605, ping -h: \"-v                 verbose output\" -- verbosity only"
+      },
       "provenance": {
         "source": "ping from iputils 20250605, ping -V: \"ping from iputils 20250605\""
       },
@@ -17,12 +23,6 @@
       },
       "unknownFlag": {
         "source": "ping from iputils 20250605, ping -h: full option listing reviewed (-f flood, -l preload, -i interval, -I interface, -p/-Q/-m/-M, -b are deliberately not modeled); an unmodeled flag keeps the fail-closed default (insufficient)"
-      },
-      "dangerFlagInert:-c": {
-        "source": "ping from iputils 20250605, ping -h: \"-c <count>         stop after <count> replies\" -- a bounding count (value restricted to the closed set ping-bound 1..120), not a config/command flag despite the spelling"
-      },
-      "dangerFlagInert:-v": {
-        "source": "ping from iputils 20250605, ping -h: \"-v                 verbose output\" -- verbosity only"
       }
     },
     "flags": {

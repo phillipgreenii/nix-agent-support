@@ -473,8 +473,7 @@
         "stdin": "never",
         "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true,
-        "flags": null
+        "endOfOptions": true
       },
       "help": {
         "name": "help",
@@ -514,8 +513,7 @@
         "stdin": "never",
         "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true,
-        "flags": null
+        "endOfOptions": true
       },
       "lsp": {
         "name": "lsp",
@@ -555,8 +553,7 @@
         "stdin": "never",
         "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true,
-        "flags": null
+        "endOfOptions": true
       },
       "new": {
         "name": "new",
@@ -596,8 +593,7 @@
         "stdin": "never",
         "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true,
-        "flags": null
+        "endOfOptions": true
       },
       "run": {
         "name": "run",

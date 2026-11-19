@@ -2,6 +2,7 @@ package embeddedspecs
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -187,4 +188,40 @@ func subsetRegistry(t *testing.T, names ...string) cmddesc.Registry {
 		schemas = append(schemas, s)
 	}
 	return cmddesc.NewRegistry(schemas...)
+}
+
+// TestCommittedDataMatchesGenerator: running the generator (the same
+// LoadSpecs + BuildSpecsPreserving path cmd/genspecs uses) over the committed
+// data/ directory must reproduce exactly what is committed, so a regeneration
+// never silently rewrites unrelated specs. The comparison is over the decoded
+// specs rather than raw bytes: the committed files are reformatted by the
+// repo formatter (indentation, key order within objects, an absent versus
+// null field) and none of that is a semantic difference.
+func TestCommittedDataMatchesGenerator(t *testing.T) {
+	prior, err := LoadSpecs(dataDir)
+	if err != nil {
+		t.Fatalf("LoadSpecs: %v", err)
+	}
+	got, err := BuildSpecsPreserving(cmddesc.DefaultRegistry(), prior)
+	if err != nil {
+		t.Fatalf("BuildSpecsPreserving: %v", err)
+	}
+	if len(got) != len(prior) {
+		t.Errorf("generator emits %d specs, committed data has %d", len(got), len(prior))
+	}
+	for name, want := range prior {
+		g, ok := got[name]
+		if !ok {
+			t.Errorf("committed spec %q is not produced by the generator", name)
+			continue
+		}
+		if !reflect.DeepEqual(g, want) {
+			t.Errorf("spec %q: generator output differs from committed data/%s.json; regenerate with `go run ./cmd/genspecs` and commit", name, name)
+		}
+	}
+	for name := range got {
+		if _, ok := prior[name]; !ok {
+			t.Errorf("generator emits spec %q that is not committed", name)
+		}
+	}
 }
