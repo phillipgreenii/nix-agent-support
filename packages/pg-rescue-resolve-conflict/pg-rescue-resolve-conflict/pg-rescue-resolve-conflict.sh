@@ -76,6 +76,14 @@ Environment (each overrides the default of the same name in the script):
                          gave-up)
   SCRIPT_MAX_FAILURES    Failed runs after which an item goes straight to the
                          give-up chain (default 3)
+  WORKTREE_ADD_TIMEOUT   Seconds allowed for the fetch and for the worktree
+                         checkout (default 600). A full checkout of a large
+                         monorepo does not finish in a minute on a loaded host.
+                         The checkout runs with git hooks disabled (a
+                         post-checkout hook of the main clone is not meant for
+                         this throwaway worktree). On failure git's own error
+                         text and the exit status (124: timed out) are in the
+                         run log.
   SWEEP_AGE              Seconds after which a recorded claim of an earlier run
                          counts as stranded and is released (default 7200)
 
@@ -112,6 +120,7 @@ RESCUE_TIMEOUT=1800
 PUSH_AGENT_RESOLVED=${PUSH_AGENT_RESOLVED:-true}
 SCRIPT_MAX_FAILURES=${SCRIPT_MAX_FAILURES:-3}
 SWEEP_AGE=${SWEEP_AGE:-7200}
+WORKTREE_ADD_TIMEOUT=${WORKTREE_ADD_TIMEOUT:-600}
 
 # The push URL pg-rescue's processes see for origin (design D5): unusable, so a
 # handler that runs `git push origin` fails. Set through the environment of that
@@ -211,6 +220,7 @@ repo_dir=${repo_dirs[$repo_name]}
   usage_error "PUSH_AGENT_RESOLVED must be true or false, got: $PUSH_AGENT_RESOLVED"
 [[ $SCRIPT_MAX_FAILURES =~ ^[0-9]+$ ]] || usage_error "SCRIPT_MAX_FAILURES must be a whole number, got: $SCRIPT_MAX_FAILURES"
 [[ $SWEEP_AGE =~ ^[0-9]+$ ]] || usage_error "SWEEP_AGE must be a whole number of seconds, got: $SWEEP_AGE"
+[[ $WORKTREE_ADD_TIMEOUT =~ ^[1-9][0-9]*$ ]] || usage_error "WORKTREE_ADD_TIMEOUT must be a positive whole number of seconds, got: $WORKTREE_ADD_TIMEOUT"
 
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 actor="pg-rescue/$run_id"
@@ -468,10 +478,12 @@ fi
 # means the item describes a head that no longer exists (a new head is a new
 # item), so the item is closed as stale before any worktree or handler.
 mkdir -p "$worktree_root" || fail "cannot create --worktree-root $worktree_root"
+fetch_rc=0
 bg_run timeout "$GIT_REMOTE_TIMEOUT" git -C "$repo_dir" fetch --quiet origin \
   "+refs/heads/$branch:refs/remotes/origin/$branch" \
-  "+refs/heads/$base:refs/remotes/origin/$base" ||
-  fail "fetch of $branch and $base from origin failed in $repo_dir"
+  "+refs/heads/$base:refs/remotes/origin/$base" || fetch_rc=$?
+((fetch_rc == 0)) ||
+  fail "fetch of $branch and $base from origin failed in $repo_dir (exit $fetch_rc; 124 means timed out after ${GIT_REMOTE_TIMEOUT}s; git's own message is above)"
 remote_sha=$(timeout "$GIT_LOCAL_TIMEOUT" git -C "$repo_dir" rev-parse --verify -q "refs/remotes/origin/$branch") ||
   fail "cannot resolve origin/$branch in $repo_dir"
 if [[ ${remote_sha,,} != "${head_sha,,}" ]]; then
@@ -485,8 +497,19 @@ fi
 # prune first drops the registration of any worktree an earlier run left behind.
 wt="$worktree_root/$repo_name-$run_id"
 timeout "$GIT_LOCAL_TIMEOUT" git -C "$repo_dir" worktree prune >/dev/null 2>&1 || true
-timeout "$GIT_LOCAL_TIMEOUT" git -C "$repo_dir" worktree add --quiet --detach "$wt" "refs/remotes/origin/$branch" ||
-  fail "cannot add a worktree for origin/$branch under $worktree_root"
+# The checkout of a large repository outlasts GIT_LOCAL_TIMEOUT, and the main
+# clone's post-checkout hook is not meant for this throwaway worktree, so the
+# call has its own bound and runs with hooks disabled (this one command only,
+# through the git configuration environment). git's stderr goes to the run log.
+wt_cfg_n=${GIT_CONFIG_COUNT:-0}
+[[ $wt_cfg_n =~ ^[0-9]+$ ]] || wt_cfg_n=0
+add_rc=0
+bg_run env "GIT_CONFIG_COUNT=$((wt_cfg_n + 1))" \
+  "GIT_CONFIG_KEY_$wt_cfg_n=core.hooksPath" \
+  "GIT_CONFIG_VALUE_$wt_cfg_n=/dev/null" \
+  timeout "$WORKTREE_ADD_TIMEOUT" git -C "$repo_dir" worktree add --quiet --detach "$wt" "refs/remotes/origin/$branch" || add_rc=$?
+((add_rc == 0)) ||
+  fail "cannot add a worktree for origin/$branch under $worktree_root (git exit $add_rc; 124 means timed out after ${WORKTREE_ADD_TIMEOUT}s; git's own message is above)"
 
 # 3. Rebase under pg-rescue. -C is mandatory: a command role sets no working
 # directory. The default verify re-runs the (non-idempotent) rebase, so an

@@ -280,6 +280,23 @@ assert_resolved() {
   [[ "$(item_field '.close_reason // ""')" == *"pg-rescue run "* ]]
 }
 
+# add_filtered_file SMUDGE: put a file on the PR branch that a smudge filter
+# (configured only in REPO) rewrites on checkout, so a checkout of origin/pr in
+# REPO runs SMUDGE; HEAD_SHA follows the new head. Hooks are not involved.
+add_filtered_file() {
+  echo 'slow.txt filter=slowfix' >"$DEV/.gitattributes"
+  echo data >"$DEV/slow.txt"
+  git -C "$DEV" checkout -q pr
+  git -C "$DEV" add .gitattributes slow.txt
+  git -C "$DEV" commit -q -m "filtered file"
+  git -C "$DEV" push -q origin pr
+  git -C "$DEV" checkout -q main
+  HEAD_SHA=$(git -C "$REMOTE" rev-parse refs/heads/pr)
+  git -C "$REPO" config filter.slowfix.smudge "$1"
+  git -C "" config filter.slowfix.clean cat
+  git -C "" config filter.slowfix.required true
+}
+
 # --------------------------------------------------------------------- tests
 
 @test "isolation guard: the fixture database is the temp embedded one" {
@@ -928,4 +945,87 @@ EOF
   run "${SHIM[@]}" --help
   [ "$status" -eq 0 ]
   [[ $output == *"Usage: pg-rescue-resolve-conflict"* ]]
+}
+
+@test "the worktree checkout runs with git hooks disabled: a slow post-checkout hook of the main clone neither runs nor delays the run" {
+  make_pr clean
+  ITEM=$(new_item)
+  write_chain resolve
+  cat >"$REPO/.git/hooks/post-checkout" <<HOOK
+#!/bin/sh
+touch "$HLOG/post-checkout.ran"
+sleep 30
+HOOK
+  chmod +x "$REPO/.git/hooks/post-checkout"
+  SECONDS=0
+  run_shim
+  assert_resolved
+  [ ! -e "$HLOG/post-checkout.ran" ]
+  [ "$SECONDS" -lt 25 ]
+}
+
+@test "a checkout that outlasts WORKTREE_ADD_TIMEOUT fails the run: exit 1, claim released, no worktree, the log says timed out" {
+  make_pr clean
+  ITEM=$(new_item)
+  write_chain resolve
+  add_filtered_file 'sleep 20; cat'
+  WORKTREE_ADD_TIMEOUT=2 run_shim
+  [ "$status" -eq 1 ]
+  assert_released
+  assert_no_worktree
+  [ "$(remote_ref pr)" = "$HEAD_SHA" ]
+  [ "$(awk '{print $2}' "$(outcome_file)")" = "failed" ]
+  log=$(printf '%s\n' "$STATE_DIR"/*.log | head -1)
+  grep -q "cannot add a worktree for origin/pr" "$log"
+  grep -q "git exit 124" "$log"
+  grep -q "timed out after 2s" "$log"
+}
+
+@test "the default worktree timeout is not the 60 s of the other git steps: a 3 s checkout succeeds" {
+  make_pr clean
+  ITEM=$(new_item)
+  write_chain resolve
+  add_filtered_file 'sleep 3; cat'
+  run_shim
+  assert_resolved
+}
+
+@test "a failed worktree add puts git's own error text in the run log" {
+  make_pr clean
+  ITEM=$(new_item)
+  write_chain resolve
+  # A worktree root git cannot create a directory in: a real git failure.
+  mkdir -p "$WTROOT"
+  chmod 555 "$WTROOT"
+  run_shim
+  chmod 755 "$WTROOT"
+  [ "$status" -eq 1 ]
+  assert_released
+  assert_no_worktree
+  log=$(printf '%s\n' "$STATE_DIR"/*.log | head -1)
+  grep -q "cannot add a worktree for origin/pr" "$log"
+  grep -q "git exit 128" "$log"
+  grep -qi "fatal:.*Permission denied" "$log"
+}
+
+@test "a failed fetch puts git's own error text in the run log" {
+  make_pr clean
+  ITEM=$(new_item)
+  write_chain give-up
+  SHIM_BRANCH=no-such-branch run_shim
+  [ "$status" -eq 1 ]
+  log=$(printf '%s\n' "$STATE_DIR"/*.log | head -1)
+  grep -q "fetch of no-such-branch and main from origin failed" "$log"
+  grep -q "exit 128" "$log"
+  grep -qi "couldn't find remote ref" "$log"
+}
+
+@test "WORKTREE_ADD_TIMEOUT must be a positive whole number: usage error before bd is touched" {
+  make_pr clean
+  ITEM=$(new_item)
+  WORKTREE_ADD_TIMEOUT=0 run_shim
+  [ "$status" -eq 2 ]
+  [[ $stderr == *WORKTREE_ADD_TIMEOUT* ]]
+  WORKTREE_ADD_TIMEOUT=abc run_shim
+  [ "$status" -eq 2 ]
 }
