@@ -8,10 +8,12 @@
   # pg-claude-control is the one way pa-monitor sends a nudge to a running Claude
   # (submit through the control mod's inbox); it never injects keystrokes itself.
   pg-claude-control,
-  # cmux is a macOS-only .app from phillipgreenii-nix-overlay (already a
-  # declared input + applied overlay). Defaulted to null so the package still
-  # evaluates on non-darwin, where it is omitted from PATH below.
-  cmux ? null,
+  # cmux-cli is the command-line client of the macOS-only cmux .app, from
+  # phillipgreenii-nix-overlay (already a declared input + applied overlay).
+  # The overlay's `cmux` package is the GUI wrapper; the CLI that pa-monitor
+  # runs is `cmux-cli`. Defaulted to null so the package still evaluates on
+  # non-darwin, where it is omitted from PATH below.
+  cmux-cli ? null,
 }:
 
 mkGoApp {
@@ -54,10 +56,12 @@ mkGoApp {
   # Wrap the binaries pa-monitor shells out to onto its PATH so they work
   # out-of-the-box under launchd (whose default PATH is /usr/bin:/bin:...):
   #   - gh: PR-status lookups
-  #   - tmux / cmux: signal-layer detection + auto-resume delivery. These are
-  #     NOT optional — without them every session on that multiplexer is
-  #     classified "unknown" and its auto-resume nudges silently fail. cmux is
-  #     darwin-only (a .app bundle); guarded so non-darwin builds still work.
+  #   - tmux / cmux-cli: signal-layer detection + auto-resume delivery. These
+  #     are NOT optional — without them every session on that multiplexer is
+  #     classified "unknown" and its auto-resume nudges silently fail. cmux-cli
+  #     is darwin-only (it lives in the cmux .app bundle); guarded so non-darwin
+  #     builds still work. Guarded by the test-pa-monitor-path-has-cmux-cli
+  #     flake check.
   postInstall = ''
     mkdir -p $out/share/bash-completion/completions
     mkdir -p $out/share/zsh/site-functions
@@ -72,7 +76,7 @@ mkGoApp {
             tmux
             pg-claude-control
           ]
-          ++ lib.optionals (stdenv.hostPlatform.isDarwin && cmux != null) [ cmux ]
+          ++ lib.optionals (stdenv.hostPlatform.isDarwin && cmux-cli != null) [ cmux-cli ]
         )
       }
   '';

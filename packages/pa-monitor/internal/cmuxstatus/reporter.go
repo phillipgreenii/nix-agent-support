@@ -153,6 +153,12 @@ func (c *cmuxReporter) run(ctx context.Context, name string, args ...string) ([]
 // that cross-call starvation (bead pg2-ii0be).
 const cmuxCallTimeout = 5 * time.Second
 
+// cliName is the executable name of the cmux command-line client. The package
+// the host installs exposes the GUI app as `cmux` and the CLI as `cmux-cli`,
+// so the reporter MUST launch `cmux-cli`; the pa-monitor package puts it on
+// the daemon's PATH.
+const cliName = "cmux-cli"
+
 // runCall runs one `cmux` invocation under its OWN fresh timeout, so sequential
 // calls within a single Push/Clear never share (and thus never starve) a budget.
 func (c *cmuxReporter) runCall(name string, args ...string) ([]byte, error) {
@@ -181,7 +187,7 @@ func (c *cmuxReporter) Push(s Snapshot) {
 	statusSkip := c.statusSent && c.statusKey == statusKey
 	c.mu.Unlock()
 	if !statusSkip {
-		if _, err := c.runCall("cmux", "set-status", "claude-agents", value,
+		if _, err := c.runCall(cliName, "set-status", "claude-agents", value,
 			"--icon", icon, "--color", color); err != nil {
 			c.log(fmt.Sprintf("cmux set-status claude-agents: %v", err))
 		} else {
@@ -210,7 +216,7 @@ func (c *cmuxReporter) Push(s Snapshot) {
 		progressSkip := c.progressSent && c.progressKey == progressKey
 		c.mu.Unlock()
 		if !progressSkip {
-			if _, err := c.runCall("cmux", args...); err != nil {
+			if _, err := c.runCall(cliName, args...); err != nil {
 				c.log(fmt.Sprintf("cmux set-progress: %v", err))
 			} else {
 				c.mu.Lock()
@@ -227,11 +233,11 @@ func (c *cmuxReporter) Push(s Snapshot) {
 	// calls above.
 	if s.HasWorkspaceColor && (!c.colorEmitted || s.WorkspaceColor != c.lastWorkspaceColor) {
 		if s.WorkspaceColor == "" {
-			if _, err := c.runCall("cmux", "workspace-action", "--action", "clear-color"); err != nil {
+			if _, err := c.runCall(cliName, "workspace-action", "--action", "clear-color"); err != nil {
 				c.log(fmt.Sprintf("cmux workspace-action clear-color: %v", err))
 			}
 		} else {
-			if _, err := c.runCall("cmux", "workspace-action", "--action", "set-color", "--color", s.WorkspaceColor); err != nil {
+			if _, err := c.runCall(cliName, "workspace-action", "--action", "set-color", "--color", s.WorkspaceColor); err != nil {
 				c.log(fmt.Sprintf("cmux workspace-action set-color: %v", err))
 			}
 		}
@@ -278,7 +284,7 @@ func stateAttrs(s State, resetAt time.Time) (value, icon, color string) {
 
 // Notify issues one cmux notify call. Failures log but do not panic.
 func (c *cmuxReporter) Notify(title, body string) {
-	if _, err := c.runCall("cmux", "notify", "--title", title, "--body", body); err != nil {
+	if _, err := c.runCall(cliName, "notify", "--title", title, "--body", body); err != nil {
 		c.log(fmt.Sprintf("cmux notify: %v", err))
 	}
 }
@@ -288,13 +294,13 @@ func (c *cmuxReporter) Notify(title, body string) {
 // under its own timeout (runCall) so a slow clear-status cannot starve the
 // clear-progress / clear-color that follow it (bead pg2-ii0be).
 func (c *cmuxReporter) Clear() {
-	if _, err := c.runCall("cmux", "clear-status", "claude-agents"); err != nil {
+	if _, err := c.runCall(cliName, "clear-status", "claude-agents"); err != nil {
 		c.log(fmt.Sprintf("cmux clear-status claude-agents: %v", err))
 	}
-	if _, err := c.runCall("cmux", "clear-progress"); err != nil {
+	if _, err := c.runCall(cliName, "clear-progress"); err != nil {
 		c.log(fmt.Sprintf("cmux clear-progress: %v", err))
 	}
-	if _, err := c.runCall("cmux", "workspace-action", "--action", "clear-color"); err != nil {
+	if _, err := c.runCall(cliName, "workspace-action", "--action", "clear-color"); err != nil {
 		c.log(fmt.Sprintf("cmux workspace-action clear-color: %v", err))
 	}
 	c.colorEmitted = true

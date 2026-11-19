@@ -90,7 +90,7 @@ func TestBuildRunOptions_WiringNotNil(t *testing.T) {
 func TestBuildRunOptions_DoesNotLookForTerminalBinaries(t *testing.T) {
 	bin := t.TempDir()
 	log := filepath.Join(bin, "calls.log")
-	for _, name := range []string{"tmux", "cmux"} {
+	for _, name := range []string{"tmux", "cmux-cli"} {
 		script := "#!/bin/sh\necho " + name + " \"$@\" >> " + log + "\n"
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
@@ -117,11 +117,11 @@ func TestBuildRunOptions_DoesNotLookForTerminalBinaries(t *testing.T) {
 		t.Fatalf("daemon assembly launched terminal binaries: %q", b)
 	}
 
-	if _, err := signal.RunCmux(ctx, "cmux", "ping"); err != nil {
+	if _, err := signal.RunCmux(ctx, "cmux-cli", "ping"); err != nil {
 		t.Fatalf("RunCmux: %v", err)
 	}
 	b, err := os.ReadFile(log)
-	if err != nil || !strings.Contains(string(b), "cmux ping") {
-		t.Fatalf("RunCmux did not run cmux: log=%q err=%v", b, err)
+	if err != nil || !strings.Contains(string(b), "cmux-cli ping") {
+		t.Fatalf("RunCmux did not run cmux-cli: log=%q err=%v", b, err)
 	}
 }

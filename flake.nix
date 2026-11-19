@@ -18089,7 +18089,7 @@
                     "Primary use of Claude Code: software development in the user's personal nix repositories (nix-agent-support, nix-ziprecruiter, nix-repo-base), plus agent-tooling and beads issue-tracking work."
                     "Host containment: Claude Code runs on an ordinary developer macOS machine with open internet; there is no container, VM or egress allow-list."
                     "Key internal services: a shared per-user Dolt server for the beads issue tracker listens on 127.0.0.1:25252 (launchd agent org.nixos.beads-dolt-server); local reads and writes through the bd CLI are routine."
-                    "Org-specific CLIs: bd, pn, pg-desk, pg-router, ccpool, pg-disk-reclaimer, session-mode, handoff-create, assume, tuicr, cmux, nb, pa-monitor and glowm are tools the user installed deliberately through nix/home-manager."
+                    "Org-specific CLIs: bd, pn, pg-desk, pg-router, ccpool, pg-disk-reclaimer, session-mode, handoff-create, assume, tuicr, cmux-cli, nb, pa-monitor and glowm are tools the user installed deliberately through nix/home-manager."
                     "Source control: github.com/phillipgreenii/* and github.com/phillipgziprecruiter/* (the user's personal accounts) are trusted. The two personal accounts are trusted destinations only for content that originates in the user's nix-* repositories (nix-agent-support, nix-ziprecruiter, nix-repo-base), never for content that belongs to the user's other organizations."
                   ];
 
@@ -20423,6 +20423,31 @@
                     exit 1
                     ;;
                 esac
+              '';
+
+              # The pa-monitor daemon and cmux-bridge run the cmux command-line
+              # client by the bare name `cmux-cli` (internal/cmuxstatus), under
+              # launchd's minimal PATH, so the pa-monitor wrapper MUST put a
+              # directory holding an executable `cmux-cli` on PATH. The overlay's
+              # `cmux` is the GUI wrapper, not the CLI, so putting only `cmux` on
+              # PATH would silently break the sidebar. cmux is darwin-only, so on
+              # other systems the check only proves the wrapper builds.
+              test-pa-monitor-path-has-cmux-cli = pkgs.runCommand "pa-monitor-path-has-cmux-cli" { } ''
+                ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
+                  wrapper=${pkgs.pa-monitor}/bin/pa-monitor
+                  found=
+                  for d in $(grep PATH "$wrapper" | grep -o '/nix/store/[^:[:space:]]*/bin' | tr -d "'\"" | sort -u); do
+                    if [ -x "$d/cmux-cli" ]; then
+                      found=$d
+                    fi
+                  done
+                  if [ -z "$found" ]; then
+                    echo "pa-monitor wrapper PATH has no directory with an executable cmux-cli:" >&2
+                    grep PATH "$wrapper" >&2
+                    exit 1
+                  fi
+                ''}
+                touch "$out"
               '';
 
               # codeburn is a prebuilt-dist repackaging (packages/codeburn) — the runtime deps

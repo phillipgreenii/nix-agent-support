@@ -57,7 +57,7 @@ func TestNewReporterReturnsNoopWhenDisabled(t *testing.T) {
 // *calls. Always returns empty bytes and no error.
 func recordingRun(calls *[]string) func(context.Context, string, ...string) ([]byte, error) {
 	return func(_ context.Context, name string, args ...string) ([]byte, error) {
-		if name != "cmux" {
+		if name != "cmux-cli" {
 			return nil, fmt.Errorf("unexpected command: %s", name)
 		}
 		*calls = append(*calls, "cmux "+strings.Join(args, " "))
