@@ -42,6 +42,7 @@ type membersFile struct {
 type member struct {
 	Cmd        []string `json:"cmd"`
 	Internal   []string `json:"internal"`
+	Extra      []string `json:"extra"`
 	StdlibOnly bool     `json:"stdlibOnly"`
 }
 
@@ -104,16 +105,25 @@ func under(path, dir string) bool {
 // owner classifies a module-relative path: ("member", name), ("shared", ""),
 // or ("engine", "").
 func (m membersFile) owner(path string) (string, string) {
-	for _, s := range m.Shared {
-		if under(path, s) {
-			return "shared", ""
-		}
-	}
 	names := make([]string, 0, len(m.Members))
 	for n := range m.Members {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	// A member's extra directories (for example its conformance fixtures) lie
+	// inside a shared directory; the member's claim wins.
+	for _, n := range names {
+		for _, e := range m.Members[n].Extra {
+			if under(path, e) {
+				return "member", n
+			}
+		}
+	}
+	for _, s := range m.Shared {
+		if under(path, s) {
+			return "shared", ""
+		}
+	}
 	for _, n := range names {
 		mem := m.Members[n]
 		for _, c := range mem.Cmd {

@@ -49,6 +49,11 @@ mkGoApp {
       members.routerFileset
       ../ccpool
       ../claude-transcript
+      # go.mod replaces these for the folded handlers member; the router's own
+      # binary does not link them, but the module must resolve in the store copy.
+      ../pg-claude-code-recorder
+      ../pg-sqlite
+      ../pg-failsig
     ];
   };
   modRoot = "pg-router";

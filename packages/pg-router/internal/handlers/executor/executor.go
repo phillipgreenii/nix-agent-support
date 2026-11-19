@@ -1,0 +1,226 @@
+// Package executor runs one (role, item) dispatch. It owns the ccpool
+// ensure→send→wait path (including the pg2-c1vp watchdog/single-terminal race)
+// and the command path. Each adapter binary picks its Executor (NewCCPool or
+// NewCommand) and hands it a Deps seam bag; Dispatch returns the failure action the
+// executor itself performed on the bead (empty on success) — the orchestrator
+// merges the observed created/closed/handed-back actions around it.
+package executor
+
+import (
+	"context"
+	"time"
+
+	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
+	"github.com/phillipgreenii/pg-router/internal/handlers/procprobe"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
+
+	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
+	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
+	"github.com/phillipgreenii/pg-router/internal/handlers/config"
+	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
+	"github.com/phillipgreenii/pg-router/internal/handlers/gwm"
+	"github.com/phillipgreenii/pg-router/internal/handlers/item"
+	"github.com/phillipgreenii/pg-router/internal/handlers/parknote"
+	"github.com/phillipgreenii/pg-router/internal/handlers/query"
+	"github.com/phillipgreenii/pg-router/internal/handlers/report"
+	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
+	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
+	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
+	"github.com/phillipgreenii/pg-router/internal/handlers/worktree"
+)
+
+// DispatchContext is one (role, item) dispatch. This module's own local
+// replacement for packages/pg-router/internal/discover.DispatchContext, which
+// is unreachable from here (Go's internal-package visibility rule —
+// docs/adr/0065's Addendum): it carries only the two fields the moved
+// executor logic actually reads. Built by this module's own dispatch CLI
+// subcommand from the wire's `{schemaVersion, id, event}` message — this
+// process's own configured Role (Task 5.7's job to load for real; today a
+// single locally-constructed Role) plus an Item decoded from the event's
+// opaque payload using the SAME field names
+// packages/pg-router/internal/discover.ItemFromPayload used before this move
+// (Task 5.6's "same shape, different side" framing).
+type DispatchContext struct {
+	Role roles.Role
+	Item item.Item
+	// EventID is the id of the pg-router event being dispatched (empty when the
+	// caller has none). A redelivery of the same accepted event carries the same
+	// id; it is stamped on the session at launch and bounds duplicate absorption
+	// of a handler-closed settled row (bead pg2-uprw5, ADR 0082).
+	EventID string
+	// DispatchID is the id the router minted for this dispatch (the id of the
+	// handler request). It is the owner id of the session's supervision lease
+	// (ccpool.MetaKeyLeaseOwner); empty (tests) falls back to the per-attempt
+	// ExternalID.
+	DispatchID string
+}
+
+// Executor dispatches one item for a role and reports the failure action it took.
+type Executor interface {
+	Dispatch(ctx context.Context, d DispatchContext, deps Deps) (report.Result, error)
+}
+
+// Deps is the explicit seam bag the executor needs from the orchestrator. Fields
+// are exported because the orchestrator builds Deps from a different package. The
+// per-attempt ExternalID is resolved ONCE by the orchestrator (so the same id is
+// reused for the deferred teardown Close); the executor never re-stamps.
+type Deps struct {
+	CC   ccpool.Runner
+	BD   beads.Runner
+	Cmd  query.Commander
+	Log  *eventlog.Writer // may be nil (no-op)
+	Cfg  config.Config
+	Now  func() time.Time                           // clock seam; nil ⇒ time.Now
+	Tick func(context.Context, time.Duration) error // cancellable wait; nil ⇒ select poll
+	// NewTicker is the lease-refresh ticker seam: it returns the tick channel and
+	// its stop func (nil ⇒ time.NewTicker). Tests drive the lease cadence with it.
+	NewTicker   func(time.Duration) (<-chan time.Time, func())
+	UsageReader usage.Reader // nil ⇒ usage.ReaderFor(CC) (ccpool consumption)
+	// FirstTurn reports whether the model has taken a turn in a transcript (the
+	// nudge gate); nil ⇒ the recorder's fact.
+	FirstTurn  func(transcriptPath string) bool
+	ExternalID string // resolved once by the orchestrator
+	// Git is the watchdog's own hard-stop reset/clean seam (nil ⇒
+	// watchdog.OSGit{}); the per-bead worktree it resets is the one the worker
+	// ran in. Unrelated to worktree creation below — that migrated onto
+	// GitOpener (pg2-mj9n0); the watchdog's own migration onto x/gitclient's
+	// Cleaner+Locator is separate (pg2-ljyaj).
+	Git watchdog.GitRunner
+	// GitOpener creates the per-bead worktree at dispatch (nil ⇒
+	// gitclient.New in production). Tests substitute a fake so they never
+	// touch a real repo.
+	GitOpener worktree.Opener
+	// LatestActivity returns the newest write time among a session's
+	// transcript files (nil ⇒ filesystem scan, LatestTranscriptActivity).
+	// ok=false means nothing observable. Tests substitute a fake.
+	LatestActivity func(transcriptPath string) (t time.Time, ok bool)
+	// ProcessCWDs lists the working directory of every live process (nil =>
+	// procprobe.CWDs, `lsof`). The dispatch path never calls it (a pg-gwm lease,
+	// not a process listing, says who holds a worktree); it is a seam a test
+	// counts calls through.
+	ProcessCWDs procprobe.Probe
+	// InFlight reports whether a session transcript (or a subagent's) ends with
+	// a Bash call still inside its declared timeout plus grace (nil ⇒
+	// InFlightToolCall). Only the close-or-release END test asks (INV-CCH-28,
+	// bead pg2-r4ig2); the post-completion quiet checks never do.
+	InFlight func(transcriptPath string, now time.Time) bool
+	// LockDir is the directory holding the per-session flocks that serialize an
+	// absorbing dispatch against the orphan reconcile (sessionlock, bead
+	// pg2-g2u9m, INV-CCH-18): <handler state dir>/locks. Empty disables the lock
+	// (unit tests; buildDeps always sets it).
+	LockDir string
+	// GWM is the pg-gwm client that leases each worktree-isolation role's
+	// worktree. nil keeps the legacy per-bead worktree path.
+	GWM gwm.Client
+	// GitRun runs git for the handler-side worktree pre-fetch (bead pg2-hh32y);
+	// nil => osGitRun (gitenv-hermetic). Tests substitute a script.
+	GitRun GitRun
+	// StatDir reports whether a leased worktree directory exists; nil => os.Stat.
+	// Tests substitute a fake for the placeholder paths their pg-gwm fakes return.
+	StatDir func(path string) error
+	// OriginCheck is pg-origin-guard's Check, consulted before the review
+	// pre-fetch's network fetch (INV-CCH-10). nil => no guard (the fetch runs);
+	// a returned error is a guard fault and the fetch runs (fail open).
+	OriginCheck originguard.Check
+	// PR is the read-only PR reader the review precheck uses (INV-CCH-22, bead
+	// pg2-5x29j). nil => ConnectorReader over Cmd (nil Cmd => OSCommander).
+	// Tests substitute a fake so they never run pg-connector.
+	PR PRReader
+	// ParkGit is the git seam the park note's worktree and branch discovery
+	// uses (bead pg2-78mxs); nil => parknote.OSGit (hermetic, bounded).
+	ParkGit parknote.Git
+	// Reconciler runs the on-demand housekeeping of INV-CCH-41 (the
+	// capacity-pressure closed-bead reconcile and the own-bead worktree check)
+	// on every dispatch. nil => none; a dispatch then declines or
+	// proceeds exactly as it would without one.
+	Reconciler Reconciler
+	// PoolListing/PoolListed carry the one pool listing the dispatch's orphan unit
+	// read (before the prior-session plan), when that unit found no orphan and so
+	// changed nothing: the plan then reuses it instead of listing again. The plan
+	// consumes it once (INV-CCH-41).
+	// FreeBytes reports the bytes available to unprivileged writers at a path
+	// (nil => statfs). The free-space floor before a worktree is created reads
+	// it (INV-CCH-8); tests substitute a fake.
+	FreeBytes   func(path string) (uint64, error)
+	PoolListing []ccpool.Session
+	PoolListed  bool
+}
+
+func (d Deps) git() watchdog.GitRunner {
+	if d.Git != nil {
+		return d.Git
+	}
+	return watchdog.OSGit{}
+}
+
+func (d Deps) gitOpener() worktree.Opener {
+	if d.GitOpener != nil {
+		return d.GitOpener
+	}
+	return worktree.GitOpener
+}
+
+func (d Deps) clock() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
+func (d Deps) reader() usage.Reader {
+	if d.UsageReader != nil {
+		return d.UsageReader
+	}
+	return usage.ReaderFor(d.CC)
+}
+
+// recorderUsage answers the first-turn nudge gate from the recorder.
+var recorderUsage = usage.NewRecorderReader(client.Options{})
+
+func (d Deps) firstTurn(path string) bool {
+	if d.FirstTurn != nil {
+		return d.FirstTurn(path)
+	}
+	return recorderUsage.FirstTurnStarted(path)
+}
+
+func (d Deps) commander() query.Commander {
+	if d.Cmd != nil {
+		return d.Cmd
+	}
+	return query.OSCommander{}
+}
+
+func (d Deps) newTicker(dur time.Duration) (<-chan time.Time, func()) {
+	if d.NewTicker != nil {
+		return d.NewTicker(dur)
+	}
+	t := time.NewTicker(dur)
+	return t.C, t.Stop
+}
+
+func (d Deps) waitPoll(ctx context.Context, dur time.Duration) error {
+	if d.Tick != nil {
+		return d.Tick(ctx, dur)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(dur):
+		return nil
+	}
+}
+
+// NewCCPool returns the ccpool executor: the ensure -> send -> wait path the
+// ccpool adapter (cmd/pg-router-handler-ccpool) runs for its roles.
+func NewCCPool() Executor { return ccpoolExecutor{} }
+
+// NewCommand returns the command executor: the argv run the command adapter
+// (cmd/pg-router-handler-command) runs for its roles.
+func NewCommand() Executor { return commandExecutor{} }
+
+// failureAction builds a single-bead Result for one failure verb.
+func failureAction(verb report.Verb, beadID string) report.Result {
+	return report.Result{Actions: []report.Action{{Verb: verb, Refs: []report.Ref{{Type: "bead", ID: beadID}}}}}
+}

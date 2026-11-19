@@ -15,9 +15,22 @@ let
   # A path a member lists may not exist yet (the heartbeat has no internal
   # subtree); the fileset functions reject a missing path.
   existing = lib.filter builtins.pathExists;
+  # Directories a member owns inside a shared directory (the handlers' own
+  # conformance tests sit under conformance/).
+  memberExtra = m: m.extra or [ ];
   memberPaths =
-    m: existing ((map (c: here + "/cmd/${c}") m.cmd) ++ (map (i: here + "/internal/${i}") m.internal));
+    m:
+    existing (
+      (map (c: here + "/cmd/${c}") m.cmd)
+      ++ (map (i: here + "/internal/${i}") m.internal)
+      ++ (map (e: here + "/${e}") (memberExtra m))
+    );
   allMemberPaths = lib.concatMap memberPaths (lib.attrValues data.members);
+  allExtraPaths = map (e: here + "/${e}") (lib.concatMap memberExtra (lib.attrValues data.members));
+  # The shared directories without any member's own subdirectory inside them.
+  sharedFileset = lib.fileset.difference (lib.fileset.unions (
+    existing (map (p: here + "/${p}") data.shared)
+  )) (lib.fileset.unions allExtraPaths);
   moduleFiles = [
     (here + "/go.mod")
     (here + "/go.sum")
@@ -36,7 +49,7 @@ rec {
     lib.fileset.unions (
       moduleFiles
       ++ memberPaths data.members.${name}
-      ++ existing (map (p: here + "/${p}") data.shared)
+      ++ [ sharedFileset ]
       ++ [ (here + "/../claude-transcript") ]
     );
 
@@ -51,9 +64,9 @@ rec {
   routerTestPackages = ''
     $(go list ./... | grep -Ev '/(${
       lib.concatStringsSep "|" (
-        lib.concatMap (m: map (c: "cmd/${c}") m.cmd ++ map (i: "internal/${i}") m.internal) (
-          lib.attrValues data.members
-        )
+        lib.concatMap (
+          m: map (c: "cmd/${c}") m.cmd ++ map (i: "internal/${i}") m.internal ++ memberExtra m
+        ) (lib.attrValues data.members)
       )
     })(/|$)')
   '';
@@ -66,5 +79,6 @@ rec {
       ++ map (i: "./internal/${i}/...") (
         lib.filter (i: builtins.pathExists (here + "/internal/${i}")) data.members.${name}.internal
       )
+      ++ map (e: "./${e}/...") (memberExtra data.members.${name})
     );
 }

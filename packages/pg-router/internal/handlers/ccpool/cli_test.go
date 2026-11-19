@@ -1,0 +1,1133 @@
+package ccpool
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/phillipgreenii/pg-router/internal/handlers/config"
+)
+
+var _ Runner = (*CLIRunner)(nil)
+
+func newSpy() (*CLIRunner, *[][]string, func(out []byte)) {
+	var got [][]string
+	var canned []byte
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return canned, nil, nil
+	}
+	setOut := func(out []byte) { canned = out }
+	return cli, &got, setOut
+}
+
+func TestEnsure_argv(t *testing.T) {
+	cli, got, _ := newSpy()
+	err := cli.Ensure(context.Background(), "pg-router-worker-zr-1-20260616T010203", "pg-router-worker-zr-1", "/repo",
+		map[string]string{"WORKSPACE_ROOT": "/repo", "BEADS_ACTOR": "pgii-pool__worker", "BEADS_DIR": "/repo/.beads"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// addressed by external_id; display name passed via --name; env keys sorted.
+	// Default() sets Autonomous=true, so --autonomous must appear at the end.
+	want := []string{
+		"new", "pg-router-worker-zr-1-20260616T010203", "--cwd", "/repo",
+		"--name", "pg-router-worker-zr-1",
+		"--env", "BEADS_ACTOR=pgii-pool__worker",
+		"--env", "BEADS_DIR=/repo/.beads",
+		"--env", "WORKSPACE_ROOT=/repo",
+		"--permission-mode", "dontAsk",
+		"--allowed-tools", config.Default().AllowedTools,
+		"--effort", "medium",
+		"--model", "claude-sonnet-5-5",
+		"--autonomous",
+	}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("argv =\n %v\nwant\n %v", (*got)[0], want)
+	}
+}
+
+func TestEnsure_argv_withModel_noPermissionMode_noName(t *testing.T) {
+	var got [][]string
+	cfg := config.Default()
+	cfg.Model = "claude-opus-4-8"
+	cfg.PermissionMode = ""
+	cfg.AllowedTools = ""
+	cfg.Effort = "high"
+	cfg.Autonomous = false // isolate this test to model/effort; not testing autonomous here
+	cli := NewCLIRunner(cfg)
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	// empty name => no --name flag emitted.
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"new", "s", "--cwd", "/r", "--effort", "high", "--model", "claude-opus-4-8"}
+	if !reflect.DeepEqual(got[0], want) {
+		t.Errorf("argv = %v, want %v", got[0], want)
+	}
+}
+
+func TestEnsure_argv_includesAutonomous(t *testing.T) {
+	cli, got, _ := newSpy() // config.Default() => Autonomous true, PermissionMode dontAsk, Effort medium, Model claude-sonnet-5-5
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"new", "s", "--cwd", "/r",
+		"--permission-mode", "dontAsk",
+		"--allowed-tools", config.Default().AllowedTools,
+		"--effort", "medium",
+		"--model", "claude-sonnet-5-5",
+		"--autonomous",
+	}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("argv =\n %v\nwant\n %v", (*got)[0], want)
+	}
+}
+
+func TestEnsure_argv_omitsAutonomousWhenDisabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Autonomous = false
+	var got [][]string
+	cli := NewCLIRunner(cfg)
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range got[0] {
+		if a == "--autonomous" {
+			t.Fatalf("--autonomous must be omitted when Autonomous=false; argv = %v", got[0])
+		}
+	}
+}
+
+func TestEnsure_allowedTools(t *testing.T) {
+	// Non-default allowlist is forwarded verbatim, positioned after --permission-mode.
+	var got [][]string
+	cfg := config.Default()
+	cfg.PermissionMode = "dontAsk"
+	cfg.AllowedTools = "Read,Bash(git *)"
+	cfg.Effort = ""
+	cfg.Model = ""
+	cfg.Autonomous = false // isolate this test to allowlist positioning
+	cli := NewCLIRunner(cfg)
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"new", "s", "--cwd", "/r", "--permission-mode", "dontAsk", "--allowed-tools", "Read,Bash(git *)"}
+	if !reflect.DeepEqual(got[0], want) {
+		t.Errorf("argv = %v, want %v", got[0], want)
+	}
+}
+
+func TestEnsure_allowedToolsEmptyOmitsFlag(t *testing.T) {
+	var got [][]string
+	cfg := config.Default()
+	cfg.PermissionMode = ""
+	cfg.AllowedTools = "" // empty => no --allowed-tools flag
+	cfg.Effort = ""
+	cfg.Model = ""
+	cfg.Autonomous = false // isolate this test to allowedTools behavior
+	cli := NewCLIRunner(cfg)
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"new", "s", "--cwd", "/r"}
+	if !reflect.DeepEqual(got[0], want) {
+		t.Errorf("argv = %v, want %v (empty AllowedTools must omit the flag)", got[0], want)
+	}
+}
+
+func TestSend_modes(t *testing.T) {
+	cases := []struct {
+		mode SendMode
+		flag string
+	}{
+		{ModeNoWait, "--no-wait"},
+		{ModeInterrupt, "--interrupt"},
+		{ModeQueue, "--queue-message"},
+	}
+	for _, tc := range cases {
+		cli, got, _ := newSpy()
+		cli.ConfirmIngest = 0 // isolate the mode→flag mapping from the ingestion guard
+		if err := cli.Send(context.Background(), "s", "hello world", tc.mode); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"reply", "s", "hello world", tc.flag}
+		if !reflect.DeepEqual((*got)[0], want) {
+			t.Errorf("mode %d argv = %v, want %v", tc.mode, (*got)[0], want)
+		}
+	}
+}
+
+// pg2-yukh #1: a worker's initial fire-and-forget nudge (ModeNoWait) must forward
+// --confirm-ingest <dur> when a confirm window is configured, so ccpool can detect
+// a dropped prompt and exit 25. A queued budget message (ModeQueue) must NOT carry
+// it (the model is already mid-turn by then).
+func TestSend_forwardsConfirmIngest(t *testing.T) {
+	cli, got, _ := newSpy()
+	cli.ConfirmIngest = 90 * time.Second
+	if err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"reply", "zr-1", "do it", "--no-wait", "--confirm-ingest", "1m30s"}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("no-wait argv = %v, want %v", (*got)[0], want)
+	}
+}
+
+func TestSend_confirmIngestOnlyForNoWait(t *testing.T) {
+	cli, got, _ := newSpy()
+	cli.ConfirmIngest = 90 * time.Second
+	if err := cli.Send(context.Background(), "zr-1", "do it", ModeQueue); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"reply", "zr-1", "do it", "--queue-message"}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("queue argv = %v, want %v (no --confirm-ingest on a queued message)", (*got)[0], want)
+	}
+}
+
+func TestSend_zeroConfirmIngestOmitsFlag(t *testing.T) {
+	cli, got, _ := newSpy()
+	cli.ConfirmIngest = 0 // a zero window must omit the flag entirely
+	if err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"reply", "zr-1", "do it", "--no-wait"}
+	if !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("zero window argv = %v, want %v (no flag)", (*got)[0], want)
+	}
+}
+
+func TestSend_notIngestedExit7(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.ConfirmIngest = 90 * time.Second
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("prompt not ingested"), &fakeExit{code: 25}
+	}
+	err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait)
+	if !errors.Is(err, ErrPromptNotIngested) {
+		t.Errorf("exit 25 should map to ErrPromptNotIngested, got %v", err)
+	}
+	if !IsNotIngested(err) {
+		t.Errorf("IsNotIngested must report true for a code-25 send error; got %v", err)
+	}
+}
+
+func TestSend_ingestUnknownExit9(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.ConfirmIngest = 90 * time.Second
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("could not confirm"), &fakeExit{code: 26}
+	}
+	err := cli.Send(context.Background(), "zr-1", "do it", ModeNoWait)
+	if !errors.Is(err, ErrIngestUnknown) || !IsIngestUnknown(err) {
+		t.Errorf("exit 26 should map to ErrIngestUnknown, got %v", err)
+	}
+	if IsNotIngested(err) {
+		t.Errorf("an unknown ingestion must not read as a definitive not-ingested; got %v", err)
+	}
+}
+
+func TestCancelCloseList_argv(t *testing.T) {
+	cli, got, setOut := newSpy()
+	_ = cli.Cancel(context.Background(), "s")
+	_ = cli.Close(context.Background(), "s", true)
+	setOut([]byte(`[{"external_id":"pg-router-worker-zr-1-20260616T010203","name":"pg-router-worker-zr-1","claude_session_id":"u-1","state":"working","live":true,"transcript_path":"/t/x.jsonl"}]`))
+	sessions, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual((*got)[0], []string{"cancel", "s"}) {
+		t.Errorf("cancel argv = %v", (*got)[0])
+	}
+	if !reflect.DeepEqual((*got)[1], []string{"close", "s", "--purge", "--reason", "handler"}) {
+		t.Errorf("close argv = %v", (*got)[1])
+	}
+	if !reflect.DeepEqual((*got)[2], []string{"list", "--all", "--json"}) {
+		t.Errorf("list argv = %v", (*got)[2])
+	}
+	if len(sessions) != 1 || sessions[0].ExternalID != "pg-router-worker-zr-1-20260616T010203" ||
+		sessions[0].Name != "pg-router-worker-zr-1" || sessions[0].ClaudeSessionID != "u-1" ||
+		sessions[0].State != StateWorking || !sessions[0].Live ||
+		sessions[0].TranscriptPath != "/t/x.jsonl" {
+		t.Errorf("parsed session = %+v", sessions)
+	}
+}
+
+// ListLight asks for the facet-free list and decodes the same rows as List.
+func TestListLight_argvAndDecode(t *testing.T) {
+	cli, got, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"s","state":"working","live":true,"transcript_path":"/t/x.jsonl"}]`))
+	sessions, err := cli.ListLight(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual((*got)[0], []string{"list", "--all", "--json", "--no-facets"}) {
+		t.Errorf("list-light argv = %v", (*got)[0])
+	}
+	if len(sessions) != 1 || sessions[0].ExternalID != "s" || !sessions[0].Live || sessions[0].TranscriptPath != "/t/x.jsonl" {
+		t.Errorf("parsed = %+v", sessions)
+	}
+}
+
+// An older ccpool rejects the unknown flag at flag parsing; that must surface as
+// ErrNoFacetsUnsupported so the caller can fall back. Any other failure must not.
+func TestListLight_flagRejectionIsRecognised(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("flag provided but not defined: -no-facets\nUsage of list:\n"), errors.New("exit status 2")
+	}
+	if _, err := cli.ListLight(context.Background()); !errors.Is(err, ErrNoFacetsUnsupported) {
+		t.Errorf("err = %v, want ErrNoFacetsUnsupported", err)
+	}
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("config load failed\n"), errors.New("exit status 1")
+	}
+	if _, err := cli.ListLight(context.Background()); err == nil || errors.Is(err, ErrNoFacetsUnsupported) {
+		t.Errorf("err = %v, want a plain failure that is not ErrNoFacetsUnsupported", err)
+	}
+}
+
+// Close without purge omits the --purge flag but still carries --reason handler.
+func TestClose_noPurge_argv(t *testing.T) {
+	cli, got, _ := newSpy()
+	_ = cli.Close(context.Background(), "s", false)
+	if !reflect.DeepEqual((*got)[0], []string{"close", "s", "--reason", "handler"}) {
+		t.Errorf("close (no purge) argv = %v", (*got)[0])
+	}
+}
+
+// Task 5 (ADR 0072): List must decode the close_reason ccpool's own
+// `list --all --json` now emits.
+func TestCLI_ListParsesCloseReason(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"x","state":"working","live":false,"close_reason":"cap_eviction"}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].CloseReason != "cap_eviction" {
+		t.Fatalf("close_reason = %q", got[0].CloseReason)
+	}
+}
+
+// Task 5 (ADR 0072): Capacity shells out to `ccpool capacity --json` and
+// decodes field-for-field into the Capacity struct.
+func TestCLI_Capacity(t *testing.T) {
+	cli, argv, setOut := newSpy()
+	setOut([]byte(`{"max_sessions":6,"live":7,"preserved":5,"counted":2,"free":4}`))
+	got, err := cli.Capacity(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Free != 4 || got.Preserved != 5 {
+		t.Fatalf("got %+v", got)
+	}
+	last := (*argv)[len(*argv)-1]
+	if strings.Join(last, " ") != "capacity --json" {
+		t.Fatalf("argv = %v", last)
+	}
+}
+
+// A hit account usage window arrives as free=0 plus a usage_limit object; an
+// older ccpool that never emits the key leaves UsageLimit nil.
+func TestCLI_CapacityDecodesUsageLimit(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`{"max_sessions":6,"live":0,"preserved":0,"counted":0,"free":0,` +
+		`"usage_limit":{"window":"five_hour","used_pct":100,"resets_at":"2026-10-06T17:00:00Z"}}`))
+	got, err := cli.Capacity(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 10, 6, 17, 0, 0, 0, time.UTC)
+	if got.Free != 0 || got.UsageLimit == nil || got.UsageLimit.Window != "five_hour" ||
+		got.UsageLimit.UsedPct != 100 || !got.UsageLimit.ResetsAt.Equal(want) {
+		t.Fatalf("got %+v (usage_limit %+v), want free=0 and a five_hour limit resetting %v", got, got.UsageLimit, want)
+	}
+
+	setOut([]byte(`{"max_sessions":6,"live":0,"preserved":0,"counted":0,"free":6}`))
+	got, err = cli.Capacity(context.Background())
+	if err != nil || got.UsageLimit != nil {
+		t.Fatalf("got %+v err %v, want nil UsageLimit when the key is absent", got, err)
+	}
+}
+
+// ccpool exit 20 (usage limit hit) is recognized whether it arrives as the typed
+// sentinel or as a raw exit status, and nothing else is mistaken for it.
+func TestIsUsageLimited(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"sentinel", ErrUsageLimited, true},
+		{"wrapped sentinel", fmt.Errorf("ccpool new: %w", ErrUsageLimited), true},
+		{"raw exit 20", fmt.Errorf("ccpool new: %w", &fakeExit{code: 20}), true},
+		{"old exit 8 is not it", &fakeExit{code: 8}, false},
+		{"exit 25 is not it", &fakeExit{code: 25}, false},
+		{"exit 1 is not it", &fakeExit{code: 1}, false},
+		{"nil", nil, false},
+	} {
+		if got := IsUsageLimited(tc.err); got != tc.want {
+			t.Errorf("%s: IsUsageLimited = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// EmitCapacity opts in to metric emission with --emit-metrics; the gate-path
+// Capacity call must never carry that flag (bead pg2-om899.6).
+func TestCLI_EmitCapacityPassesFlagAndCapacityDoesNot(t *testing.T) {
+	cli, argv, setOut := newSpy()
+	setOut([]byte(`{"max_sessions":1}`))
+	if err := cli.EmitCapacity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join((*argv)[len(*argv)-1], " "); got != "capacity --emit-metrics" {
+		t.Fatalf("EmitCapacity argv = %q", got)
+	}
+	if _, err := cli.Capacity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join((*argv)[len(*argv)-1], " "); strings.Contains(got, "emit") {
+		t.Fatalf("Capacity (admission gate) must not emit; argv = %q", got)
+	}
+}
+
+// Task 5 (ADR 0072): a handler-initiated close must always carry --reason
+// handler, whether or not it purges.
+func TestCLI_ClosePassesHandlerReason(t *testing.T) {
+	cli, argv, _ := newSpy()
+	if err := cli.Close(context.Background(), "x", false); err != nil {
+		t.Fatal(err)
+	}
+	last := strings.Join((*argv)[len(*argv)-1], " ")
+	if !strings.Contains(last, "--reason handler") {
+		t.Fatalf("handler-initiated close must carry --reason handler; argv = %q", last)
+	}
+}
+
+// Task 5: a ccpool capacity failure (e.g. a store I/O error) must surface as
+// a non-nil error, not a zero-value Capacity.
+func TestCLI_CapacityErrorSurfaces(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return nil, []byte("capacity: store: disk I/O error"), errors.New("exit status 1")
+	}
+	if _, err := cli.Capacity(context.Background()); err == nil {
+		t.Fatal("want non-nil error when ccpool capacity fails")
+	}
+}
+
+// ccpool now emits idle/errored (was done/failed); pg-router's parse must match.
+func TestList_parsesIdleErroredStates(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"a","state":"idle","live":false},{"external_id":"b","state":"errored","live":false}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].State != StateIdle || got[1].State != StateErrored {
+		t.Errorf("parsed states = %+v (want idle, errored)", got)
+	}
+}
+
+func TestCancel_unconfirmedExit6(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		return nil, []byte("cancel may not have landed"), &fakeExit{code: 24}
+	}
+	err := cli.Cancel(context.Background(), "s")
+	if !errors.Is(err, ErrCancelUnconfirmed) {
+		t.Errorf("exit 24 should map to ErrCancelUnconfirmed, got %v", err)
+	}
+}
+
+func TestCancel_otherErrorNotUnconfirmed(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) { return nil, nil, &fakeExit{code: 1} }
+	err := cli.Cancel(context.Background(), "s")
+	if err == nil || errors.Is(err, ErrCancelUnconfirmed) {
+		t.Errorf("exit 1 must not be ErrCancelUnconfirmed, got %v", err)
+	}
+}
+
+func TestList_parsesCWD(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"name":"s","state":"working","live":true,"transcript_path":"/t.jsonl","cwd":"/wt/repo-pr1"}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].CWD != "/wt/repo-pr1" {
+		t.Errorf("CWD = %q, want /wt/repo-pr1", got[0].CWD)
+	}
+}
+
+// TestList_parsesMeta proves ccpool's own `meta` object (the pgrouter.* tags
+// DispatchMeta stamps at dispatch — ccpool's list.go listJSON.Meta) round-trips
+// into Session.Meta, so a caller can recover the session's own bead id without
+// parsing ExternalID/Name (pg2-5sirm: preShutdown's reconciliation reads
+// s.Meta[MetaKeyBead] this way rather than re-deriving it from the id string).
+func TestList_parsesMeta(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"a","state":"needs_input","live":true,"meta":{"pgrouter.bead":"zr-1.2","pgrouter.role":"review","pgrouter.pool":"pg-router"}}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Meta[MetaKeyBead] != "zr-1.2" {
+		t.Errorf("parsed Meta = %+v, want pgrouter.bead=zr-1.2", got[0].Meta)
+	}
+}
+
+// TestList_absentMetaIsNil proves a session with no `meta` key (the common
+// case for older/non-tagged sessions) decodes to a nil map rather than an
+// error, so a caller can safely index it (s.Meta[MetaKeyBead] on a nil map is
+// "", not a panic).
+func TestList_absentMetaIsNil(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`[{"external_id":"a","state":"idle","live":false}]`))
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].Meta != nil {
+		t.Errorf("Meta = %+v, want nil for a session with no meta key", got[0].Meta)
+	}
+	if got[0].Meta[MetaKeyBead] != "" {
+		t.Errorf("indexing a nil Meta must yield the zero value, not panic")
+	}
+}
+
+// pg2-x6ef: stderr noise emitted alongside the list JSON must not reach the
+// parser. run returns stdout and stderr separately; List reads stdout only.
+func TestList_stderrDoesNotCorruptJSON(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(_ context.Context, _ []string) ([]byte, []byte, error) {
+		return []byte(`[{"name":"s","state":"working","live":true}]`), []byte("WARN: deprecated flag\n"), nil
+	}
+	got, err := cli.List(context.Background())
+	if err != nil {
+		t.Fatalf("stderr must not corrupt list --json: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "s" {
+		t.Errorf("parsed = %+v, want one session named s", got)
+	}
+}
+
+// pg2-x6ef: execCmd must capture stdout and stderr into SEPARATE buffers so a
+// command that writes to both yields clean stdout and surfaces stderr on error.
+func TestExecCmd_separatesStreams(t *testing.T) {
+	stdout, stderr, err := execCmd(context.Background(), "sh", "", []string{"-c", "printf '[]'; echo noise 1>&2; exit 7"})
+	if string(stdout) != "[]" {
+		t.Errorf("stdout = %q, want %q", stdout, "[]")
+	}
+	if !strings.Contains(string(stderr), "noise") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "noise")
+	}
+	var ec exitCoder
+	if !errors.As(err, &ec) || ec.ExitCode() != 7 {
+		t.Errorf("err = %v, want exit-status 7", err)
+	}
+}
+
+func TestExecCmd_success(t *testing.T) {
+	stdout, stderr, err := execCmd(context.Background(), "sh", "", []string{"-c", "printf 'ok'"})
+	if err != nil || string(stdout) != "ok" || len(stderr) != 0 {
+		t.Errorf("stdout=%q stderr=%q err=%v", stdout, stderr, err)
+	}
+}
+
+// pg2-yy42: execCmd uses exec.CommandContext, so a cancelled/expired ctx kills
+// the child instead of hanging the orchestrator/watchdog.
+func TestExecCmd_honorsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, _, err := execCmd(ctx, "sh", "", []string{"-c", "sleep 5"})
+	if err == nil {
+		t.Fatal("a sleeping command under an expired ctx must error")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("ctx cancellation did not kill the child promptly: took %s", elapsed)
+	}
+}
+
+// unsetCCPoolPool removes CCPOOL_POOL from this test's environment (restored
+// when the test ends), so a test of the "no pool override" path measures what
+// execCmd adds rather than the pool the test process itself runs in (bead
+// pg2-q0bi4). A pool session exports it and the nix sandbox does not;
+// t.Setenv registers the restore, as testing has no t.Unsetenv.
+func unsetCCPoolPool(t *testing.T) {
+	t.Helper()
+	t.Setenv("CCPOOL_POOL", "")
+	_ = os.Unsetenv("CCPOOL_POOL")
+}
+
+// pg2-mr0sl: an empty poolDir must leave cmd.Env nil (inherit os.Environ()
+// unchanged) -- execCmd must not force CCPOOL_POOL into the child's
+// environment when no per-role pool override is configured.
+func TestExecCmd_emptyPoolDirInheritsEnvUnchanged(t *testing.T) {
+	unsetCCPoolPool(t)
+	stdout, _, err := execCmd(context.Background(), "sh", "", []string{"-c", "printf '%s' \"${CCPOOL_POOL-<unset>}\""})
+	if err != nil {
+		t.Fatalf("execCmd: %v", err)
+	}
+	if string(stdout) != "<unset>" {
+		t.Errorf("CCPOOL_POOL = %q, want unset (poolDir was empty)", stdout)
+	}
+}
+
+// pg2-mr0sl: a non-empty poolDir must override CCPOOL_POOL in the child's
+// environment, regardless of any value already inherited from this process's
+// own environment -- the mechanism a role's own dedicated ccpool pool relies
+// on (roles.CCPoolConfig.PoolDir -> NewCLIRunnerForPool).
+func TestExecCmd_poolDirOverridesEnv(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/inherited/pool")
+	stdout, _, err := execCmd(context.Background(), "sh", "/role/pool", []string{"-c", "printf '%s' \"$CCPOOL_POOL\""})
+	if err != nil {
+		t.Fatalf("execCmd: %v", err)
+	}
+	if string(stdout) != "/role/pool" {
+		t.Errorf("CCPOOL_POOL = %q, want the poolDir override, not the inherited value", stdout)
+	}
+}
+
+// pg2-mr0sl: NewCLIRunnerForPool must wire poolDir through its UNFAKED run
+// closure into execCmd end to end (not merely store it unused) -- proven by
+// swapping only `bin` (unexported, same-package access) to a real shell and
+// letting the constructed closure actually exec, the same way every OTHER
+// CLIRunner call (Ensure/Send/Cancel/Close/List/Capacity) would.
+func TestNewCLIRunnerForPool_runClosureOverridesEnv(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/inherited/pool")
+	cli := NewCLIRunnerForPool(config.Default(), "/role/pool")
+	cli.bin = "sh"
+	stdout, _, err := cli.run(context.Background(), []string{"-c", "printf '%s' \"$CCPOOL_POOL\""})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if string(stdout) != "/role/pool" {
+		t.Errorf("CCPOOL_POOL = %q, want the poolDir override, not the inherited value", stdout)
+	}
+}
+
+// pg2-mr0sl: the plain NewCLIRunner constructor must still leave cmd.Env
+// untouched end to end (mirrors TestExecCmd_emptyPoolDirInheritsEnvUnchanged,
+// but through the real, unfaked run closure) -- a deployment that never
+// opts into a per-role pool observes byte-for-byte unchanged behavior.
+func TestNewCLIRunner_runClosureInheritsEnvUnchanged(t *testing.T) {
+	unsetCCPoolPool(t)
+	cli := NewCLIRunner(config.Default())
+	cli.bin = "sh"
+	stdout, _, err := cli.run(context.Background(), []string{"-c", "printf '%s' \"${CCPOOL_POOL-<unset>}\""})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if string(stdout) != "<unset>" {
+		t.Errorf("CCPOOL_POOL = %q, want unset", stdout)
+	}
+}
+
+// pg2-q0bi4: the two "inherits env unchanged" tests above assert CCPOOL_POOL is
+// absent from the child, so each must clear whatever the test process carries.
+// The nix sandbox exports none, so only a pool session would notice a test that
+// stopped clearing it; this guard exports a sentinel itself and runs both under
+// it, so such a regression fails in every environment.
+func TestInheritsEnvUnchanged_hermeticToAmbientCCPoolPool(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/ambient/pool-session")
+	t.Run("execCmd", TestExecCmd_emptyPoolDirInheritsEnvUnchanged)
+	t.Run("runClosure", TestNewCLIRunner_runClosureInheritsEnvUnchanged)
+}
+
+// review follow-up: a per-call timeout must name the timeout in the error, not
+// leak a bare "context deadline exceeded".
+func TestCCpool_timeoutNamesTheTimeout(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(ctx context.Context, _ []string) ([]byte, []byte, error) {
+		<-ctx.Done() // a wedged ccpool that only returns once the deadline fires
+		return nil, nil, ctx.Err()
+	}
+	_, err := cli.ccpool(context.Background(), 10*time.Millisecond, "list", "--all", "--json")
+	if err == nil || !strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("timeout should be named in the error, got %v", err)
+	}
+	if !errors.Is(err, ErrCallTimeout) {
+		t.Fatalf("a killed call must match ErrCallTimeout, got %v", err)
+	}
+	cli.run = func(context.Context, []string) ([]byte, []byte, error) { return nil, nil, errors.New("boom") }
+	if _, err := cli.ccpool(context.Background(), time.Second, "list"); err == nil || errors.Is(err, ErrCallTimeout) {
+		t.Fatalf("an ordinary failure must not match ErrCallTimeout, got %v", err)
+	}
+}
+
+// A caller whose own deadline expires before the per-call timeout must not see
+// its cut reported as the per-call timeout.
+func TestCCpool_callerDeadlineIsNotReportedAsCallTimeout(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(ctx context.Context, _ []string) ([]byte, []byte, error) {
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := cli.ccpool(ctx, time.Minute, "list", "--all", "--json")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if errors.Is(err, ErrCallTimeout) {
+		t.Fatalf("a caller deadline must not match ErrCallTimeout: %v", err)
+	}
+	if strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("a caller deadline must not read as a per-call timeout: %v", err)
+	}
+	if !errors.Is(err, ErrCallerDeadline) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want ErrCallerDeadline wrapping the parent's deadline error, got %v", err)
+	}
+}
+
+// review follow-up: long positionals (the full reply prompt) must be elided in
+// error messages so the real diagnostic isn't buried.
+func TestArgSummary_elidesLongArgs(t *testing.T) {
+	long := strings.Repeat("x", 5000)
+	got := argSummary([]string{"reply", "sess", long, "--queue-message"})
+	if strings.Contains(got, long) {
+		t.Errorf("long arg must be elided; got %q", got)
+	}
+	if !strings.Contains(got, "reply sess ") || !strings.Contains(got, "--queue-message") {
+		t.Errorf("short args must be preserved; got %q", got)
+	}
+	if !strings.Contains(got, "<5000 bytes>") {
+		t.Errorf("elision should show the byte count; got %q", got)
+	}
+}
+
+// fakeExit implements the bits of *exec.ExitError errors.As + ExitCode() need.
+type fakeExit struct{ code int }
+
+func (e *fakeExit) Error() string { return fmt.Sprintf("exit status %d", e.code) }
+func (e *fakeExit) ExitCode() int { return e.code }
+
+func TestEnsure_argv_includesMeta(t *testing.T) {
+	var got [][]string
+	cli := &CLIRunner{PermissionMode: "dontAsk"}
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	meta := map[string]string{"pgrouter.role": "worker", "pgrouter.bead": "zr-1", "pgrouter.pool": "pg-router"}
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, meta); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	joined := strings.Join(got[0], " ")
+	for _, want := range []string{
+		"--meta pgrouter.bead=zr-1",
+		"--meta pgrouter.pool=pg-router",
+		"--meta pgrouter.role=worker",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv missing %q; got %v", want, got[0])
+		}
+	}
+	if i, j := strings.Index(joined, "pgrouter.bead"), strings.Index(joined, "pgrouter.pool"); i > j {
+		t.Errorf("--meta keys not sorted: %v", got[0])
+	}
+}
+
+// pg2-qye99.8: CLIRunner.Ensure flags pgrouter.role/pgrouter.pool as ccpool
+// session labels (--label <key>) in the same `ccpool new` call that writes
+// them via --meta, per D8.1. pgrouter.bead is NOT labeled — its value space
+// is effectively unbounded (D9). The --label VALUES must be the real,
+// prefixed --meta key names (pgrouter.role/pgrouter.pool), never the bare
+// design-illustration spelling (role/pool) — a bare key would make
+// MarkAsLabel error "key not found" since only the prefixed keys are ever
+// SetMeta'd (meta.go's MetaKeyRole/MetaKeyPool).
+func TestEnsure_argv_includesLabels(t *testing.T) {
+	var got [][]string
+	cli := &CLIRunner{}
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	meta := DispatchMeta("zr-1", "worker", time.Time{}, 0, "", "")
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, meta); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	joined := strings.Join(got[0], " ")
+	for _, want := range []string{"--label pgrouter.role", "--label pgrouter.pool"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv missing %q; got %v", want, got[0])
+		}
+	}
+	if strings.Contains(joined, "--label pgrouter.bead") {
+		t.Errorf("pgrouter.bead must NOT be labeled (unbounded cardinality, D9); got %v", got[0])
+	}
+	if strings.Contains(joined, "--label role") || strings.Contains(joined, "--label pool") {
+		t.Errorf("labels must use the prefixed meta key names, not bare role/pool; got %v", got[0])
+	}
+}
+
+// A call with no meta (or meta missing role/pool) must omit --label entirely
+// — this must not regress the many existing Ensure tests that pass nil meta.
+func TestEnsure_argv_omitsLabelsWhenMetaAbsent(t *testing.T) {
+	cli, got, _ := newSpy()
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, nil); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	for _, a := range (*got)[0] {
+		if a == "--label" {
+			t.Errorf("argv must omit --label when meta carries no role/pool; got %v", (*got)[0])
+		}
+	}
+}
+
+// SetMeta shells out to `ccpool meta set <external_id> <key> <value>` with no
+// --label (the lease value changes every poll; it must never reach telemetry).
+func TestSetMeta_argv(t *testing.T) {
+	cli, got, _ := newSpy()
+	if err := cli.SetMeta(context.Background(), "ext-1", MetaKeyLeaseUntil, "2026-10-06T12:00:00Z"); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	want := []string{"meta", "set", "ext-1", "pgrouter.lease_until", "2026-10-06T12:00:00Z"}
+	if len(*got) != 1 || !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("argv = %v, want %v", *got, want)
+	}
+}
+
+func TestSetMeta_propagatesError(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(context.Context, []string) ([]byte, []byte, error) {
+		return nil, []byte("no such session"), errors.New("exit 1")
+	}
+	if err := cli.SetMeta(context.Background(), "ext-1", "k", "v"); err == nil {
+		t.Fatal("SetMeta must surface a ccpool failure")
+	}
+}
+
+// pg2-wqi3e: NewCLIRunnerDefaultPool must strip an inherited CCPOOL_POOL from
+// every subprocess call (through the real, unfaked run closure), so ccpool
+// resolves its shared default pool even when this process itself runs against
+// another pool; other inherited variables are untouched.
+func TestNewCLIRunnerDefaultPool_runClosureStripsInheritedPool(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/inherited/pool")
+	t.Setenv("PG_WQI3E_KEEP", "kept")
+	cli := NewCLIRunnerDefaultPool(config.Default())
+	cli.bin = "sh"
+	stdout, _, err := cli.run(context.Background(), []string{"-c", "printf '%s|%s' \"${CCPOOL_POOL-<unset>}\" \"$PG_WQI3E_KEEP\""})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if string(stdout) != "<unset>|kept" {
+		t.Errorf("child env = %q, want CCPOOL_POOL unset and other vars kept", stdout)
+	}
+}
+
+// A launch's env map (the role's sessionEnv, the adapter markers and the item
+// context) reaches `ccpool new` as one --env K=V per key, sorted and unchanged,
+// and the --label set stays exactly pgrouter.role + pgrouter.pool whatever the
+// env carries (pg2-12gr4.8.7; the rollback pin: an older handler still adopts
+// the session).
+func TestEnsure_argv_envUnchangedLabelsUnchanged(t *testing.T) {
+	var got [][]string
+	cli := &CLIRunner{}
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = append(got, args)
+		return nil, nil, nil
+	}
+	env := map[string]string{
+		"PG_ROUTER_ROLE": "worker", "PG_ROUTER_ITEM_ID": "zr-1", "K12_PROBE": "yes", "WITH_EQ": "a=b c",
+	}
+	meta := DispatchMeta("zr-1", "worker", time.Time{}, 0, "", "")
+	if err := cli.Ensure(context.Background(), "s", "", "/r", env, meta); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	var gotEnv, gotLabels []string
+	for i, a := range got[0] {
+		switch a {
+		case "--env":
+			gotEnv = append(gotEnv, got[0][i+1])
+		case "--label":
+			gotLabels = append(gotLabels, got[0][i+1])
+		}
+	}
+	wantEnv := []string{"K12_PROBE=yes", "PG_ROUTER_ITEM_ID=zr-1", "PG_ROUTER_ROLE=worker", "WITH_EQ=a=b c"}
+	if !slices.Equal(gotEnv, wantEnv) {
+		t.Errorf("--env = %v, want %v", gotEnv, wantEnv)
+	}
+	if want := []string{"pgrouter.role", "pgrouter.pool"}; !slices.Equal(gotLabels, want) { // no ids in this meta
+		t.Errorf("--label = %v, want %v", gotLabels, want)
+	}
+}
+
+// The correlation ids are session labels when the meta carries them, so the
+// recorder can index a session by event and dispatch.
+func TestEnsure_labelsCorrelationIDs(t *testing.T) {
+	cli := &CLIRunner{}
+	var got []string
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = args
+		return nil, nil, nil
+	}
+	meta := DispatchMeta("zr-1", "worker", time.Time{}, 0, "evt-7", "")
+	meta[MetaKeyDispatchID] = "dsp-0123456789ab"
+	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, meta); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	var labels, metas []string
+	for i, a := range got {
+		switch a {
+		case "--label":
+			labels = append(labels, got[i+1])
+		case "--meta":
+			metas = append(metas, got[i+1])
+		}
+	}
+	for _, k := range []string{"pgrouter.dispatch_id", "pgrouter.event_id"} {
+		if !slices.Contains(labels, k) {
+			t.Errorf("--label lacks %s: %v", k, labels)
+		}
+	}
+	if !slices.Contains(metas, "pgrouter.dispatch_id=dsp-0123456789ab") || !slices.Contains(metas, "pgrouter.event_id=evt-7") {
+		t.Errorf("--meta lacks the ids: %v", metas)
+	}
+}
+
+// pg2-iznqf3: the reply call's timeout must exceed the confirm-ingest window
+// (the default 90s window was killed at 60s), and non-confirming replies keep
+// the quick-call bound.
+func TestReplyTimeout_exceedsConfirmWindow(t *testing.T) {
+	for _, confirm := range []time.Duration{config.Default().ConfirmIngest, 55 * time.Second, 5 * time.Minute} {
+		if got := replyTimeout(confirm, ModeNoWait); got <= confirm {
+			t.Errorf("replyTimeout(%v, NoWait) = %v, must exceed the confirm window", confirm, got)
+		}
+	}
+	if got := replyTimeout(90*time.Second, ModeNoWait); got != 90*time.Second+confirmCallSlack {
+		t.Errorf("replyTimeout(90s) = %v, want confirm + confirmCallSlack", got)
+	}
+	if got := replyTimeout(90*time.Second, ModeQueue); got != quickCallTimeout {
+		t.Errorf("queue reply timeout = %v, want quickCallTimeout", got)
+	}
+	if got := replyTimeout(0, ModeNoWait); got != quickCallTimeout {
+		t.Errorf("zero-window reply timeout = %v, want quickCallTimeout", got)
+	}
+}
+
+// EmitGauge execs the generic `ccpool emit-gauge` with sorted labels.
+func TestCLI_EmitGaugeArgv(t *testing.T) {
+	cli, argv, _ := newSpy()
+	err := cli.EmitGauge(context.Background(), "ccpool_x", 1.5, map[string]string{"role": "r", "pass": "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "emit-gauge --name ccpool_x --value 1.5 --label pass=p --label role=r"
+	if got := strings.Join((*argv)[len(*argv)-1], " "); got != want {
+		t.Fatalf("EmitGauge argv = %q, want %q", got, want)
+	}
+}
+
+// Version execs `ccpool version` and trims the bare version it prints.
+func TestCLI_VersionArgvAndTrim(t *testing.T) {
+	cli, argv, setOut := newSpy()
+	setOut([]byte("0.0.0-abcd1234\n"))
+	got, err := cli.Version(context.Background())
+	if err != nil || got != "0.0.0-abcd1234" {
+		t.Fatalf("Version = %q, %v", got, err)
+	}
+	if a := strings.Join((*argv)[len(*argv)-1], " "); a != "version" {
+		t.Fatalf("argv = %q", a)
+	}
+}
+
+// pg2-mpabs0: Send itself must bound the ccpool call with replyTimeout, not
+// quickCallTimeout; the helper test above cannot see which one Send passes.
+func TestSend_usesReplyTimeout(t *testing.T) {
+	cases := []struct {
+		name    string
+		mode    SendMode
+		confirm time.Duration
+		want    time.Duration
+	}{
+		{"no-wait confirm", ModeNoWait, 90 * time.Second, 90*time.Second + confirmCallSlack},
+		{"queue keeps quick", ModeQueue, 90 * time.Second, quickCallTimeout},
+		{"no confirm keeps quick", ModeNoWait, 0, quickCallTimeout},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cli := NewCLIRunner(config.Default())
+			cli.ConfirmIngest = tc.confirm
+			var got time.Duration
+			cli.run = func(ctx context.Context, _ []string) ([]byte, []byte, error) {
+				dl, ok := ctx.Deadline()
+				if !ok {
+					t.Fatal("ccpool call has no deadline")
+				}
+				got = time.Until(dl)
+				return nil, nil, nil
+			}
+			if err := cli.Send(context.Background(), "ext-1", "hi", tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			if got > tc.want || got < tc.want-5*time.Second {
+				t.Errorf("Send deadline = %v, want ~%v", got, tc.want)
+			}
+		})
+	}
+}
+
+// EmitCapacityPools must cover every pool in ONE ccpool process: one argv with
+// a --pool-dir per pool, in order.
+func TestCLI_EmitCapacityPoolsIsOneProcess(t *testing.T) {
+	cli, argv, _ := newSpy()
+	if err := cli.EmitCapacityPools(context.Background(), []string{"/p/a", "/p/b"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*argv) != 1 {
+		t.Fatalf("ccpool processes = %d, want 1", len(*argv))
+	}
+	if got := strings.Join((*argv)[0], " "); got != "capacity --emit-metrics --pool-dir /p/a --pool-dir /p/b" {
+		t.Fatalf("argv = %q", got)
+	}
+}
+
+func TestConsumption_argvAndDecode(t *testing.T) {
+	cli, got, setOut := newSpy()
+	setOut([]byte(`{"model":"claude-opus-4-8","input_tokens":1,"output_tokens":2,"cache_creation_tokens":3,"cache_read_tokens":4,"estimated_cost_cents":250,"models":[]}`))
+	s, err := cli.Consumption(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]string{{"consumption", "sess-1", "--json"}}; !reflect.DeepEqual(*got, want) {
+		t.Errorf("argv = %v, want %v", *got, want)
+	}
+	if s.Model != "claude-opus-4-8" || s.InputTokens != 1 || s.OutputTokens != 2 || s.CacheCreationTokens != 3 || s.CacheReadTokens != 4 || s.CostCents != 250 {
+		t.Errorf("snapshot = %+v", s)
+	}
+}
+
+func TestConsumption_badJSONIsAnError(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`not json`))
+	if _, err := cli.Consumption(context.Background(), "s"); err == nil {
+		t.Error("want a decode error")
+	}
+}
+
+// The reply call does a cold resume, a pre-delivery feed Mark and a post-window
+// probe Mark besides the confirm wait; each recorder query can run to its own
+// 30s deadline under load. The call bound MUST leave room for both queries so a
+// slow recorder ends the call as exit 26 instead of the handler killing it
+// (a 30s margin was killed at 2m0s with the recorder up).
+func TestReplyTimeout_marginCoversTwoRecorderQueries(t *testing.T) {
+	const recorderQueryDeadline = 30 * time.Second
+	margin := replyTimeout(90*time.Second, ModeNoWait) - 90*time.Second
+	if margin < 2*recorderQueryDeadline+30*time.Second {
+		t.Errorf("margin over the confirm window = %v, want at least two recorder queries plus delivery", margin)
+	}
+}
+
+// EmitGauges execs ONE `ccpool emit-gauge` carrying every point as JSON.
+func TestCLI_EmitGaugesOneCall(t *testing.T) {
+	cli, argv, _ := newSpy()
+	err := cli.EmitGauges(context.Background(), []GaugePoint{
+		{Name: "ccpool_x", Value: 1.5, Labels: map[string]string{"role": "r"}},
+		{Name: "ccpool_y", Value: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*argv) != 1 {
+		t.Fatalf("calls = %d, want 1", len(*argv))
+	}
+	want := `emit-gauge --point {"name":"ccpool_x","value":1.5,"labels":{"role":"r"}} --point {"name":"ccpool_y","value":2}`
+	if got := strings.Join((*argv)[0], " "); got != want {
+		t.Fatalf("argv = %q, want %q", got, want)
+	}
+	if err := cli.EmitGauges(context.Background(), nil); err != nil || len(*argv) != 1 {
+		t.Fatalf("empty batch must not exec: err=%v calls=%d", err, len(*argv))
+	}
+}
+
+// The ccpool exit codes are a contract with the ccpool CLI (which pins the same
+// numbers): app codes in 20..63, never the shared Busy code 9.
+func TestExitCodeContract(t *testing.T) {
+	for name, c := range map[string][2]int{
+		"usage_limited":     {ExitUsageLimited, 20},
+		"cancel_unconfirm":  {ExitCancelUnconfirmed, 24},
+		"prompt_not_ingest": {ExitPromptNotIngested, 25},
+		"ingest_unknown":    {ExitIngestUnknown, 26},
+	} {
+		if c[0] != c[1] {
+			t.Errorf("%s = %d, want %d", name, c[0], c[1])
+		}
+	}
+	// Old numbers must no longer be read as these outcomes.
+	for _, old := range []int{6, 7, 9} {
+		if _, ok := map[int]bool{ExitCancelUnconfirmed: true, ExitPromptNotIngested: true, ExitIngestUnknown: true}[old]; ok {
+			t.Errorf("old code %d still mapped", old)
+		}
+	}
+}
+
+func TestArgSummary_keepsCwdPathWhole(t *testing.T) {
+	cwd := "/Volumes/gitrepos/example/pg-gwm/pristine/pristine-wt-5/with/extra/depth"
+	if len(cwd) <= 48 {
+		t.Fatal("test path must exceed the elision limit")
+	}
+	got := argSummary([]string{"new", "ext", "--cwd", cwd})
+	if !strings.Contains(got, cwd) {
+		t.Errorf("--cwd value must not be elided, got %q", got)
+	}
+}
+
+// GetMeta shells out to `ccpool meta list <external_id> --json` and decodes the
+// whole map (the lease refresh reads the lease generation from it).
+func TestGetMeta_argvAndDecode(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	var got []string
+	cli.run = func(_ context.Context, args []string) ([]byte, []byte, error) {
+		got = args
+		return []byte(`{"pgrouter.lease_generation":"3","pgrouter.lease_owner":"d-1"}`), nil, nil
+	}
+	m, err := cli.GetMeta(context.Background(), "ext-1")
+	if err != nil {
+		t.Fatalf("GetMeta: %v", err)
+	}
+	if want := []string{"meta", "list", "ext-1", "--json"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("argv = %v, want %v", got, want)
+	}
+	if ParseLeaseGeneration(m) != 3 || m[MetaKeyLeaseOwner] != "d-1" {
+		t.Errorf("decoded meta = %v", m)
+	}
+	cli.run = func(context.Context, []string) ([]byte, []byte, error) { return []byte("not json"), nil, nil }
+	if _, err := cli.GetMeta(context.Background(), "ext-1"); err == nil {
+		t.Error("an undecodable answer must be an error")
+	}
+	cli.run = func(context.Context, []string) ([]byte, []byte, error) {
+		return nil, []byte("no such session"), errors.New("exit 1")
+	}
+	if _, err := cli.GetMeta(context.Background(), "ext-1"); err == nil {
+		t.Error("a ccpool failure must be an error")
+	}
+}

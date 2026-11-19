@@ -195,6 +195,7 @@ func memberSubtrees(root string) (map[string]bool, error) {
 		Members map[string]struct {
 			Cmd      []string `json:"cmd"`
 			Internal []string `json:"internal"`
+			Extra    []string `json:"extra"`
 		} `json:"members"`
 	}
 	if err := json.Unmarshal(b, &m); err != nil {
@@ -207,6 +208,9 @@ func memberSubtrees(root string) (map[string]bool, error) {
 		}
 		for _, i := range mem.Internal {
 			out["internal/"+i] = true
+		}
+		for _, e := range mem.Extra {
+			out[e] = true
 		}
 	}
 	return out, nil

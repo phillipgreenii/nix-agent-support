@@ -1,0 +1,2287 @@
+package executor
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/phillipgreenii/pg-failsig"
+	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
+	"github.com/phillipgreenii/pg-router/internal/handlers/budget"
+	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
+	"github.com/phillipgreenii/pg-router/internal/handlers/complete"
+	"github.com/phillipgreenii/pg-router/internal/handlers/config"
+	"github.com/phillipgreenii/pg-router/internal/handlers/item"
+	"github.com/phillipgreenii/pg-router/internal/handlers/prompt"
+	"github.com/phillipgreenii/pg-router/internal/handlers/report"
+	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
+	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
+	"github.com/phillipgreenii/pg-router/internal/handlers/worktree"
+	"github.com/phillipgreenii/x/gitclient"
+)
+
+// purgeCloseTimeout bounds the abandoned-session purge-close (both attempts).
+const purgeCloseTimeout = 2 * time.Minute
+
+type ccpoolExecutor struct{}
+
+func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps) (report.Result, error) {
+	// The dispatch's own cancel-with-cause: the lease refresh cancels it with
+	// ErrSuperseded when a newer dispatch takes the session over (lease.go).
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	r := &ccpoolRun{deps: deps, cancelDispatch: cancel}
+	res, err := r.run(ctx, d)
+	r.recordOutcome(d, err)
+	return res, err
+}
+
+// ccpoolRun carries Deps so the moved methods keep their original signatures
+// (only o.X → r.deps.X). It exists per-Dispatch; no cross-dispatch state.
+type ccpoolRun struct {
+	deps Deps
+
+	// gwm is this dispatch's pg-gwm lease state (zero when it uses none).
+	gwm gwmState
+
+	// sigMu guards the failure-signature state below (INV-CCH-9).
+	sigMu      sync.Mutex
+	transcript string            // last-seen TranscriptPath of the dispatched session
+	exit       failsig.ExitFacts // last-observed ccpool session facts (state, liveness, close reason)
+	captured   *failsig.Result   // signature captured before teardown; first capture wins
+	// row/rowOK are the session row the most recent poll saw and whether it was
+	// present (guarded by sigMu, set by noteSession/noteAbsent): the needs_input
+	// stall bound (needsinput.go) reads the row waitDone's own poll already
+	// fetched, so it adds no ccpool call.
+	row   ccpool.Session
+	rowOK bool
+	// lightUnsupported: this dispatch's ccpool rejected list --no-facets, so the
+	// wait poll uses the plain List (touched only by the wait loop's goroutine).
+	lightUnsupported bool
+
+	// The outcome record state (INV-CCH-35), touched only by the dispatch's own
+	// goroutine. started: dispatch_start was written (the dispatch is accepted),
+	// startSession its session's external id. finished/waitErr: finishWait ran, and
+	// the wait's end cause. outcomeDone: the failure record (dispatch_result) was
+	// already written, so recordOutcome writes nothing more.
+	started      bool
+	startSession string
+	finished     bool
+	waitErr      error
+	outcomeDone  bool
+
+	// The lease ownership of this dispatch (lease.go): ownerID is its dispatch id,
+	// generation the generation it owns (0 until launch or takeover wrote it,
+	// read by the refresh goroutine), supervisors what the takeover reported.
+	// cancelDispatch ends the dispatch's supervision with a cause; superseded
+	// records that the cause was ErrSuperseded.
+	ownerID        string
+	generation     atomic.Int64
+	supervisors    int
+	cancelDispatch context.CancelCauseFunc
+	superseded     atomic.Bool
+}
+
+// recordOutcome writes the ONE outcome record an accepted dispatch owes after
+// its dispatch_start (INV-CCH-35): the dispatch_result failure record when it
+// failed (already written by recordDispatchFailure for a failed wait, written
+// here for a failure before the wait such as a failed send), else dispatch_end
+// with the outcome that ended it, success included. runErr is Dispatch's own
+// returned error. A dispatch that was never accepted (a decline, a failed launch)
+// has no dispatch_start and so writes none.
+func (r *ccpoolRun) recordOutcome(d DispatchContext, runErr error) {
+	if !r.started || r.outcomeDone {
+		return
+	}
+	r.outcomeDone = true
+	cause := runErr
+	if r.finished {
+		cause = r.waitErr
+	}
+	if outcome, ok := dispatchEndOutcome(cause); ok {
+		emitDispatchEnd(r.deps.Log, d, r.startSession, outcome)
+		return
+	}
+	pool := "default"
+	if d.Role.CCPool != nil && d.Role.CCPool.PoolDir != "" {
+		pool = d.Role.CCPool.PoolDir
+	}
+	emitDispatchFailed(r.deps.Log, d, pool, r.startSession, cause.Error())
+}
+
+// ErrPoolAtCapacity: the pool reported free == 0 — a healthy, expected
+// backpressure signal (the pool is simply full). No bead was mutated and no
+// isolation prepared; the cmd layer maps this to the transport's pre-accept
+// busy decline so the core re-offers the event with backoff (INV-CCH-6, ADR
+// 0072's Decision item 3).
+//
+// Scoped to the capacity.Free == 0 case ONLY (bead pg2-j4uwg): before this
+// bead it ALSO covered the capErr != nil case below, so a genuinely
+// worth-investigating "the capacity query itself is failing" was
+// indistinguishable from this ordinary, expected case — confirmed live
+// 2026-09-22, declined counts climbing into the hundreds while ccpool
+// capacity showed a healthy, simply-full pool. See ErrPoolCapacityUnknown
+// for that now-separate sentinel.
+var ErrPoolAtCapacity = errors.New("ccpool: no free slot")
+
+// ErrPoolCapacityUnknown: the pool's capacity could not be queried at all
+// (capErr != nil) — split off ErrPoolAtCapacity by bead pg2-j4uwg because
+// this case is genuinely worth investigating, unlike ErrPoolAtCapacity's
+// healthy/expected backpressure. No bead was mutated and no isolation
+// prepared here either, and the cmd layer maps THIS sentinel to the SAME
+// transport pre-accept busy decline (INV-CCH-6, ADR 0072's Decision item
+// 3) — the wire-level exit code and the core's retry/backoff cadence are
+// IDENTICAL for either sentinel (INV-FAIL-1: every DeclineReason re-offers
+// alike); only cmd/pg-router-handler-ccpool/dispatch.go's OPTIONAL reply
+// body, and from there pg-router core's declined metric/status breakdown,
+// tell the two apart. Unknown capacity still fails CLOSED here: launching
+// blind is the failure mode the gate exists to stop, and a re-offer costs
+// nothing.
+var ErrPoolCapacityUnknown = errors.New("ccpool: pool capacity unknown")
+
+// ErrLowDisk re-exports internal/worktree.ErrLowDisk under this package's own
+// Err* naming (bead pg2-8vn8t), mirroring ErrPoolAtCapacity/
+// ErrPoolCapacityUnknown just above: a worktree-isolation failure caused by
+// the filesystem running out of room is a transient, SYSTEM-WIDE condition,
+// never a bead-specific defect — the 2026-09-23 incident's repeated
+// 'git worktree add ... exit 128' failures escalated several UNRELATED beads
+// to `human` (one per dispatch that happened to land while the volume was
+// full), which is exactly the noise this sentinel exists to stop. It is the
+// SAME error value as worktree.ErrLowDisk (not a distinct wrapping sentinel),
+// so errors.Is(err, ErrLowDisk) and errors.Is(err, worktree.ErrLowDisk) match
+// identically; this alias exists purely so callers outside this file (e.g.
+// internal/wire's BusyDeclineFor, which already
+// references this package's other two sentinels this same way) never need
+// their own import of internal/worktree just to check it.
+var ErrLowDisk = worktree.ErrLowDisk
+
+// ErrSessionInFlight: an earlier attempt of the same bead and role is in flight
+// (its turn is in progress, or a handler still holds its supervision lease) and
+// this dispatch may not absorb it (INV-CCH-30, ADR 0094's Decision item 4).
+// Nothing was mutated: no bead, no session, no worktree. The cmd layer maps it
+// to the transport's pre-accept busy decline with reason session-in-flight, so
+// the core re-offers the event later; like a full pool it is routine
+// backpressure, and the failure-rate alert excludes that reason.
+var ErrSessionInFlight = errors.New("ccpool: an earlier attempt of this bead and role is in flight")
+
+// ErrPoolUnreadable: the pool's sessions cannot be read (the ccpool list call
+// failed), so the dispatch cannot tell whether an earlier attempt is in flight
+// and, as INV-CCH-30 requires, treats the pool as holding one: it declines and
+// launches nothing. Nothing was mutated. It is a decline like
+// ErrSessionInFlight (same pre-accept busy decline, same re-offer), but it gets
+// its OWN reason, pool-unreadable (bead pg2-s3pjt): an unreadable pool is not
+// routine backpressure, and under session-in-flight the failure-rate alert's
+// exclusion hid a persistently unreadable pool. The failure-rate alert counts
+// pool-unreadable, so it pages when the condition persists.
+var ErrPoolUnreadable = errors.New("ccpool: the pool's sessions cannot be read")
+
+// ErrLaunchFailed: a failure BEFORE ccpool new returned ready (the call failed,
+// timed out, the pane's wrapper failed, or claude died or stalled before ready).
+// It is a pre-accept DECLINE: nothing was delivered, and no bead was mutated
+// (the handler never claims beads; the session does). The abandoned session is
+// purged and its worktree reclaimed first. The cmd layer maps it to exit 9,
+// reason launch-failed, kind fault (INV-CCH-34). A launch failure is not
+// retried per bead: the old launch-failure label stamp and the second-failure human
+// escalation are retired, so a persistently failing launch is seen by the
+// failure-rate alert, never by a label on one bead. The usage-limit-at-launch
+// case is NOT this error: it stays ErrPoolAtCapacity (busy).
+var ErrLaunchFailed = errors.New("ccpool: the session failed before it was ready")
+
+// errSessionNotLive: the session was ready but is no longer live when the nudge
+// is about to be sent. It takes the same post-ready path as a dropped nudge.
+var errSessionNotLive = errors.New("ccpool: the session is not live")
+
+// LaunchFailedError is the error run returns for an ErrLaunchFailed decline.
+type LaunchFailedError struct {
+	// Tail is the ccpool new error text after failsig.Redact. It is NOT bounded
+	// here: the decline writer truncates it to the wire's detail bound.
+	Tail string
+	// Err is the underlying launch error.
+	Err error
+}
+
+// Error reports the underlying launch error.
+func (e *LaunchFailedError) Error() string { return "launch failed: " + e.Err.Error() }
+
+// Unwrap returns the underlying launch error.
+func (e *LaunchFailedError) Unwrap() error { return e.Err }
+
+// Is reports whether target is ErrLaunchFailed.
+func (e *LaunchFailedError) Is(target error) bool { return target == ErrLaunchFailed }
+
+// run is the ccpool dispatch: Ensure a fresh per-attempt session, Send the
+// rendered nudge (async), then wait for completion — racing the budget watchdog when
+// the role carries a finite budget. The session is addressed by ExternalID; the
+// stable DisplayName is passed only as ccpool --name.
+func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, error) {
+	r.ownerID = d.DispatchID
+	if r.ownerID == "" {
+		r.ownerID = r.deps.ExternalID
+	}
+	cc := d.Role.CCPool
+	display := d.Role.DisplayName(r.deps.Cfg.SessionPrefix, d.Item.ID)
+
+	// Fresh session by default (INV-CCH-30, ADR 0094): look at every session the
+	// pool already holds for this bead and role (the ccpool --name label is
+	// stable per bead and role across attempts, unlike the per-attempt
+	// ExternalID), BEFORE the admission gate, and decide whether this dispatch
+	// absorbs the same event's turn in progress (the one exception, which keeps
+	// INV-CCH-2's and INV-EVT-2's duplicate tolerance), declines because another
+	// attempt is in flight, or launches its own session after closing any
+	// leftover nobody supervises.
+	plan := r.planPriorSessions(ctx, d, display)
+	switch plan.verdict {
+	case verdictDecline:
+		if plan.session == "" {
+			// An unreadable pool declines the same way (it counts as one in flight),
+			// but unlike routine backpressure it is worth an operator's look: it
+			// carries its own reason (pool-unreadable), which the failure-rate
+			// alert counts, and is logged at WARN.
+			slog.Warn("dispatch declined: the pool's sessions cannot be read; treating it as an attempt in flight",
+				"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "why", plan.why)
+			return report.Result{}, fmt.Errorf("%w: %s", ErrPoolUnreadable, plan.describe())
+		}
+		slog.Info("dispatch declined: an earlier attempt of this bead and role is in flight",
+			"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "session", plan.session, "why", plan.why)
+		return report.Result{}, fmt.Errorf("%w: %s", ErrSessionInFlight, plan.describe())
+	case verdictAbsorb:
+		// Take the per-session lock and refresh the supervision lease BEFORE
+		// waiting, so a concurrent orphan reconcile either already finished (the
+		// row is then closed and no longer absorbable: decline, and let the next
+		// offer decide afresh) or sees the fresh lease and stands down (INV-CCH-18).
+		existing, ok, err := r.takeOverForAbsorb(ctx, plan.absorb, d.EventID)
+		if err != nil {
+			return report.Result{}, fmt.Errorf("absorb %s: %w", display, err)
+		}
+		if !ok {
+			slog.Info("dispatch declined: the turn to absorb changed while taking it over",
+				"role", d.Role.Name, "bead", d.Item.ID, "session", plan.absorb.ExternalID)
+			return report.Result{}, fmt.Errorf("%w: session %s changed while being taken over", ErrSessionInFlight, plan.absorb.ExternalID)
+		}
+		return r.absorbDuplicate(ctx, d, existing)
+	}
+	for _, s := range plan.leftovers {
+		if err := r.closeLeftover(ctx, d, s); err != nil {
+			return report.Result{}, err
+		}
+	}
+
+	// Admission gate (INV-CCH-6, ADR 0072's Decision item 3): consult the
+	// pool's capacity before preparing isolation or launching anything. No
+	// bead is mutated and no worktree is prepared on this path. Unknown
+	// capacity fails CLOSED — treated as full, never as "launch anyway" —
+	// but as its OWN sentinel (ErrPoolCapacityUnknown, bead pg2-j4uwg), kept
+	// distinct from the capacity.Free == 0 branch just below.
+	capacity, capErr := r.deps.CC.Capacity(ctx)
+	if capErr != nil {
+		slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
+		return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
+	}
+	// Capacity pressure (INV-CCH-41): a full pool with no
+	// usage limit in force is reconciled once (closed-bead sessions) and capacity
+	// is read once more. The decline below keeps its reason; only the detail says a
+	// reconcile was tried.
+	reconcileNote := ""
+	if capacity.Free == 0 && capacity.UsageLimit == nil && r.admissionActive() {
+		capacity, reconcileNote, capErr = r.reconcileForCapacity(ctx, d, capacity)
+		if capErr != nil {
+			slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
+			return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
+		}
+	}
+	if capacity.Free == 0 {
+		if ul := capacity.UsageLimit; ul != nil {
+			// The account's usage window is at its limit, so ccpool reports no free
+			// slot whatever the occupancy. This is the SAME healthy backpressure as a
+			// full pool (and keeps the same at-capacity tag, so the failure-rate alert
+			// that excludes it stays quiet for the hours a window takes to reset): the
+			// core re-offers the event with backoff until the window clears or the
+			// event's TTL expires. No bead is touched.
+			slog.Info("dispatch declined: usage limit hit", "role", d.Role.Name, "bead", d.Item.ID,
+				"window", ul.Window, "used_pct", ul.UsedPct, "resets_at", ul.ResetsAt)
+			return report.Result{}, fmt.Errorf("%w: usage limit %s hit until %s",
+				ErrPoolAtCapacity, ul.Window, ul.ResetsAt.Format(time.RFC3339))
+		}
+		slog.Info("dispatch declined: pool at capacity", "role", d.Role.Name, "bead", d.Item.ID,
+			"counted", capacity.Counted, "max", capacity.MaxSessions, "preserved", capacity.Preserved)
+		detail := fmt.Sprintf("counted=%d max=%d preserved=%d", capacity.Counted, capacity.MaxSessions, capacity.Preserved)
+		if reconcileNote != "" {
+			detail += " (" + reconcileNote + ")"
+		}
+		return report.Result{}, fmt.Errorf("%w: %s", ErrPoolAtCapacity, detail)
+	}
+
+	// Prepare WORKSPACE_ROOT per the role's isolation strategy (roles.IsolationConfig;
+	// default "worktree" — a fresh per-bead worktree so the worker never runs on a
+	// stale unrelated branch, pg2-yukh root cause #2). On failure, fail the
+	// dispatch — running in the shared monorepo is
+	// exactly the bug the worktree default is fixing, so we do NOT silently fall
+	// back to RepoRoot for that strategy (a role using "none" gets RepoRoot on
+	// purpose, by its own explicit config, not as a fallback).
+	//
+	// Remember whether the per-bead worktree already existed: only a worktree
+	// THIS dispatch created is reclaimed if the dispatch dies before a session
+	// takes ownership of it (reclaimAbandonedWorktree, pg2-w3usi).
+	//
+	// Hold the per-bead worktree lock (SHARED) from before the worktree exists
+	// until this dispatch returns, so the worktree-keyed sweep can tell a worktree
+	// a live dispatch is using from one a killed handler leaked (pg2-ganjb,
+	// INV-CCH-19). A SIGKILL drops the lock with the process.
+	useGWM := r.useGWM(cc)
+	if usesWorktreeIsolation(cc.Isolation) && !useGWM {
+		// Before the shared lock (the examination takes the lock exclusively): a
+		// worktree this bead's own earlier attempt leaked is reclaimed, under the
+		// sweep's guards, rather than reused as if it were fresh (INV-CCH-19).
+		if r.admissionActive() {
+			if err := r.deps.Reconciler.ReclaimLeakedWorktree(ctx, d.Item.ID); err != nil {
+				slog.Warn("own-bead worktree check failed; continuing", "bead", d.Item.ID, "err", err)
+			}
+		}
+		defer r.holdWorktreeLock(ctx, d.Item.ID)()
+	}
+	preexisting := usesWorktreeIsolation(cc.Isolation) && !useGWM && r.worktreePathExists(d.Item.ID)
+	// Free-space floor (INV-CCH-8): creating a worktree writes gigabytes, so a
+	// NEW worktree is only started while the volume keeps at least
+	// Cfg.MinFreeBytes free, above the floors other tools on the machine act on.
+	// A worktree that already exists is reused and adds nothing.
+	if usesWorktreeIsolation(cc.Isolation) && !useGWM && !preexisting {
+		if _, fErr := r.deps.checkFreeSpace(); fErr != nil {
+			slog.Warn("dispatch declined: free space below the worktree floor", "role", d.Role.Name, "bead", d.Item.ID, "err", fErr)
+			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, fErr)
+		}
+	}
+	var wt string
+	var wtErr error
+	if useGWM {
+		var res report.Result
+		wt, res, wtErr = r.leaseWorktree(ctx, d, cc)
+		if wtErr != nil {
+			return res, wtErr
+		}
+		// A renewed lease is a worktree an earlier attempt already used.
+		preexisting = r.gwm.lease.Renewed
+	} else {
+		wt, wtErr = newIsolation(cc.Isolation, r.deps).Ensure(ctx, d.Item.ID)
+	}
+	if wtErr != nil {
+		if errors.Is(wtErr, ErrLowDisk) {
+			// Low disk is the ONE isolation failure this function does NOT treat
+			// like an ordinary launch failure (bead pg2-8vn8t): it is a
+			// transient, system-wide condition that will hit whichever bead
+			// happens to dispatch next, not a defect in THIS bead — escalating
+			// it per-bead (below) is exactly what flooded several unrelated
+			// beads with `human` during the 2026-09-23 incident. Logged clearly
+			// (distinguishable from a generic exit-128 at a glance, unlike
+			// before this fix) and returned with no bead mutation at all, so the
+			// caller (cmd/pg-router-handler-ccpool/dispatch.go's
+			// wire.BusyDeclineFor) can map it to a pre-accept decline instead
+			// — the core simply re-offers later with backoff, same as
+			// ErrPoolAtCapacity.
+			slog.Warn("dispatch declined: low disk space preparing isolation", "role", d.Role.Name, "bead", d.Item.ID, "err", wtErr)
+			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
+		}
+		// Any other isolation failure (a per-bead worktree defect, before any
+		// session exists) is NOT a decline: it is an accepted failure (exit 1)
+		// that mutates no bead and carries no label. The old launch-failure label
+		// stamp and the second-failure human escalation are retired.
+		return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
+	}
+
+	// Handler-side pre-fetch (bead pg2-hh32y): pin the worktree to the item's
+	// commit and write the diff BEFORE the session launches, so neither the
+	// time nor a pool slot is spent on it. Best effort; see prefetch.go.
+	if pf := cc.Isolation.Prefetch; pf != nil && usesWorktreeIsolation(cc.Isolation) {
+		r.prefetch(ctx, *pf, d, wt)
+	}
+
+	// The launch env (INV-CCH-32/33). This is the ONE launch path (a resume goes
+	// through it too), so every launch carries the role's CURRENT sessionEnv. The
+	// sessionEnv entries are passed through uninterpreted and go in first: the
+	// adapter markers and the item context are set after them and so always win
+	// (loadRole already rejects a sessionEnv key that collides with one).
+	env := make(map[string]string, len(d.Role.SessionEnv)+6)
+	for k, v := range d.Role.SessionEnv {
+		env[k] = v
+	}
+	for k, v := range itemContextEnv(d.Role.Name, d.Item, d.EventID, d.DispatchID) {
+		env[k] = v
+	}
+	env["BEADS_ACTOR"] = cc.Actor
+	// BEADS_DIR stays repo-rooted: worktrees share .git but the beads dolt store
+	// is repo-rooted, so the worker must read/write the SAME bead store, just on
+	// its own working tree (pg2-yukh).
+	env["BEADS_DIR"] = beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads"
+	env["WORKSPACE_ROOT"] = wt
+	meta := ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))
+	if d.DispatchID != "" {
+		meta[ccpool.MetaKeyDispatchID] = d.DispatchID
+	}
+	r.gwmMeta(meta)
+	if r.deps.Cfg.LeaseTTL > 0 {
+		// The first owner of a new session: generation 1, one supervisor.
+		ccpool.StampLeaseOwner(meta, r.ownerID)
+		r.generation.Store(1)
+		r.supervisors = 1
+	}
+	if cc.Isolation.Type == BeadWorktreeIsolation {
+		// The directory is not this handler's: every teardown path leaves it alone
+		// (bead pg2-b49ydt, ccpool.MetaKeyKeepWorktree).
+		meta[ccpool.MetaKeyKeepWorktree] = "1"
+	}
+	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, meta); err != nil {
+		// Could not create a READY session. The bead was never dispatched and no
+		// bead is mutated here (the handler never claims beads; the session does).
+		// Whatever the failure was (a failed or timed-out ccpool new, a wrapper
+		// failure in the pane, claude dying or stalling before ready), it is a
+		// pre-accept decline below (INV-CCH-34), unless the handler's own context
+		// was cancelled or the usage window filled.
+		//
+		// Best-effort purge-close the abandoned session (pg2-u2v2p): `ccpool new`
+		// may have already inserted a store row (state=starting) before it failed
+		// or timed out waiting for ready ("did not reach ready before timeout
+		// (state=starting)") — ccpool never auto-reaps a session nobody explicitly
+		// closed. Left alone, that row stays state=starting, live=true forever,
+		// leaking pool capacity (the zombie-session incident this bead fixes).
+		// Purge (not a soft close) since a session that never reached ready has
+		// no transcript and nothing resumable worth preserving. If ensure never
+		// got far enough to create a row at all, ccpool close on an unknown
+		// external_id just errors, which this ignores exactly like every other
+		// best-effort Close call in this file.
+		r.purgeAbandonedSession(ctx, d.Item.ID)
+		// The worktree created just above has no session to own it now, so no
+		// reconcile keyed on a session row can ever find it (pg2-w3usi).
+		r.reclaimAbandonedWorktree(ctx, cc, d.Item.ID, wt, !preexisting)
+		if ccpool.IsUsageLimited(err) {
+			// ccpool declined the launch because the account's usage window filled
+			// between the capacity pre-check and `new` (exit 20). That is "not right
+			// now", never a defect of THIS bead: no launch-failure label, no
+			// escalation to human. The abandoned session and worktree are already
+			// reclaimed above; the busy decline re-offers the event with backoff.
+			slog.Info("dispatch declined: usage limit hit at launch", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
+			return report.Result{}, fmt.Errorf("%w: ensure %s: %v", ErrPoolAtCapacity, r.deps.ExternalID, err)
+		}
+		launchErr := fmt.Errorf("ensure %s: %w", r.deps.ExternalID, err)
+		if ctx.Err() != nil {
+			// The handler's own context is cancelled (shutdown): no decline. Core
+			// checks busy before shutdown in Offer, so a shutdown declined here
+			// would be counted as a fault. The error returns as a plain failure.
+			return report.Result{}, launchErr
+		}
+		slog.Warn("dispatch declined: the session failed before it was ready", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
+		return report.Result{}, &LaunchFailedError{Tail: failsig.Redact(err.Error()), Err: launchErr}
+	}
+	// The dispatch is accepted once ccpool new returned ready (INV-CCH-35).
+	r.emitCCPoolStart(d, RouteLaunched, r.deps.ExternalID)
+	// From here until Dispatch returns (Send, the wait, the watchdog, the
+	// worktree cleanup's quiet wait and the settled-session close) a background
+	// ticker keeps the supervision lease fresh, so a later dispatch can tell this
+	// live session from an orphan (INV-CCH-18).
+	defer r.startLease(ctx, r.deps.ExternalID)()
+	nudge := r.renderNudge(cc, d, wt)
+	// Every send through ccpool reply first checks the session is live (INV-CCH-38):
+	// reply resumes a cold session with an EMPTY env. The session was ready, so a
+	// not-live one takes the post-ready failure path below (the exit-7 branch),
+	// as an accepted dispatch. The check-then-send race is accepted.
+	var err error
+	if r.sessionLive(ctx, r.deps.ExternalID) {
+		err = r.deps.CC.Send(ctx, r.deps.ExternalID, nudge, ccpool.ModeNoWait)
+	} else {
+		slog.Warn("nudge not sent: the session is not live", "session", r.deps.ExternalID, "bead", d.Item.ID)
+		err = errSessionNotLive
+	}
+	if err != nil && ccpool.IsIngestUnknown(err) {
+		// The recorder could not confirm or refute ingestion (feed timeout, or the
+		// recorder unavailable or lagging under load): the prompt was delivered and
+		// the model may already be working, so this is neither a dropped nudge nor
+		// a send failure. Closing the session and unclaiming the bead on it killed
+		// working sessions and re-dispatched the same bead. Carry on as if the send
+		// succeeded: the wait and the budget watchdog below catch a session that
+		// really never started.
+		slog.Warn("nudge ingestion unknown: the recorder could not confirm it; leaving the session and the claim intact",
+			"session", r.deps.ExternalID, "bead", d.Item.ID, "err", err)
+		err = nil
+	}
+	if err != nil {
+		var res report.Result
+		// A confirmed dropped nudge (exit 7): the model never ingested the task, so
+		// hand the bead back unclaimed regardless of on_dispatch_fail — leaving it
+		// claimed would let the budget watchdog later nudge a context-less model
+		// (the pg2-yukh incident). The session never did anything, so no other bead
+		// can have been touched.
+		if ccpool.IsNotIngested(err) || errors.Is(err, errSessionNotLive) {
+			// The session never took the task: close it (reason handler, via
+			// the CLI runner) so a ready-but-empty row does not hold a
+			// counted slot until idle_ttl — cap eviction no longer reclaims
+			// ready rows (ADR 0072's Decision item 2).
+			r.closeFailedDispatchSession(ctx, d.Item.ID)
+			released := r.releaseAfterFailedSend(ctx, d.Item.ID)
+			// The session did nothing, so the worktree created for it is
+			// reclaimed too (pg2-w3usi); reclaimAbandonedWorktree skips it if
+			// the Close above did not actually stop the session.
+			r.reclaimAbandonedWorktree(ctx, cc, d.Item.ID, wt, !preexisting)
+			if released {
+				res = failureAction(report.Unclaimed, d.Item.ID)
+			}
+			return res, fmt.Errorf("send %s: prompt not ingested (the model started no turn within the confirm window, or the session was not live; session closed, claim released: %v): %w", r.deps.ExternalID, notIngestedCause(err), err)
+		}
+		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
+		if cc.OnDispatchFail == roles.DispatchUnclaim {
+			if r.releaseAfterFailedSend(ctx, d.Item.ID) {
+				res = failureAction(report.Unclaimed, d.Item.ID)
+			}
+		}
+		return res, fmt.Errorf("send %s: %w", r.deps.ExternalID, err)
+	}
+	// A finite budget => run the watchdog (it races waitDone); unlimited => no
+	// watchdog, so no race and waitDone always owns the outcome.
+	var werr error
+	if budgetUnlimited(cc.Budget) {
+		werr = r.waitDone(ctx, nil, d, r.deps.ExternalID)
+	} else {
+		werr = r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID, wt, time.Time{})
+	}
+	return r.finishWait(ctx, cc, d, r.deps.ExternalID, wt, werr)
+}
+
+// purgeAbandonedSession purge-closes the session of a failed launch and, unlike
+// the other best-effort Close calls in this file, does NOT discard the result
+// (pg2-rkjbu): a failed close left the session to reach ready AFTER the launch
+// was reported failed (2026-09-29 incident), so a failure is logged with its
+// error and retried once. The close runs on a context detached from ctx's
+// cancellation, since the launch failure is often ctx expiry ("did not reach
+// ready before timeout") and a close on a dead ctx would fail for that reason
+// alone. A close that still fails after the retry is logged at Error level.
+func (r *ccpoolRun) purgeAbandonedSession(ctx context.Context, beadID string) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), purgeCloseTimeout)
+	defer cancel()
+	err := r.deps.CC.Close(cctx, r.deps.ExternalID, true)
+	if err == nil {
+		return
+	}
+	slog.Warn("purge-close of abandoned session failed; retrying once",
+		"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
+	if err = r.deps.CC.Close(cctx, r.deps.ExternalID, true); err != nil {
+		slog.Error("purge-close of abandoned session failed after retry; session may still be live and reach ready",
+			"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
+	}
+}
+
+// closeFailedDispatchSession closes the session of a dispatch whose nudge never
+// took, and unlike a best-effort close does NOT discard the result: a failed
+// close leaves a ready-but-empty session holding a pool slot until idle_ttl (it
+// also depends on the recorder), so a failure is logged with its error and
+// retried once; one that still fails is logged at Error level. The close runs on
+// a context detached from ctx's cancellation, as in purgeAbandonedSession.
+func (r *ccpoolRun) closeFailedDispatchSession(ctx context.Context, beadID string) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), purgeCloseTimeout)
+	defer cancel()
+	err := r.deps.CC.Close(cctx, r.deps.ExternalID, false)
+	if err == nil {
+		return
+	}
+	slog.Warn("close of the session after a failed dispatch failed; retrying once",
+		"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
+	if err = r.deps.CC.Close(cctx, r.deps.ExternalID, false); err != nil {
+		slog.Error("close of the session after a failed dispatch failed after retry; session may still hold a pool slot",
+			"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
+	}
+}
+
+// worktreePathExists reports whether the per-bead worktree directory for
+// beadID is already on disk (worktree.Ensure keys it as WorktreeDir/<beadID>).
+// Read BEFORE Ensure to tell a worktree this dispatch creates from a reused
+// one. A stat error other than "does not exist" counts as existing: it fails
+// toward NOT reclaiming.
+func (r *ccpoolRun) worktreePathExists(beadID string) bool {
+	_, err := os.Stat(filepath.Join(r.deps.Cfg.WorktreeDir, beadID))
+	return err == nil || !errors.Is(err, fs.ErrNotExist)
+}
+
+// reclaimAbandonedWorktree removes the per-bead worktree and pg-router/<bead>
+// anchor branch that run() created via isolation.Ensure when the dispatch
+// returns early, before any session took ownership of them (pg2-w3usi):
+// CC.Ensure failed or was cancelled (ctx expiry, handler SIGTERM), or the
+// nudge was confirmed dropped. Every other cleanup keys on a session row
+// (finishWait; the dispatch-time and shutdown reconciles), and by construction
+// no row exists for such a worktree, so without this it leaked forever.
+//
+// Guards: createdHere must be true (a worktree that pre-existed this dispatch
+// may carry a previous attempt's commits and is left to finishWait or the
+// reconciles); a session row for this dispatch that is still live, or that
+// cannot be read, is never deprived of its working directory; everything
+// else is cleanupWorktree's own (needs_input, live peer, quiet window,
+// RemoveWorktree force=false so git refuses a dirty tree, branch deleted only
+// after the worktree is gone). Runs on a context detached from ctx's
+// cancellation, since the early return is often caused by ctx expiry itself
+// and every git/ccpool call on a dead ctx would fail for that reason alone.
+// Fails soft like cleanupWorktree.
+//
+// A SIGKILLed handler runs none of this; that window is covered by the
+// worktree-keyed sweep (cmd/pg-router-handler-ccpool/worktreesweep.go,
+// pg2-ganjb, INV-CCH-19), which keys on the worktree rather than a session row.
+func (r *ccpoolRun) reclaimAbandonedWorktree(ctx context.Context, cc *roles.CCPoolConfig, beadID, wt string, createdHere bool) {
+	if wt == "" || !createdHere || !usesWorktreeIsolation(cc.Isolation) {
+		return
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), purgeCloseTimeout)
+	defer cancel()
+	name := r.deps.ExternalID
+	sessions, err := r.deps.CC.List(cctx)
+	if err != nil {
+		slog.Warn("dispatch: abandoned worktree left for next sweep -- session list failed",
+			"session", name, "bead", beadID, "worktree", wt, "err", err)
+		return
+	}
+	for _, s := range sessions {
+		if s.ExternalID == name && s.Live {
+			slog.Warn("dispatch: abandoned worktree kept -- its session is still live",
+				"session", name, "bead", beadID, "worktree", wt)
+			return
+		}
+	}
+	slog.Info("dispatch: reclaiming worktree of a dispatch that never reached a running session",
+		"session", name, "bead", beadID, "worktree", wt)
+	r.cleanupWorktree(cctx, cc, name, beadID, wt)
+}
+
+// waitFailureResult maps a wait-path error to the verb actually applied to the
+// bead: a budget hard-stop (watchdog won) always unclaimed; an external close
+// (ErrExternallyClosed) unclaimed, or escalated when it was the second
+// consecutive strike; an unclaimed end of a close-or-release role
+// (ErrUnclaimedEnd) unclaimed on its first strike, escalated on its second; a
+// peer-held bead (ErrPeerHeld) no verb at all; any other failure went through fail →
+// complete.OnFailure(OnFailure). nil/ctx errors → no verb. (pg2-kj7j, INV-CCH-7)
+func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err error) report.Result {
+	if err == nil {
+		return report.Result{}
+	}
+	if errors.Is(err, watchdog.ErrBudgetExceeded) {
+		return failureAction(report.Unclaimed, beadID)
+	}
+	if errors.Is(err, ErrPeerHeld) {
+		// A peer holds the bead: no verb, and no on_failure (INV-CCH-28).
+		return report.Result{}
+	}
+	if errors.Is(err, ErrUnclaimedEnd) {
+		var ue *unclaimedEnd
+		if errors.As(err, &ue) && ue.exempt {
+			// A usage or spend limit or an API outage (INV-CCH-28): no strike and
+			// no bead write, so no verb.
+			return report.Result{}
+		}
+		if ue != nil && ue.escalated {
+			return failureAction(report.Escalated, beadID)
+		}
+		return failureAction(report.Unclaimed, beadID)
+	}
+	if errors.Is(err, ErrNeedsInputStalled) {
+		// The stall bound (INV-CCH-29) released the claim in one call (Unclaimed),
+		// added human with the release on the second consecutive strike (Escalated),
+		// or wrote nothing to the bead (no verb).
+		var ns *needsInputStalled
+		switch {
+		case errors.As(err, &ns) && ns.escalated:
+			return failureAction(report.Escalated, beadID)
+		case ns != nil && ns.released:
+			return failureAction(report.Unclaimed, beadID)
+		}
+		return report.Result{}
+	}
+	if errors.Is(err, ErrExternallyClosed) {
+		var ec *externallyClosed
+		if errors.As(err, &ec) && ec.escalated {
+			return failureAction(report.Escalated, beadID)
+		}
+		if ec != nil && ec.releaseErr != nil {
+			// The release did not land, so no unclaim verb is claimed (pg2-ybkav).
+			return report.Result{}
+		}
+		return failureAction(report.Unclaimed, beadID)
+	}
+	if errors.Is(err, ErrSessionDied) {
+		// complete.OnDeath released the claim under either on_failure, so the
+		// unclaim verb is reported; add-human adds its escalation too
+		// (pg2-0fsuu). When the release itself failed, nothing was written
+		// (the label rides the same update), so no verb is claimed (pg2-qyc3h).
+		var sd *sessionDied
+		if errors.As(err, &sd) && sd.releaseErr != nil {
+			return report.Result{}
+		}
+		res := failureAction(report.Unclaimed, beadID)
+		if cc.OnFailure == roles.AddHuman && (sd == nil || !sd.exempt) {
+			res.Actions = append([]report.Action{{Verb: report.Escalated, Refs: res.Actions[0].Refs}}, res.Actions...)
+		}
+		return res
+	}
+	switch cc.OnFailure {
+	case roles.Unclaim:
+		return failureAction(report.Unclaimed, beadID)
+	case roles.AddHuman:
+		return failureAction(report.Escalated, beadID)
+	}
+	return report.Result{}
+}
+
+// budgetWaitMargin is how long past a role's time budget waitDone keeps waiting
+// (INV-CCH-27): the budget watchdog's hard stop and the session's own wrap-up
+// need room to land before the wait gives up and applies on_failure.
+const budgetWaitMargin = 10 * time.Minute
+
+// effectiveMaxWait is waitDone's deadline for a ccpool role: max(Cfg.MaxWait,
+// budget.time + 10m) when the role has a time budget, else Cfg.MaxWait
+// unchanged (INV-CCH-27). Derived only: no per-role knob. Without it a role
+// whose time budget is longer than MaxWait would be failed (on_failure) while
+// its live session still held the bead.
+func effectiveMaxWait(cfg config.Config, cc *roles.CCPoolConfig) time.Duration {
+	if cc == nil || cc.Budget.Time <= 0 {
+		return cfg.MaxWait
+	}
+	return max(cfg.MaxWait, cc.Budget.Time+budgetWaitMargin)
+}
+
+// budgetUnlimited reports whether a budget imposes no finite bound (so no watchdog
+// is needed and no budget prompt-line is appended).
+func budgetUnlimited(b budget.Budget) bool {
+	return b.Tokens.Unlimited() && b.Cost.Unlimited() && b.Time <= 0
+}
+
+// finishWait is run()/absorbDuplicate()'s shared tail: classify werr into the
+// verb actually applied to the bead (waitFailureResult, unchanged), and — as
+// the SAME step — run this dispatch's terminal-outcome worktree cleanup
+// (pg2-4roho decision item 1's "primary fix"). werr's three possible shapes
+// (nil/success, a complete.OnFailure-driven failure, or watchdog.
+// ErrBudgetExceeded) are exactly the "success, failure, OR timeout" outcomes
+// the decision names as "already distinguished elsewhere in this code" — one
+// cleanupWorktree call here covers all three, rather than three separate call
+// sites.
+//
+// It then closes (non-purge) the settled session this dispatch launched or
+// absorbed (closeSettledSession, INV-CCH-17, ADR 0082), so a finished session
+// does not hold a counted slot of a max_sessions=1 pool until idle_ttl.
+func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
+	if r.superseded.Load() {
+		// A newer dispatch took this session over (lease.go): stop without a
+		// terminal action -- no session close, no worktree removal, no failure
+		// report. The newer dispatch owns the session's end.
+		r.finished, r.waitErr = true, ErrSuperseded
+		return report.Result{}, fmt.Errorf("session %s: %w", name, ErrSuperseded)
+	}
+	lost := r.gwm.lost.Load() && werr == nil
+	if lost {
+		werr = ErrWorktreeLost
+	}
+	r.finished, r.waitErr = true, werr
+	r.recordDispatchFailure(d, name, werr)
+	// The settled session is closed BEFORE the worktree is removed, so its own idle
+	// process is gone when the process-working-directory guard looks (INV-CCH-15,
+	// INV-CCH-17); the quiet verdict computed by the first step is passed on.
+	q, proceed := r.prepareWorktreeCleanup(ctx, cc, name, wt)
+	r.closeSettledSession(ctx, cc, d.Item.ID, name, werr, q)
+	switch {
+	case r.gwmOn():
+		r.gwmSessionEnd(ctx, cc, name, proceed)
+	case proceed:
+		r.removeWorktree(ctx, name, d.Item.ID, wt)
+	}
+	if lost {
+		// The worktree went away under a session that otherwise finished: a
+		// dispatch failure, with the role's on_dispatch_fail action.
+		var res report.Result
+		if cc.OnDispatchFail == roles.DispatchUnclaim && r.releaseAfterFailedSend(ctx, d.Item.ID) {
+			res = failureAction(report.Unclaimed, d.Item.ID)
+		}
+		return res, werr
+	}
+	if errors.Is(werr, ErrPeerHeld) {
+		// Another actor holds the bead (close-or-release, INV-CCH-28): the dispatch
+		// wrote nothing to it and clears nothing on it, and it is not a failure of
+		// this session, so it reports success with no verb.
+		return r.waitFailureResult(cc, d.Item.ID, werr), nil
+	}
+	if werr == nil {
+		if cc.Completion == roles.CloseOrRelease {
+			// A completed close-or-release dispatch (closed, or handed back after the
+			// worker claimed) resets the unclaimed-end strike count, which like
+			// pool-evicted below counts CONSECUTIVE strikes (INV-CCH-28). Best-effort.
+			_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, unclaimedEndLabel)
+			// Likewise the needs_input stall strike count (INV-CCH-29).
+			_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, drainStallLabel)
+		}
+		// A successful completion resets the eviction strike counter so
+		// escalateEviction's two-strike count stays CONSECUTIVE, not lifetime
+		// (as the other consecutive-strike labels reset on success).
+		// Best-effort.
+		_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, "pool-evicted")
+		// The budget-stop record is cleared only once the bead is CLOSED; a
+		// reopened bead keeps its history (pg2-6akgz).
+		if cc.BudgetStopEscalateAfter > 0 {
+			_ = beads.ClearBudgetStops(ctx, r.deps.BD, d.Item.ID)
+		}
+	}
+	return r.waitFailureResult(cc, d.Item.ID, werr), werr
+}
+
+// cleanupWorktree removes name's per-dispatch worktree at wt now that the
+// dispatch has reached a terminal outcome (finishWait's own doc comment).
+// This is the single owner of the common-case cleanup, immediately, with no
+// new timer — replacing reliance on the once-per-process-lifetime
+// preShutdown sweep (cmd/pg-router-handler-ccpool/preshutdown.go's
+// the removed shutdown sweep, pg2-a8h6c's short-term stopgap) for the case this
+// dispatch call itself can observe. preshutdown.go's own sweep is left
+// unchanged — it remains the belt-and-suspenders path for a crashed prior
+// run's stray sessions, which this dispatch-scoped call can never see.
+//
+// Scoped to "worktree" isolation ONLY (roles.IsolationConfig's default,
+// usesWorktreeIsolation below): "none" isolation hands back RepoRoot itself
+// (never removable — same invariant watchdog/terminal.go's safeToReset
+// enforces for the reset path), "path" isolation is one FIXED directory
+// reused across every dispatch (removing it after one dispatch would break
+// the next one that reuses it), "bead-worktree" isolation looks at a worktree
+// a drain worker made and owns, and "workforest" isolation has its own,
+// unrelated lifecycle (pn-workspace-rules) — none of those are a per-bead
+// git worktree this executor itself created and may unilaterally remove.
+//
+// needs_input is excluded by design (pg2-4roho decision item 2, ADR 0037):
+// a needs_input session's worktree lifetime is tied to the SESSION's own
+// eventual close, not to this dispatch call returning — reimplementing that
+// tie is explicitly out of this bead's scope, but honoring it here (rather
+// than naively removing on every terminal outcome, including the "not
+// complete within MaxWait while still needs_input" failure shape) is not:
+// this is a no-op while the session is still alive and needs_input, or while
+// its state can't be determined at all (needsInputAlive's own can't-tell
+// case). The worktree is removed later, once the session actually closes, by
+// the reconcile's RemoveWorktree call.
+//
+// Deletion safety guard (decision item 5): RemoveWorktree runs with
+// force=false, so git itself refuses removal whenever the worktree is dirty
+// (uncommitted changes) rather than force-deleting live work (gitclient's
+// own documented behavior — see x/gitclient's WorktreeManager.RemoveWorktree
+// doc comment). Any failure here (dirty worktree, already gone, not a linked
+// worktree, a transient git error) fails soft — log and continue, leaving it
+// for the next sweep (a future dispatch of the same bead reusing the same
+// worktree path, or pg-disk-reclaimer's independent belt-and-suspenders
+// sweep, decision item 4) rather than force-removing.
+//
+// finishWait closes the settled session between the guards
+// (prepareWorktreeCleanup) and the removal (removeWorktree). The dispatch does
+// not probe the process table: a pg-gwm lease, not a process listing, says who
+// holds a worktree.
+//
+// The returned quietResult reports whether this call already ran
+// waitSessionQuiet (and what it found), so finishWait's following
+// closeSettledSession reuses the verdict instead of polling a second time.
+func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig, name, beadID, wt string) quietResult {
+	q, proceed := r.prepareWorktreeCleanup(ctx, cc, name, wt)
+	if proceed {
+		r.removeWorktree(ctx, name, beadID, wt)
+	}
+	return q
+}
+
+// prepareWorktreeCleanup is cleanupWorktree's decision half: the isolation,
+// needs_input, live-peer and quiet-window guards. proceed reports whether the
+// worktree may now be removed (removeWorktree); the quietResult is as
+// cleanupWorktree's.
+func (r *ccpoolRun) prepareWorktreeCleanup(ctx context.Context, cc *roles.CCPoolConfig, name, wt string) (q quietResult, proceed bool) {
+	if wt == "" || !usesWorktreeIsolation(cc.Isolation) {
+		return quietResult{}, false
+	}
+	if r.needsInputAlive(ctx, name) {
+		slog.Info("dispatch: worktree cleanup deferred -- session still needs_input",
+			"session", name, "worktree", wt)
+		return quietResult{}, false
+	}
+	if r.worktreeSharedWithLivePeer(ctx, name, wt) {
+		slog.Info("dispatch: worktree cleanup deferred -- another live session still uses it",
+			"session", name, "worktree", wt)
+		return quietResult{}, false
+	}
+	if !r.waitSessionQuiet(ctx, name, r.quietWindow(cc)) {
+		slog.Warn("dispatch: worktree cleanup deferred -- session or its subagents still active (left for next sweep)",
+			"session", name, "worktree", wt, "quietWindow", r.quietWindow(cc))
+		return quietResult{checked: true, quiet: false}, false
+	}
+	return quietResult{checked: true, quiet: true}, true
+}
+
+// removeWorktree is cleanupWorktree's removal half, run once
+// prepareWorktreeCleanup said to proceed.
+func (r *ccpoolRun) removeWorktree(ctx context.Context, name, beadID, wt string) {
+	if r.gwmOn() {
+		r.gwmSessionEnd(ctx, nil, name, true)
+		return
+	}
+	wm, err := r.deps.gitOpener()(ctx, wt)
+	if errors.Is(err, fs.ErrNotExist) {
+		// The path is already gone (an earlier dispatch of this bead removed the
+		// worktree, and this one absorbed that dispatch's row): there is nothing to
+		// remove and nothing a later sweep could retry, so say so once at INFO
+		// instead of a failed open that every re-dispatch repeats as "left for next
+		// sweep". No branch is touched: a concurrent dispatch of the same bead owns
+		// the anchor branch it is creating.
+		slog.Info("dispatch: worktree cleanup: already removed", "session", name, "worktree", wt)
+		return
+	}
+	if err != nil {
+		slog.Warn("dispatch: worktree cleanup: open failed (left for next sweep)",
+			"session", name, "worktree", wt, "err", err)
+		return
+	}
+	if err := worktree.RemoveWithin(ctx, wm, wt, false, r.deps.Cfg.WorktreeRemoveTimeout, worktree.PruneVia(r.deps.gitOpener(), r.deps.Cfg.RepoRoot)); err != nil {
+		slog.Warn("dispatch: worktree cleanup: remove failed (left for next sweep)",
+			"session", name, "worktree", wt, "err", err)
+		return
+	}
+	slog.Info("dispatch: worktree removed", "session", name, "worktree", wt)
+	r.deleteBranch(ctx, name, beadID)
+}
+
+// quietResult is cleanupWorktree's report of whether it already ran
+// waitSessionQuiet for this dispatch (checked) and, if so, its verdict
+// (quiet). The zero value means "not checked yet".
+type quietResult struct {
+	checked bool
+	quiet   bool
+}
+
+// closeSettledSessionTimeout bounds the settled-session close.
+const closeSettledSessionTimeout = time.Minute
+
+// deathUsageLimitTimeout bounds the usage-limit reading logOnDeath takes on the
+// unexplained-death path: short, because the reading is evidence only and must
+// never hold up the failure it accompanies. A var so a test can shrink it;
+// nothing else assigns it.
+var deathUsageLimitTimeout = 5 * time.Second
+
+// closeSettledSession closes (non-purge, --reason handler) the session name
+// that this dispatch launched or absorbed, once the dispatch has reached a
+// terminal outcome and the session has settled (INV-CCH-17, ADR 0082). Without
+// it a finished session stays live and idle, counting against the pool's
+// max_sessions until ccpool's idle_ttl + reap tick, because a gated dispatcher
+// never pushes the pool over cap, so cap eviction never fires (ADR 0072).
+//
+// It closes ONLY name -- never another row -- and only when ALL hold:
+//   - neither ctx nor werr is a cancellation (a daemon shutdown is owned by
+//     the INV-CCH-14 preShutdown sweep, not by this dispatch tail);
+//   - the session is quiet (no write to its transcript or its Agent-tool
+//     subagents' for WorktreeQuietWindow; reuses cleanupWorktree's verdict
+//     when it already ran, otherwise runs waitSessionQuiet), for EVERY
+//     isolation type -- closing the tmux pane would kill running subagents;
+//   - a fresh List row for name is present, carries no CloseReason (nobody
+//     closed it already: watchdog hard stop, waitDone's death branch,
+//     idle_ttl/cap_eviction/operator), and is idle or errored (never
+//     starting/ready/working, and never needs_input, ADR 0037).
+//
+// A close failure is best effort: WARN and continue; werr and the dispatch
+// result are never changed. Every close logs INFO.
+func (r *ccpoolRun) closeSettledSession(ctx context.Context, cc *roles.CCPoolConfig, beadID, name string, werr error, q quietResult) {
+	if ctx.Err() != nil || errors.Is(werr, context.Canceled) || errors.Is(werr, context.DeadlineExceeded) {
+		return
+	}
+	if !q.checked {
+		q.quiet = r.waitSessionQuiet(ctx, name, r.quietWindow(cc))
+	}
+	if ctx.Err() != nil {
+		return // cancelled while waiting for quiet
+	}
+	if !q.quiet {
+		slog.Info("settled-session close deferred -- subagents active", "session", name, "bead", beadID)
+		return
+	}
+	sessions, err := r.deps.CC.List(ctx)
+	if err != nil {
+		slog.Warn("settled-session close skipped: could not re-read session", "session", name, "bead", beadID, "err", err)
+		return
+	}
+	var row ccpool.Session
+	found := false
+	for _, s := range sessions {
+		if s.ExternalID == name {
+			row, found = s, true
+			break
+		}
+	}
+	if !found || row.CloseReason != "" || (row.State != ccpool.StateIdle && row.State != ccpool.StateErrored) {
+		return
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeSettledSessionTimeout)
+	defer cancel()
+	// No outcome mark is written first: a settled row is never absorbed, whatever
+	// its outcome (INV-CCH-17, INV-CCH-30), so the incomplete mark of bead
+	// pg2-tc9c3 is no longer needed (ADR 0094's Decision item 6).
+	if err := r.deps.CC.Close(cctx, name, false); err != nil {
+		slog.Warn("settled-session close failed (left to idle_ttl)", "session", name, "bead", beadID, "err", err)
+		return
+	}
+	slog.Info("settled session closed", "session", name, "bead", beadID,
+		"state", string(row.State), "outcome", settledOutcome(werr))
+}
+
+// logUsageLimitOnDeath records, once, whether an account usage window was at its
+// limit when a session died unexplained, so a later operator can tell whether
+// such deaths line up with the usage-limit windows (INV-CCH-26). Observe-only:
+// it classifies nothing and changes nothing, and a failed or slow read is
+// logged and dropped, never an error of the death path. The read uses a fresh
+// bounded context because ctx may already be cancelled by then.
+func (r *ccpoolRun) logUsageLimitOnDeath(ctx context.Context, name, beadID string) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deathUsageLimitTimeout)
+	defer cancel()
+	capacity, err := r.deps.CC.Capacity(cctx)
+	if err != nil {
+		slog.Warn("usage_limit_reading_error", "session", name, "bead", beadID, "err", err.Error())
+		return
+	}
+	ul := capacity.UsageLimit
+	if ul == nil {
+		slog.Info("session died; usage-limit reading", "session", name, "bead", beadID, "usage_limit_present", false)
+		return
+	}
+	slog.Info("session died; usage-limit reading", "session", name, "bead", beadID, "usage_limit_present", true,
+		"window", ul.Window, "used_pct", ul.UsedPct, "resets_at", ul.ResetsAt)
+}
+
+// settledOutcome labels a dispatch's terminal outcome for closeSettledSession's
+// INFO log line.
+func settledOutcome(werr error) string {
+	switch {
+	case werr == nil:
+		return "success"
+	case errors.Is(werr, watchdog.ErrBudgetExceeded):
+		return "budget_stop"
+	case errors.Is(werr, ErrExternallyClosed):
+		return "externally_closed"
+	case errors.Is(werr, ErrNeedsInputStalled):
+		return "needs_input_stalled"
+	default:
+		return "failure"
+	}
+}
+
+// deleteBranch removes this bead's own throwaway pg-router/<beadID> anchor
+// branch (worktree.Ensure's own doc comment: "a dedicated branch
+// pg-router/<beadID>") now that cleanupWorktree has confirmed its worktree is
+// gone. x/gitclient's RemoveWorktree runs only `git worktree remove` and
+// never touches the branch (bead pg2-ci75j's root cause) -- without this
+// call, the branch is orphaned in RepoRoot forever, which is exactly the
+// ~100+-stray-branch state pg2-ci75j found in the ZR monorepo.
+//
+// Deliberately reopens the gitclient at r.deps.Cfg.RepoRoot rather than
+// reusing wm/wt from the caller: wt was just removed by RemoveWorktree above,
+// so a client anchored there (cmd.Dir) can no longer spawn git at all, and a
+// branch is a repo-level ref that must be deleted from a still-existing
+// checkout anyway -- the same anchor worktree.Ensure itself uses to create
+// the branch in the first place (CreateWorktree is likewise called with wm
+// opened at repoRoot, not at the not-yet-created worktree path).
+//
+// These are pg-router's own internal per-dispatch anchor branches, reset at
+// HEAD on every dispatch (CreateWorktree's ResetBranch/-B) -- never a user
+// branch with independent value -- so once the worktree is confirmed removed
+// the branch has fully served its purpose. Most are never merged into
+// anything (they are throwaway checkout anchors, not feature branches), so
+// deletion uses force (`git branch -D`) rather than plain `-d`, which would
+// refuse constantly for exactly that reason (pg2-ci75j's own comments).
+//
+// Fails soft exactly like RemoveWorktree above: any error here (open
+// failure, the branch already gone, a client that isn't a BranchManager, a
+// transient git error) is logged and left for the next sweep, never
+// escalated -- an orphaned branch costs disk, not correctness.
+func (r *ccpoolRun) deleteBranch(ctx context.Context, name, beadID string) {
+	branch := "pg-router/" + beadID
+	root, err := r.deps.gitOpener()(ctx, r.deps.Cfg.RepoRoot)
+	if err != nil {
+		slog.Warn("dispatch: worktree cleanup: branch delete: open repo root failed (left for next sweep)",
+			"session", name, "branch", branch, "err", err)
+		return
+	}
+	bm, ok := root.(gitclient.BranchManager)
+	if !ok {
+		return
+	}
+	if err := bm.DeleteBranch(ctx, branch, true); err != nil {
+		slog.Warn("dispatch: worktree cleanup: branch delete failed (left for next sweep)",
+			"session", name, "branch", branch, "err", err)
+		return
+	}
+	slog.Info("dispatch: branch deleted", "session", name, "branch", branch)
+}
+
+// needsInputAlive reports whether the session addressed by externalID is
+// currently alive and in ccpool.StateNeedsInput. Mirrors active()'s own
+// can't-tell/absent split (just below in this file) but resolves the
+// can't-tell case in the OPPOSITE direction, since the two callers need
+// opposite fail-safe biases: active() can't-tell ⇒ assume active (keep
+// waiting; MaxWait still bounds it), while this guard's can't-tell ⇒ assume
+// STILL needs_input (skip cleanup) — deleting a worktree the operator may be
+// actively inspecting is the failure mode decision item 2 exists to prevent,
+// so an ambiguous read must fail toward NOT deleting, not toward deleting. An
+// ABSENT session (definitively gone, not merely unreadable) is unambiguous
+// either way: nothing is left to preserve, so cleanup may proceed.
+func (r *ccpoolRun) needsInputAlive(ctx context.Context, externalID string) bool {
+	sessions, err := r.deps.CC.List(ctx)
+	if err != nil {
+		return true // can't tell ⇒ treat as still needs_input ⇒ skip cleanup
+	}
+	for _, s := range sessions {
+		if s.ExternalID == externalID {
+			return s.State == ccpool.StateNeedsInput
+		}
+	}
+	return false // absent ⇒ gone ⇒ safe to clean up
+}
+
+// worktreeSharedWithLivePeer reports whether a session other than name that
+// is live and not idle/errored still uses wt as its working directory
+// (pg2-aqpqx). A per-bead worktree path is keyed by bead id alone
+// (worktree.Ensure), so every role's session for one bead shares it: the
+// session that finishes first must not delete the directory out from under
+// a peer that is starting, ready, working or awaiting input -- the last
+// session to detach removes it. Mirrors the reconcile path's
+// worktreeInUseByPeer (cmd/pg-router-handler-ccpool/reconcile.go), except
+// that a needs_input peer is also protected here: its own cleanup is
+// deferred until it closes, so removing its cwd now would strand it. A list
+// error is treated as "in use" (can't tell => don't delete).
+func (r *ccpoolRun) worktreeSharedWithLivePeer(ctx context.Context, name, wt string) bool {
+	sessions, err := r.deps.CC.List(ctx)
+	if err != nil {
+		return true
+	}
+	for _, s := range sessions {
+		if s.ExternalID == name || wt == "" || s.CWD != wt || !s.Live {
+			continue
+		}
+		if s.State != ccpool.StateIdle && s.State != ccpool.StateErrored {
+			return true
+		}
+	}
+	return false
+}
+
+// usesWorktreeIsolation reports whether cfg selects the "worktree" isolation
+// strategy (the default: an empty Type, or the explicit "worktree" value —
+// matching newIsolation's own switch in isolation.go) — the only strategy
+// whose Ensure result is a per-dispatch git worktree this executor itself
+// created, and so the only one cleanupWorktree may remove.
+func usesWorktreeIsolation(cfg roles.IsolationConfig) bool {
+	return cfg.Type == "" || cfg.Type == "worktree"
+}
+
+// --- Prior sessions of the bead and role (INV-CCH-30, ADR 0094) ---
+//
+// Every dispatch runs in a fresh session it launches itself. Before launching,
+// it looks at every session the role's pool holds for the same bead and role
+// and decides, in this order:
+//
+//   - absorb: a session whose turn is in progress (live, working or
+//     needs_input), that records this dispatch's own event id, that nobody has
+//     closed or begun to tear down, and whose bead is not closed. This is the
+//     one exception (a redelivery of an event whose turn still runs: the
+//     re-offer after a daemon restart, a crash-window redelivery, a dead
+//     handler's session still at work). The head is deliberately not compared.
+//   - decline (ErrSessionInFlight): any other attempt in flight (a turn in
+//     progress it may not absorb, or a session a handler may still be
+//     supervising, whatever its state: it holds the lease, or the session has
+//     no lease yet and is still inside its launch window), an absorb candidate
+//     whose bead is closed or cannot be read.
+//   - decline (ErrPoolUnreadable): a pool whose sessions cannot be read counts
+//     as holding one in flight. Same decline, its own reason (pool-unreadable)
+//     so the failure-rate alert still counts it (bead pg2-s3pjt).
+//   - launch: nothing in flight. A leftover nobody supervises (live, still
+//     starting or ready, and no longer supervised) is closed first, under the
+//     per-session lock, and every settled session (turn ended, or no longer
+//     live) is left alone: it is never absorbed, whoever closed it.
+//
+// This replaces the earlier duplicate-absorption check (findSessionByName,
+// crashOrphaned, staleSettledRow) and the bounds added to it one by one: the
+// event id on settled rows (pg2-uprw5), the item's pinned head (pg2-afre3) and
+// the outcome mark (pg2-tc9c3). None of them is needed once a settled row is
+// never absorbed (bead pg2-qaeb8).
+
+type priorVerdict int
+
+const (
+	verdictLaunch  priorVerdict = iota // nothing in flight: launch a fresh session
+	verdictAbsorb                      // the same event's turn in progress: wait on it as this dispatch's own
+	verdictDecline                     // another attempt in flight (session-in-flight) or an unreadable pool (pool-unreadable)
+)
+
+// priorPlan is planPriorSessions' decision.
+type priorPlan struct {
+	verdict   priorVerdict
+	absorb    ccpool.Session   // verdictAbsorb: the session to absorb
+	leftovers []ccpool.Session // verdictLaunch: leftovers to close before launching
+	session   string           // verdictDecline: the session that is in flight ("" for an unreadable pool)
+	why       string           // verdictDecline: a short reason, for the log and the error
+}
+
+func (p priorPlan) describe() string {
+	if p.session == "" {
+		return p.why
+	}
+	return "session " + p.session + ": " + p.why
+}
+
+// sameBeadAndRole reports whether s is a session of this bead and role: it
+// carries the stable per-bead display name, or the dispatch tags of this bead
+// and role in this handler's pool.
+func sameBeadAndRole(s ccpool.Session, display, beadID, role string) bool {
+	if s.Name == display {
+		return true
+	}
+	return s.Meta[ccpool.MetaKeyPool] == ccpool.PoolName && s.Meta[ccpool.MetaKeyBead] == beadID && s.Meta[ccpool.MetaKeyRole] == role
+}
+
+// turnInProgress reports whether s is live and working or needs_input: a turn
+// under way, or one paused for a person.
+func turnInProgress(s ccpool.Session) bool {
+	return s.Live && (s.State == ccpool.StateWorking || s.State == ccpool.StateNeedsInput)
+}
+
+// priorClock is what the predicates below judge supervision against: the
+// dispatch's clock reading and its launch window (launchWindow).
+type priorClock struct {
+	now    time.Time
+	window time.Duration
+}
+
+// launchWindow is how long a live session still starting or ready that
+// carries NO lease may still be inside its own launch. ccpool now applies a
+// dispatch's `ccpool new --meta` (the lease, the event id, the dispatch tags)
+// when it inserts the row, before the launch wait (bead pg2-7139f), so a
+// session launched by this handler normally carries its lease from the start.
+// Before that fix ccpool applied it only once the session was ready, so a
+// launching session, and what a failed launch left behind, carried none (bead
+// pg2-qaeb8, found by the real-ccpool test); a row from such a ccpool, or from
+// a handler whose LeaseTTL is not positive, still carries none. The lease such
+// a launch would have been stamped with covers the launch wait plus one TTL
+// (ccpool.DispatchMeta), so that same window, measured from the row's last
+// activity, stands in for it.
+func (r *ccpoolRun) launchWindow() time.Duration { return ccpool.EnsureTimeout + r.deps.Cfg.LeaseTTL }
+
+// awaitingTurn reports whether s is live with no turn yet (still starting, or
+// ready), and not under two-phase teardown (that row is the purge_pending
+// retry's, INV-CCH-20).
+func awaitingTurn(s ccpool.Session) bool {
+	return s.Live && (s.State == ccpool.StateStarting || s.State == ccpool.StateReady) && !s.PurgePending()
+}
+
+// supervised reports whether a handler may still be supervising s: it holds
+// s's lease, or s carries no lease yet, still awaits its first turn and may
+// still be inside its launch (its last activity is within the launch window,
+// or unknown). Any other session with no lease has no lease to hold.
+func supervised(s ccpool.Session, c priorClock) bool {
+	if until, ok := s.LeaseUntil(); ok {
+		return c.now.Before(until)
+	}
+	if !awaitingTurn(s) {
+		return false
+	}
+	if s.LastActivityAt == 0 {
+		return true // age unknown: it may still be launching
+	}
+	return c.now.Sub(time.Unix(s.LastActivityAt, 0)) < c.window
+}
+
+// inFlight reports whether s is an attempt still in flight: its turn is in
+// progress, or a handler may still be supervising it (launching it, waiting on
+// it, settling it or handling its death), whatever its state and liveness.
+func inFlight(s ccpool.Session, c priorClock) bool {
+	return turnInProgress(s) || supervised(s, c)
+}
+
+// tornDown reports whether someone has closed s or begun to tear it down: a
+// close reason, the two-phase teardown marker (INV-CCH-20) or the orphan
+// reclaim mark (INV-CCH-18).
+func tornDown(s ccpool.Session) bool {
+	return s.CloseReason != "" || s.PurgePending() || s.Meta[ccpool.MetaKeyOrphanReclaimed] != ""
+}
+
+// absorbable reports whether s is the one session a dispatch of eventID may
+// absorb, bead aside: its turn is in progress, it records the same non-empty
+// event id, and nobody has closed it or begun to tear it down. The bead's
+// status is planPriorSessions' own read.
+func absorbable(s ccpool.Session, eventID string) bool {
+	return turnInProgress(s) && eventID != "" && s.Meta[ccpool.MetaKeyEventID] == eventID && !tornDown(s)
+}
+
+// leftover reports whether s is a session nobody supervises and no turn uses:
+// live, still starting or ready, and no longer supervised (its lease expired,
+// or, carrying none, it has outlived the launch window): a launch whose handler
+// gave up or died before its prompt was taken, a launch that reached ready only
+// after its `ccpool new` had failed, or a session a cancel left ready after its
+// handler had gone.
+func leftover(s ccpool.Session, c priorClock) bool {
+	return awaitingTurn(s) && !supervised(s, c)
+}
+
+// inFlightWhy names why s is in flight but not absorbable, for the decline.
+func inFlightWhy(s ccpool.Session, eventID string) string {
+	_, leased := s.LeaseUntil()
+	switch {
+	case !turnInProgress(s) && !leased:
+		return "it may still be inside its launch (state " + string(s.State) + ", no lease yet)"
+	case !turnInProgress(s):
+		return "its handler still holds the supervision lease (state " + string(s.State) + ")"
+	case tornDown(s):
+		return "it was closed or is being torn down while its turn runs"
+	case eventID == "" || s.Meta[ccpool.MetaKeyEventID] == "":
+		return "its turn is in progress for an event that cannot be compared"
+	default:
+		return "its turn is in progress for another event (" + s.Meta[ccpool.MetaKeyEventID] + ")"
+	}
+}
+
+// planPriorSessions reads the pool once and decides what this dispatch does
+// about the sessions it already holds for the bead and role (see the section
+// comment above). A list error is a pool that cannot be read, which counts as
+// one in flight: decline with ErrPoolUnreadable.
+func (r *ccpoolRun) planPriorSessions(ctx context.Context, d DispatchContext, display string) priorPlan {
+	var sessions []ccpool.Session
+	if r.deps.PoolListed {
+		// The orphan unit read the pool a moment ago and found no orphan, so the
+		// listing is still the pool as it is: one shared read (INV-CCH-41).
+		sessions = r.deps.PoolListing
+		r.deps.PoolListed, r.deps.PoolListing = false, nil
+	} else {
+		var err error
+		sessions, err = r.deps.CC.List(ctx)
+		if err != nil {
+			return priorPlan{verdict: verdictDecline, why: "the pool's sessions cannot be read: " + err.Error()}
+		}
+	}
+	clk := priorClock{now: r.deps.clock(), window: r.launchWindow()}
+	var candidates, busy, leftovers []ccpool.Session
+	for _, s := range sessions {
+		if !sameBeadAndRole(s, display, d.Item.ID, d.Role.Name) {
+			continue
+		}
+		switch {
+		case absorbable(s, d.EventID):
+			candidates = append(candidates, s)
+		case inFlight(s, clk):
+			busy = append(busy, s)
+		case leftover(s, clk):
+			leftovers = append(leftovers, s)
+		}
+	}
+	if len(candidates) > 0 {
+		s := candidates[0]
+		iss, err := beads.ShowObj(ctx, r.deps.BD, d.Item.ID)
+		switch {
+		case err != nil:
+			return priorPlan{verdict: verdictDecline, session: s.ExternalID, why: "its turn is in progress and the bead cannot be read: " + err.Error()}
+		case iss.Status == "closed":
+			return priorPlan{verdict: verdictDecline, session: s.ExternalID, why: "its turn is in progress and the bead is already closed"}
+		}
+		return priorPlan{verdict: verdictAbsorb, absorb: s}
+	}
+	if len(busy) > 0 {
+		return priorPlan{verdict: verdictDecline, session: busy[0].ExternalID, why: inFlightWhy(busy[0], d.EventID)}
+	}
+	return priorPlan{verdict: verdictLaunch, leftovers: leftovers}
+}
+
+// closeLeftover closes, without purging, a leftover session nobody supervises
+// (INV-CCH-30's leftover case) so this dispatch can launch its own: the
+// leftover neither keeps the pool's slot nor hands the new attempt a budget
+// clock that started at an earlier launch. It takes the same per-session lock an
+// absorb and the orphan reconcile take (INV-CCH-18) and re-reads the row under
+// it: a row that is gone or no longer a leftover and not in flight needs
+// nothing; a row that is now in flight declines the dispatch. A failed lock or
+// close is an error of this dispatch, never a silent launch beside the leftover.
+func (r *ccpoolRun) closeLeftover(ctx context.Context, d DispatchContext, s ccpool.Session) error {
+	if r.deps.LockDir != "" {
+		lock, err := r.lockSession(ctx, s.ExternalID)
+		if err != nil {
+			return fmt.Errorf("close leftover %s: %w", s.ExternalID, err)
+		}
+		defer lock.Unlock()
+		sessions, err := r.deps.CC.List(ctx)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrPoolUnreadable, err)
+		}
+		found := false
+		for _, cur := range sessions {
+			if cur.ExternalID != s.ExternalID {
+				continue
+			}
+			found, s = true, cur
+			break
+		}
+		clk := priorClock{now: r.deps.clock(), window: r.launchWindow()}
+		switch {
+		case !found:
+			return nil
+		case inFlight(s, clk):
+			return fmt.Errorf("%w: session %s: %s", ErrSessionInFlight, s.ExternalID, inFlightWhy(s, d.EventID))
+		case !leftover(s, clk):
+			return nil
+		}
+	}
+	if err := r.deps.CC.Close(ctx, s.ExternalID, false); err != nil {
+		return fmt.Errorf("close leftover %s: %w", s.ExternalID, err)
+	}
+	lease := "none"
+	if until, ok := s.LeaseUntil(); ok {
+		lease = ccpool.FormatMetaTime(until)
+	}
+	slog.Info("closed a leftover session nobody supervises; launching a fresh one",
+		"role", d.Role.Name, "bead", d.Item.ID, "session", s.ExternalID, "state", string(s.State),
+		"lease_until", lease)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("info", "leftover_closed", "closed a leftover session nobody supervises",
+			map[string]any{
+				"role": d.Role.Name, "bead": d.Item.ID, "session": s.ExternalID, "state": string(s.State),
+				"lease_until": lease,
+			})
+	}
+	return nil
+}
+
+// dispatchHeadSHA returns the pinned PR head of the dispatched item (its
+// head_sha metadata, refreshed from the bead at dispatch time), or "" when the
+// item carries none (worker and feedback beads have no head). It is stamped on
+// the launched session (ccpool.MetaKeyHeadSHA) as a record of what the session
+// was launched for; it is never compared (INV-CCH-30).
+func dispatchHeadSHA(it item.Item) string {
+	h, _ := it.Metadata["head_sha"].(string)
+	return h
+}
+
+// absorbDuplicate treats this dispatch as a redelivery of the event whose turn
+// existing's session is still running (INV-CCH-30's one exception): it never
+// re-Ensures/Sends (that would put a SECOND session on the same bead — exactly
+// what INV-EVT-2 forbids), it only waits on the EXISTING session's own outcome,
+// addressing it by its own ExternalID and reusing its own worktree
+// (existing.CWD) for the watchdog's guarded reset. It blocks until the turn
+// settles — the "deferred ack pointing at the same in-flight work", held open
+// the same way a normal inline dispatch already holds the call open for a
+// long-running session (cmd/pg-router-handler-ccpool/dispatch.go's own doc
+// comment). Mirrors run()'s own tail (budget-gated watchdog race +
+// waitFailureResult) so the terminal verb reported here is identical to what a
+// first-time dispatch of the same work would have reported.
+func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
+	r.noteSession(existing)
+	cc := d.Role.CCPool
+	// Adopting a live session is the other way a dispatch is accepted (INV-CCH-35).
+	r.emitCCPoolStart(d, RouteAdopted, existing.ExternalID)
+	// The lease covers this absorbed session for as long as this dispatch is alive
+	// (takeOverForAbsorb already wrote the first refresh under the session lock).
+	defer r.startLease(ctx, existing.ExternalID)()
+	var werr error
+	if budgetUnlimited(cc.Budget) {
+		werr = r.waitDone(ctx, nil, d, existing.ExternalID)
+	} else {
+		// An absorbed session keeps its original launch time as the budget's
+		// start: it is the same attempt still running, so absorbing it never
+		// grants a fresh budget (INV-CCH-18, INV-CCH-30; pg2-3j76b's case).
+		// Absent launched_at (an older build) falls back to now, as before.
+		start, _ := existing.LaunchedAt()
+		werr = r.workerWaitWithWatchdog(ctx, d, existing.ExternalID, existing.CWD, start)
+	}
+	res, err := r.finishWait(ctx, cc, d, existing.ExternalID, existing.CWD, werr)
+	// Report the adopted session's own launch time so the core times this
+	// dispatch from its real start and not from this re-offer (DEC-EVENT-5,
+	// INV-CCH-30). Absent launched_at (an older build) reports nothing.
+	if launched, ok := existing.LaunchedAt(); ok {
+		res.StartedAt = launched
+	}
+	// A takeover that completed before this point reports the supervisor count it
+	// returned (read in process, never from the session's metadata), with the
+	// session it absorbed. r.supervisors stays 0 when no takeover ran.
+	if r.supervisors >= 1 {
+		res.Session = existing.ExternalID
+		res.Supervisors = r.supervisors
+	}
+	return res, err
+}
+
+// renderNudge builds the prompt sent to a ccpool session: the (non-editable) safety
+// preamble when authorship_guard is set, the (non-editable) protected-path notice
+// when the session runs under permissionMode=dontAsk, then the role's rendered task
+// prompt, then the budget prompt-line (empty when the budget is unlimited).
+func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d DispatchContext, worktreeDir string) string {
+	pctx := prompt.Context{
+		Item:        d.Item,
+		WorktreeDir: worktreeDir,
+		SkillMD:     cc.SkillMD,
+		SelfLogin:   r.deps.Cfg.SelfLogin,
+		RepoRoot:    r.deps.Cfg.RepoRoot,
+	}
+	if cc.Isolation.Prefetch != nil {
+		pctx.Prefetch = loadPrefetchInfo(worktreeDir)
+	}
+	body, err := prompt.Render(cc.Prompt, pctx)
+	if err != nil {
+		// A prompt that references an unknown var fails here; fall back to the raw
+		// template source so the dispatch still carries the task (and log it).
+		slog.Warn("prompt render failed; sending raw body", "role", d.Role.Name, "err", err)
+		body = cc.PromptBody
+	}
+	var sb strings.Builder
+	if cc.AuthorshipGuard {
+		sb.WriteString(prompt.AuthorshipPreamble())
+	}
+	if r.deps.Cfg.PermissionMode == "dontAsk" {
+		sb.WriteString(prompt.ProtectedPathNotice())
+	}
+	sb.WriteString(prompt.ActorNotice(cc.Actor))
+	sb.WriteString(body)
+	sb.WriteString(cc.Budget.PromptLine()) // "" when unlimited
+	return sb.String()
+}
+
+// workerWaitWithWatchdog runs waitDone and the budget watchdog concurrently.
+// First to return a terminal result wins and cancels the other. The cancelled
+// loser returns ctx.Err() (and skips its terminal action by design), so only
+// the winner's outcome takes effect.
+//
+// The single-terminal guarantee is enforced by an atomic owner claim, NOT by
+// cancel() timing: cancel() only fires after the winner returns, which is too
+// late to stop a loser already mid terminal bead mutation. So whichever of
+// {waitDone, watchdog} reaches its terminal bead mutation first claims ownership;
+// the loser then performs NO bead mutation. Without this the watchdog's unclaim
+// and waitDone's add-human could both fire (bead ends open AND human), or the
+// watchdog's unclaim could be misread by waitDone as a successful hand-back
+// (a budget hard-stop reported as success). (pg2-c1vp)
+func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContext, name, worktreeDir string, start time.Time) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var owner atomic.Bool
+	claimTerminal := func() bool { return owner.CompareAndSwap(false, true) }
+
+	wd := &watchdog.Watchdog{
+		Reader: r.deps.reader(),
+		CC:     r.deps.CC,
+		BD:     r.deps.BD,
+		Log:    r.deps.Log,
+		Budget: d.Role.CCPool.Budget,
+		Role:   d.Role.Name,
+		Pool:   d.Role.CCPool.PoolDir,
+		// Per-bead budget-stop counter (pg2-6akgz); 0 = disabled.
+		BudgetStopEscalateAfter: d.Role.CCPool.BudgetStopEscalateAfter,
+		RepoRoot:                r.deps.Cfg.RepoRoot,
+		WorktreeDir:             worktreeDir, // the per-bead worktree the worker ran in (pg2-yukh)
+		Start:                   start,       // zero = now; an absorbed session passes its recorded launch time
+		ReminderMsg:             r.deps.Cfg.ReminderMsg,
+		WrapUpMsg:               r.deps.Cfg.WrapUpMsg,
+		Git:                     r.deps.git(),
+		// FirstTurnStarted gates the budget NUDGES on a real model turn so a worker
+		// that never ingested its task is never prompted (pg2-yukh #3b). The hard
+		// STOP is NOT gated — it unclaims, it does not nudge.
+		FirstTurnStarted: r.deps.firstTurn,
+		Now:              r.deps.Now,
+		// The watchdog polls the recorder's facts every WatchdogPoll (30 s by
+		// default), not every PollInterval: its readings are cheap queries, not
+		// whole-file re-reads, and the budget meter does not need 10 s freshness.
+		Poll:          r.deps.Cfg.WatchdogPollInterval(),
+		ClaimTerminal: claimTerminal,
+		OwnerID:       r.ownerID,
+		Generation:    r.generation.Load(),
+	}
+
+	type res struct{ err error }
+	done := make(chan res, 2) // buffered 2: both goroutines can send without blocking
+	go func() { done <- res{r.waitDone(ctx, claimTerminal, d, name)} }()
+	go func() { done <- res{wd.Run(ctx, name, d.Item.ID)} }()
+
+	first := <-done // the winner's terminal result (the loser blocks until cancel)
+	cancel()        // release the loser
+	<-done          // drain the loser (it returns ctx.Err(), no terminal action)
+	return first.err
+}
+
+// waitDone polls the bead status until DoneSignal fires (success) or MAX_WAIT
+// elapses / the session dies (failure). On detecting death it re-reads the bead
+// status once more before failing (a bead that closed in the same instant the
+// session ended is a success), then — if that is still not a DoneSignal — gives
+// it ONE bounded extra poll interval and re-reads again before failing, so a
+// same-bead external mutation racing the exact instant of death (e.g. the
+// ACL's own head-advance reopen, pg2-qmltm) has a chance to become visible
+// before this is classified as an unexplained death. On failure it applies the
+// role's OnFailure.
+//
+// A close-or-release role (INV-CCH-28) differs in three ways: the session counts
+// as ended only when it is not active AND its transcript and subagents are quiet
+// (a bare idle keeps waiting); the claim latch is set only for a bead held by the
+// role's own actor; and an ended session whose bead is held by a peer (no write,
+// ErrPeerHeld) or never claimed (two-strike ErrUnclaimedEnd) is classified
+// before the death branch's external-close and on_failure handling.
+//
+// claimTerminal arbitrates the single-terminal race with the budget watchdog:
+// EVERY terminal outcome (success or failure) is gated through it, so exactly
+// one of {waitDone, watchdog} owns the bead's final state. The loser performs no
+// bead mutation and waits for the orchestrator to cancel ctx. A nil claimTerminal
+// means no watchdog is racing (feedback dispatches / direct tests) — always own.
+// (pg2-c1vp)
+func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d DispatchContext, name string) error {
+	completion := d.Role.CCPool.Completion
+	maxWait := effectiveMaxWait(r.deps.Cfg, d.Role.CCPool)
+	actor := d.Role.CCPool.Actor
+	release := completion == roles.CloseOrRelease
+	deadline := r.deps.clock().Add(maxWait)
+	var tr complete.Tracker
+	alertedNeedsInput := false // edge latch: fire the needs_input alert at most once
+	// The needs_input stall bound (INV-CCH-29): applies to a drain role only; a nil
+	// bound (every other role) leaves ADR 0037's rule untouched.
+	stall := r.newNeedsInputStall(d.Role.CCPool)
+	// check reads the bead (from the role's own tracker, pg2-2grpj) and reports
+	// whether the role's completion rule is satisfied; a failed read is
+	// "not done" (transient bd hiccup, matches bash bead_status 2>/dev/null).
+	// ended is whether the session has ended (close-or-release only reads it, and
+	// only the !active branch below passes true: INV-CCH-28). It also returns the
+	// observation and whether the read succeeded, for the latch and the
+	// end-of-session classification.
+	check := func(ended bool) (bool, complete.Observation, bool) {
+		iss, err := beads.ShowObj(ctx, r.deps.BD, d.Item.ID)
+		obs := complete.Observation{Status: iss.Status, Labels: iss.Labels, Comments: iss.CommentCount, Assignee: iss.Assignee}
+		if release {
+			obs.FutureDefer = iss.DeferredUntilAfter(r.deps.clock())
+			obs.Blocked = iss.HasOpenBlocker()
+		}
+		return tr.Done(completion, obs, err == nil, ended), obs, err == nil
+	}
+	// While the session row is active the bead is re-read at most every
+	// showWindow (30 s at the default poll; a completion may lag by that much); a
+	// non-active row, the first poll and the deadline's final check read it every poll.
+	showWindow := beadShowWindow(r.deps.Cfg.PollInterval)
+	var (
+		lastShow   time.Time
+		lastObs    complete.Observation
+		haveShow   bool
+		prevActive bool
+	)
+	// won reports whether this loop owns the single terminal outcome.
+	won := func() bool { return claimTerminal == nil || claimTerminal() }
+	// lose is the loser's exit: take NO bead action, wait for the orchestrator to
+	// cancel the shared ctx, then return ctx.Err() (so the winner's result, not
+	// this one, is reported by workerWaitWithWatchdog).
+	lose := func() error { <-ctx.Done(); return ctx.Err() }
+	for {
+		// If ctx is already cancelled the watchdog won (or we're shutting down):
+		// do not trust a fresh status read as completion (the watchdog's unclaim
+		// would look like an "open" hand-back), and run no failure action.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// Edge-detect needs_input and alert the operator exactly once. Pure
+		// observation: it does not affect the terminal decision below (active()
+		// still treats needs_input as keep-waiting, bounded by MaxWait).
+		// ONE facet-free list per poll feeds both this edge check and the active
+		// read below (the loop reads only state, live and transcript_path).
+		poll := r.pollSessions(ctx)
+		if !alertedNeedsInput {
+			if st, ok := stateIn(poll, name); ok && st == ccpool.StateNeedsInput {
+				r.alertNeedsInput(name, d.Item.ID)
+				alertedNeedsInput = true
+			}
+		}
+		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
+		var (
+			done bool
+			obs  complete.Observation
+		)
+		if now := r.deps.clock(); !haveShow || !prevActive || now.Sub(lastShow) >= showWindow {
+			done, obs, _ = check(false)
+			lastShow, lastObs, haveShow = now, obs, true
+		} else {
+			obs = lastObs
+		}
+		if done {
+			if won() {
+				return nil
+			}
+			return lose()
+		}
+		tr.Observe(completion, obs, actor)
+		// INV-CCH-28: a close-or-release session counts as ended only when it is
+		// not active AND its transcript and subagents are quiet; a bare idle (an
+		// orchestrator that ended its turn while an asynchronous subagent runs)
+		// keeps waiting. Every other mode treats !active as the end, as before.
+		// active is read once per poll, ahead of the end test, because the stall
+		// bound below reads the row that read observed.
+		isActive := r.activeIn(poll, name)
+		prevActive = isActive
+		// An unanswered Bash call inside its declared timeout is activity too
+		// (pg2-r4ig2): a subagent in one long hook run writes nothing until it
+		// returns, and closing the pane would kill the call and park the bead.
+		if !isActive && (!release || r.waitSessionEnded(ctx, name, r.quietWindow(d.Role.CCPool))) {
+			// re-check-after-death: the bead may have closed as the session ended.
+			if done, _, _ = check(true); done {
+				if won() {
+					return nil
+				}
+				return lose()
+			}
+			// pg2-qmltm: a legitimate concurrent external mutation of THIS SAME
+			// bead -- e.g. pg-router's ACL reopening a review-pr bead on PR
+			// head-advance (ReopenReview: status=open, assignee cleared;
+			// docs/pr-review-flow.md JR4) -- can land microseconds after the
+			// session is observed dead but before that write is visible to the
+			// read just above. One bounded re-read (mirrors closeReason's own
+			// bounded re-read just below, for the identical class of race) gives
+			// the write a chance to become visible before this branch commits to
+			// "unexplained death." seenClaimed still gates it exactly as it gates
+			// the ordinary DoneSignal check above, so a session that never
+			// claimed the bead before dying (the true startup-race failure
+			// DoneSignal's own seenClaimed guard exists for) is unaffected.
+			if err := r.deps.waitPoll(ctx, r.deps.Cfg.PollInterval); err != nil {
+				return err
+			}
+			done, obs, ok := check(true)
+			if done {
+				if won() {
+					return nil
+				}
+				return lose()
+			}
+			if won() {
+				// INV-CCH-28: a close-or-release session that ended with the bead held
+				// by someone else writes nothing to it, ahead of every branch below
+				// (the external-close branch unclaims the bead, which would be a write
+				// to the peer's).
+				end := tr.EndKind(completion, obs, ok, actor)
+				if end == complete.EndPeer {
+					slog.Info("session ended; the bead is held by another actor: no write, no strike",
+						"session", name, "bead", d.Item.ID, "assignee", obs.Assignee, "status", obs.Status)
+					return fmt.Errorf("%s: %w", d.Item.ID, ErrPeerHeld)
+				}
+				r.captureSignature() // before any teardown (INV-CCH-9)
+				// INV-CCH-7: distinguish an EXTERNAL close (ccpool itself ended the
+				// session — idle_ttl, cap_eviction, operator) from a genuine worker
+				// failure. On external close, release the bead regardless of the
+				// role's configured on_failure and escalate via the two-strike
+				// idiom; only an unexplained death or the handler's own close still
+				// applies on_failure below.
+				reason := r.closeReason(ctx, name)
+				if externalCloseReasons[reason] {
+					_ = beads.Comment(ctx, r.deps.BD, d.Item.ID,
+						fmt.Sprintf("released: ccpool closed the session (%s) before the bead completed; retrying", reason))
+					// The claim is the closed session's, usually under another actor's
+					// identity, so the release is guarded by the observed holder (pg2-ybkav).
+					rerr := beads.UnclaimHeld(ctx, r.deps.BD, d.Item.ID)
+					if rerr != nil {
+						r.externalReleaseFailed(d, name, reason, rerr)
+					}
+					escalated := r.escalateEviction(ctx, d.Item.ID)
+					return fmt.Errorf("%s: %w", d.Item.ID, &externallyClosed{reason: reason, escalated: escalated, releaseErr: rerr})
+				}
+				if end == complete.EndUnclaimed {
+					return r.unclaimedEndResult(ctx, d, name)
+				}
+				if release && tr.SeenClaimed {
+					// The worker did claim its bead, so any earlier unclaimed-end strike
+					// is no longer consecutive (INV-CCH-28). Best-effort.
+					_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, unclaimedEndLabel)
+				}
+				// Unexplained death (not an external close): close the dead row
+				// now, mirroring run()'s own not-ingested cleanup (r.deps.CC.Close
+				// call above), so the row does not sit in ccpool's list as an open
+				// session forever (pg2-04bf7's zombie-session root cause, part b).
+				// A later dispatch never absorbs it either way: it is settled
+				// (INV-CCH-30). Best-effort: a failed Close here does not change the
+				// failure outcome already decided below.
+				//
+				// A row that already carries a close reason (another handler watching
+				// the same absorbed session closed it first) is not closed a second
+				// time: that re-stamps it and appends another close event (bead
+				// pg2-92rfu).
+				if reason == "" {
+					_ = r.deps.CC.Close(ctx, name, false)
+				}
+				r.logUsageLimitOnDeath(ctx, name, d.Item.ID)
+				return r.failDead(ctx, d, name, "session exited before completing")
+			}
+			return lose()
+		}
+		// The needs_input stall bound (INV-CCH-29): Escape, then close and release the
+		// claim, a drain session that has sat in needs_input past the bound. It ends
+		// the dispatch only when it clears the session.
+		if stop, err := r.stallStep(ctx, d, name, stall, won, lose); stop {
+			return err
+		}
+		if !r.deps.clock().Before(deadline) {
+			// final status check after the deadline.
+			if done, _, _ = check(false); done {
+				if won() {
+					return nil
+				}
+				return lose()
+			}
+			if won() {
+				r.captureSignature() // INV-CCH-9
+				return r.fail(ctx, d, fmt.Sprintf("not complete within %s", maxWait))
+			}
+			return lose()
+		}
+		// cancellable wait — on cancellation return ctx.Err() and DO NOT fail
+		// (the watchdog won the race and owns the terminal outcome).
+		if err := r.deps.waitPoll(ctx, r.deps.Cfg.PollInterval); err != nil {
+			return err
+		}
+	}
+}
+
+// beadShowActiveEvery is the longest the wait loop leaves the bead unread while
+// the session row is active (3 polls at the default 10 s): completion detection
+// may lag by this much, in exchange for two thirds fewer `bd show` launches.
+// A shorter poll shortens the window to beadShowActivePolls polls (never more
+// than this cap), so a fast-polling handler keeps its detection latency in polls.
+const beadShowActiveEvery = 30 * time.Second
+
+// beadShowActivePolls is the window, in polls, between bead reads while the row
+// is active.
+const beadShowActivePolls = 3
+
+// beadShowWindow is the bead-read window for an active row: the lesser of
+// beadShowActiveEvery and beadShowActivePolls x PollInterval.
+func beadShowWindow(poll time.Duration) time.Duration {
+	return min(beadShowActiveEvery, beadShowActivePolls*poll)
+}
+
+// beadsDirFor returns the workspace dir whose .beads holds the role's items:
+// the role's BeadsDir when set (pg2-2grpj), else repoRoot.
+func beadsDirFor(repoRoot string, cc *roles.CCPoolConfig) string {
+	if cc != nil && cc.BeadsDir != "" {
+		return cc.BeadsDir
+	}
+	return repoRoot
+}
+
+func (r *ccpoolRun) fail(ctx context.Context, d DispatchContext, reason string) error {
+	_ = complete.OnFailure(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID)
+	return fmt.Errorf("%s: %s", d.Item.ID, reason)
+}
+
+// failDead is fail for a session that is GONE (it exited before completing and
+// its row is closed): the role's on_failure label policy is unchanged, but the
+// claim is released in the same single update (complete.OnDeath), so the bead
+// is never left in_progress under a session that no longer exists (pg2-0fsuu).
+// The error text is the same as fail's.
+//
+// An add-human death writes the park note (bead pg2-78mxs, parknote.go) before
+// the label-and-release update: the bead is parked as human with nothing for a
+// person to decide, and the note says so and names the drain worktree.
+//
+// A death whose failure signature is api-rate-limit or api-transient (a usage
+// or spend limit, a 429, an API outage) is the one exception (INV-CCH-28, the
+// pg2-e0imq ruling widened to every role by pg2-jzttp): nothing about the bead
+// failed, so the death is handled as on_failure=unclaim whatever the role
+// declares, with no human label and no park note, and the error carries
+// UsageLimitEndSentinel so the router counts it under its own reason. The
+// signature is the one shared classification (INV-CCH-9, captured before the
+// session was closed); the capacity usage-limit reading is never consulted.
+func (r *ccpoolRun) failDead(ctx context.Context, d DispatchContext, name, reason string) error {
+	sig := r.captureSignature()
+	exempt := unclaimedEndExempt(sig.Signature)
+	action := d.Role.CCPool.OnFailure
+	if exempt {
+		action = roles.Unclaim
+	}
+	note := ""
+	if action == roles.AddHuman {
+		note = r.parkNote(ctx, d, name, "session died before completing ("+reason+")", r.deathDetail())
+	}
+	derr := complete.OnDeath(ctx, r.deps.BD, action, d.Item.ID, note)
+	if derr != nil {
+		r.deathReleaseFailed(d, name, derr)
+	}
+	return &sessionDied{beadID: d.Item.ID, reason: reason, releaseErr: derr, exempt: exempt, signature: sig.Signature}
+}
+
+// deathReleaseKind is the eventlog kind of a dead session's claim release that
+// bd refused or that otherwise failed (pg2-qyc3h): the bead is still
+// in_progress under the dead session, so this record is the countable signal
+// (one per failed release) that the death path did not hold, in place of the
+// silent discard that left zr-xvbqa.2 stranded for 23 h.
+const deathReleaseKind = "death_release_failed"
+
+// deathReleaseFailed surfaces a failed OnDeath: an error log line and one
+// deathReleaseKind eventlog record. guard_stale is true when bd refused only
+// because the claim changed hands since it was read (nothing was written, and
+// the bead is no longer the dead session's to release).
+func (r *ccpoolRun) deathReleaseFailed(d DispatchContext, name string, err error) {
+	stale := beads.IsGuardStale(err)
+	slog.Error("dead session's claim release failed; the bead keeps its claim",
+		"role", d.Role.Name, "bead", d.Item.ID, "session", name, "guard_stale", stale, "err", err)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("error", deathReleaseKind, "dead session's claim release failed",
+			map[string]any{
+				"role": d.Role.Name, "bead": d.Item.ID, "session": name,
+				"on_failure": string(d.Role.CCPool.OnFailure), "guard_stale": stale, "error": err.Error(),
+			})
+	}
+}
+
+// ErrSessionDied wraps the unexplained death of a session (waitDone's death
+// branch, failDead); waitFailureResult reports it with the unclaim verb since
+// the claim was released.
+var ErrSessionDied = errors.New("session exited before completing")
+
+// sessionDied is the concrete error behind ErrSessionDied. Its message is
+// exactly what fail produced ("<bead>: <reason>"), so every consumer of the
+// failure text is unchanged.
+type sessionDied struct {
+	beadID string
+	reason string
+	// releaseErr is the failure of complete.OnDeath, nil when the claim was
+	// released. waitFailureResult reports no verb for a release that did not
+	// land (pg2-qyc3h).
+	releaseErr error
+	// exempt is true when the death was caused by a usage or spend limit or an
+	// API outage (failDead): no human label was added whatever the role's
+	// on_failure, and the error text carries UsageLimitEndSentinel.
+	exempt    bool
+	signature failsig.Signature
+}
+
+func (e *sessionDied) Error() string {
+	if e.exempt {
+		return fmt.Sprintf("%s: %s before completing (%s; claim released, no human added)", e.beadID, UsageLimitEndSentinel, e.signature)
+	}
+	return fmt.Sprintf("%s: %s", e.beadID, e.reason)
+}
+
+func (e *sessionDied) Is(target error) bool { return target == ErrSessionDied }
+
+// externalCloseReasons: SOMETHING ELSE ended the session while the worker was
+// fine — the reaper (idle_ttl, cap_eviction) or an operator. "handler" is this
+// process's own close (watchdog hard-stop, not-ingested cleanup), which already
+// owns its outcome. (INV-CCH-7, ADR 0072)
+var externalCloseReasons = map[string]bool{"idle_ttl": true, "cap_eviction": true, "operator": true}
+
+// ErrExternallyClosed wraps a death whose close reason was external; the wait
+// failure mapping reports it as Unclaimed (or Escalated on the second
+// consecutive strike — see externallyClosed below).
+var ErrExternallyClosed = errors.New("session closed externally by ccpool")
+
+// externallyClosed is the concrete error waitDone's death branch returns for an
+// external close: it carries the specific reason plus whether escalateEviction
+// found this to be the SECOND consecutive external close (escalated). Its Is
+// method matches ErrExternallyClosed directly, so errors.Is(err,
+// ErrExternallyClosed) sees this type without needing a %w-wrapped sentinel;
+// waitFailureResult additionally errors.As's the struct to read escalated.
+type externallyClosed struct {
+	reason    string
+	escalated bool
+	// releaseErr is the failure of the claim release (a stale guard included:
+	// then the claim changed hands and nothing was written), nil when it landed.
+	// waitFailureResult reports no unclaim verb for a release that did not land.
+	releaseErr error
+}
+
+// externalReleaseKind is the eventlog kind of an external close's claim release
+// that bd refused or that otherwise failed (pg2-ybkav): the bead is still
+// in_progress under the closed session. A stale guard is not recorded: the claim
+// changed hands and the release was rightly skipped.
+const externalReleaseKind = "external_close_release_failed"
+
+// externalReleaseFailed surfaces a failed release after an external close: a
+// log line, plus one externalReleaseKind eventlog record unless the guard was
+// stale.
+func (r *ccpoolRun) externalReleaseFailed(d DispatchContext, name, reason string, err error) {
+	if beads.IsGuardStale(err) {
+		slog.Info("session closed externally; the bead's claim changed hands, release skipped",
+			"role", d.Role.Name, "bead", d.Item.ID, "session", name, "close_reason", reason)
+		return
+	}
+	slog.Error("session closed externally; releasing its claim failed; the bead keeps its claim",
+		"role", d.Role.Name, "bead", d.Item.ID, "session", name, "close_reason", reason, "err", err)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("error", externalReleaseKind, "externally closed session's claim release failed",
+			map[string]any{
+				"role": d.Role.Name, "bead": d.Item.ID, "session": name,
+				"close_reason": reason, "error": err.Error(),
+			})
+	}
+}
+
+func (e *externallyClosed) Error() string {
+	return fmt.Sprintf("session closed externally by ccpool (%s)", e.reason)
+}
+
+func (e *externallyClosed) Is(target error) bool {
+	return target == ErrExternallyClosed
+}
+
+// unclaimedEndLabel counts a close-or-release role's consecutive unclaimed ends
+// on one bead (INV-CCH-28): added on the first, read on the second, which adds
+// human. It is a plain label and deliberately NOT the budget-stop: prefix, which
+// INV-CCH-11 owns.
+const unclaimedEndLabel = "drain-unclaimed-end"
+
+// releaseAfterFailedSend returns the bead to the open pool after a failed
+// nudge send and reports whether the release landed. The session may already
+// have claimed the bead under its own actor (a send can report "not ingested"
+// while the model is working), and bd refuses an unguarded release of another
+// actor's in_progress claim, so the release is guarded by the observed holder
+// (beads.UnclaimHeld). A refused or stale release is logged, never discarded:
+// the bead keeps its claim and the caller must not report it as unclaimed.
+func (r *ccpoolRun) releaseAfterFailedSend(ctx context.Context, beadID string) bool {
+	if err := beads.UnclaimHeld(ctx, r.deps.BD, beadID); err != nil {
+		slog.Error("release after a failed nudge send did not land; the bead keeps its claim",
+			"bead", beadID, "session", r.deps.ExternalID, "guard_stale", beads.IsGuardStale(err), "err", err)
+		return false
+	}
+	return true
+}
+
+// ErrUnclaimedEnd wraps the end of a close-or-release session that never claimed
+// its bead and left no mark that it gave the bead back. Like ErrExternallyClosed
+// it is a returned error because waitDone's other non-failure results have no
+// carrier (a nil error means "completed" and would clear pool-evicted); the wait
+// failure mapping reports it as Unclaimed on the first strike and Escalated on
+// the second (see unclaimedEnd); an end that died on a usage limit or API outage
+// is exempt from both (INV-CCH-28). It is NOT a session failure:
+// recordDispatchFailure records no dispatch_result for it, so it does not count
+// in the failure metrics as a dispatch failure. Its own unclaimed_end record
+// carries the failure signature instead.
+var ErrUnclaimedEnd = errors.New("session ended without claiming its bead")
+
+// UsageLimitEndSentinel is the documented, stable substring the error of an
+// EXEMPT unclaimed end carries (docs/behavior/interfaces.md, "Usage-limit
+// sentinel"): the session ended without claiming its bead because it died on a
+// usage or spend limit or an API outage (INV-CCH-28). pg-router matches on this
+// text (its own copy of the constant) to give the failure its own reason, so the
+// wording MUST NOT change without changing both sides.
+const UsageLimitEndSentinel = "session ended on a usage limit or API outage"
+
+// unclaimedEnd is the concrete error behind ErrUnclaimedEnd: escalated says
+// whether this was the SECOND consecutive strike (human was added); exempt says
+// the end was caused by a usage or spend limit or an API outage, so no strike
+// was counted (INV-CCH-28) and the error carries UsageLimitEndSentinel.
+type unclaimedEnd struct {
+	escalated bool
+	exempt    bool
+	signature failsig.Signature
+}
+
+func (e *unclaimedEnd) Error() string {
+	if e.exempt {
+		return fmt.Sprintf("%s before claiming its bead (%s; no strike counted)", UsageLimitEndSentinel, e.signature)
+	}
+	if e.escalated {
+		return "session ended without claiming its bead (second consecutive end; escalated to human)"
+	}
+	return "session ended without claiming its bead (first end)"
+}
+
+func (e *unclaimedEnd) Is(target error) bool {
+	return target == ErrUnclaimedEnd
+}
+
+// ErrPeerHeld is the end of a close-or-release session whose bead is held by an
+// actor other than the role's own (a peer won the claim). finishWait turns it
+// into a success with no verb: no bead write, no strike (INV-CCH-28).
+var ErrPeerHeld = errors.New("bead held by another actor")
+
+// unclaimedEndResult counts one unclaimed-end strike for the bead and returns
+// the error that carries it: the first strike adds drain-unclaimed-end only, the
+// second adds human, mirroring escalateEviction. A bd hiccup reading the label
+// counts as a first strike that wrote nothing (the safe direction: no human).
+//
+// The dying session is classified first, with the one shared classification
+// (INV-CCH-9; captureSignature is captured-once, and waitDone already ran it
+// before any teardown). An end whose signature is api-rate-limit or
+// api-transient (a usage or spend limit, a 429, an API outage) is EXEMPT: it
+// writes nothing to the bead, leaves an existing strike as it is, and returns an
+// error carrying UsageLimitEndSentinel. The exemption keys on the signature
+// alone; it never reads the capacity usage-limit reading, which can say "not
+// limited" inside a blocked window. The unclaimed_end record carries
+// failure_signature and signature_evidence either way, and still no
+// dispatch_result is recorded for an unclaimed end.
+func (r *ccpoolRun) unclaimedEndResult(ctx context.Context, d DispatchContext, name string) error {
+	sig := r.captureSignature()
+	exempt := unclaimedEndExempt(sig.Signature)
+	escalated := false
+	if !exempt {
+		escalated = r.escalateUnclaimedEnd(ctx, d.Item.ID)
+	}
+	slog.Info("session ended without claiming its bead", "session", name, "bead", d.Item.ID, "escalated", escalated,
+		"exempt", exempt, "failure_signature", string(sig.Signature), "signature_evidence", sig.Evidence)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("info", "unclaimed_end", "session ended without claiming its bead",
+			map[string]any{
+				"role": d.Role.Name, "bead": d.Item.ID, "session": name, "escalated": escalated,
+				"failure_signature": string(sig.Signature), "signature_evidence": sig.Evidence,
+			})
+	}
+	return fmt.Errorf("%s: %w", d.Item.ID, &unclaimedEnd{escalated: escalated, exempt: exempt, signature: sig.Signature})
+}
+
+// unclaimedEndExempt reports whether an unclaimed end with this signature is
+// outside the two-strike policy: the session died on a limit or an outage, not
+// on anything about the bead (INV-CCH-28).
+func unclaimedEndExempt(s failsig.Signature) bool {
+	return s == failsig.APIRateLimit || s == failsig.APITransient
+}
+
+// escalateUnclaimedEnd is the two-strike idiom of escalateEviction
+// for an unclaimed end: label on the first, human on the
+// second. Returns true iff it escalated to human.
+func (r *ccpoolRun) escalateUnclaimedEnd(ctx context.Context, beadID string) bool {
+	already, err := beads.HasLabel(ctx, r.deps.BD, beadID, unclaimedEndLabel)
+	if err != nil {
+		return false // can't tell => do nothing this pass; the next unclaimed end retries
+	}
+	if already {
+		_ = beads.AddHuman(ctx, r.deps.BD, beadID)
+		return true
+	}
+	_ = beads.AddLabel(ctx, r.deps.BD, beadID, unclaimedEndLabel)
+	return false
+}
+
+// closeReason returns ccpool's recorded close reason for the session, "" when
+// absent, unstamped, or unreadable. ccpool stamps before teardown, so an empty
+// reason on a just-dead row is rare; one bounded re-read covers a list that
+// raced the stamp.
+func (r *ccpoolRun) closeReason(ctx context.Context, externalID string) string {
+	read := func() (string, bool) {
+		sessions, err := r.deps.CC.List(ctx)
+		if err != nil {
+			return "", false
+		}
+		for _, s := range sessions {
+			if s.ExternalID == externalID {
+				return s.CloseReason, true
+			}
+		}
+		return "", false
+	}
+	reason, present := read()
+	if reason == "" && present {
+		if err := r.deps.waitPoll(ctx, r.deps.Cfg.PollInterval); err == nil {
+			reason, _ = read()
+		}
+	}
+	return reason
+}
+
+// escalateEviction is the two-strike idiom for external closes: label on
+// the first, human on the second consecutive one (INV-CCH-7). Returns true iff
+// it escalated to human (repeat external close); false on the first (label
+// only) or on a bd read hiccup.
+func (r *ccpoolRun) escalateEviction(ctx context.Context, beadID string) bool {
+	already, err := beads.HasLabel(ctx, r.deps.BD, beadID, "pool-evicted")
+	if err != nil {
+		return false // can't tell ⇒ do nothing this pass; the next external close retries
+	}
+	if already {
+		_ = beads.AddHuman(ctx, r.deps.BD, beadID)
+		return true
+	}
+	_ = beads.AddLabel(ctx, r.deps.BD, beadID, "pool-evicted")
+	return false
+}
+
+// active reports whether it is still worth waiting on the session addressed by
+// externalID. A session is active while it can still make progress:
+// starting/ready/working, and needs_input (paused awaiting a human who may attach
+// and move it along — still bounded by MaxWait). It is NOT active once the ccpool
+// session reaches idle (Claude Stop: the turn ended and nothing re-nudges it) or
+// errored (Claude StopFailure), or once it is absent from ccpool list. These are
+// session FACTS, not work judgments — on !active the caller re-reads the BEAD to
+// decide success vs failure (ADR 0015). A list error is treated as active (can't
+// tell ⇒ keep waiting; MaxWait bounds us).
+func (r *ccpoolRun) activeIn(p sessionPoll, externalID string) bool {
+	if p.err != nil {
+		r.clearRow() // an unreadable poll must not leave the previous poll's row for the stall bound
+		return true  // can't tell ⇒ assume active; the deadline still bounds us
+	}
+	for _, s := range p.sessions {
+		if s.ExternalID == externalID {
+			r.noteSession(s)
+			return s.Live && s.State != ccpool.StateErrored && s.State != ccpool.StateIdle
+		}
+	}
+	r.noteAbsent()
+	return false // absent ⇒ gone
+}
+
+// sessionLive reports whether the session addressed by externalID is present in
+// the pool and live (tmux has-session): the check every send through ccpool reply
+// makes first (INV-CCH-38). A list that cannot be read counts as live (can't tell
+// => let the send decide; its own failure is handled as today).
+func (r *ccpoolRun) sessionLive(ctx context.Context, externalID string) bool {
+	return ccpool.SessionLive(ctx, r.deps.CC, externalID)
+}
+
+// sessionPoll is the result of the one session list a wait poll makes.
+type sessionPoll struct {
+	sessions []ccpool.Session
+	err      error
+}
+
+// pollSessions reads the pool once for a wait poll. It asks for the facet-free
+// list when the runner offers one (the wait loop never reads cwd or the git
+// facets, and resolving them costs a process launch per live row). When the
+// ccpool in use rejects --no-facets (an older binary), it logs once, remembers
+// that for the rest of this dispatch and falls back to the plain List, which
+// returns the same fields the loop reads.
+func (r *ccpoolRun) pollSessions(ctx context.Context) sessionPoll {
+	if ll, ok := r.deps.CC.(ccpool.LightLister); ok && !r.lightUnsupported {
+		s, err := ll.ListLight(ctx)
+		if err == nil || !errors.Is(err, ccpool.ErrNoFacetsUnsupported) {
+			return sessionPoll{s, err}
+		}
+		r.lightUnsupported = true
+		slog.Warn("ccpool list --no-facets is not supported by this ccpool; falling back to the full list for the wait poll", "err", err)
+	}
+	s, err := r.deps.CC.List(ctx)
+	return sessionPoll{s, err}
+}
+
+// stateIn returns the ccpool state of the session addressed by externalID in the
+// poll and whether it was present. Unlike activeIn (which collapses state to a
+// keep-waiting bool), this preserves the raw state so the caller can detect the
+// EDGE into needs_input. A list error returns ("", false) — can't tell ⇒ no edge
+// fires this poll (the next poll retries).
+func stateIn(p sessionPoll, externalID string) (ccpool.SessionState, bool) {
+	if p.err != nil {
+		return "", false
+	}
+	for _, s := range p.sessions {
+		if s.ExternalID == externalID {
+			return s.State, true
+		}
+	}
+	return "", false
+}
+
+// alertNeedsInput fires the one-shot operator alert when a dispatched session
+// enters needs_input: a distinct eventlog record (kind "needs_input") plus a
+// warn log line that NAMES the session and the attach command. It does NOT
+// change completion semantics — needs_input stays non-terminal and waitDone
+// keeps polling to MaxWait. ccpool's own desktop notifier still fires
+// independently (internal/notify, On=[needs_input,failed]); this surfaces the
+// same event into pg-router's log/eventlog so an operator watching pg-router sees
+// which session to attach to. (pg2-th35)
+func (r *ccpoolRun) alertNeedsInput(externalID, beadID string) {
+	slog.Warn("session needs input — attach to continue",
+		"session", externalID, "bead", beadID, "attach", "ccpool attach "+externalID)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("warn", "needs_input",
+			"session needs input; operator must attach",
+			map[string]any{"session": externalID, "bead": beadID, "attach": "ccpool attach " + externalID})
+	}
+}
+
+// notIngestedCause names why the send was judged not ingested, so the failure
+// carries a cause instead of only the sentinel text. ccpool's own logs hold no
+// deeper reason: the later "reap pruned phantom session" line is the cleanup of
+// the session this path closed, not the cause.
+func notIngestedCause(err error) string {
+	if errors.Is(err, errSessionNotLive) {
+		return "session not live at send time"
+	}
+	return "no model turn observed after delivery"
+}

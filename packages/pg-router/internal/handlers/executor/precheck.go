@@ -1,0 +1,657 @@
+package executor
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
+	"github.com/phillipgreenii/pg-router/internal/handlers/complete"
+	"github.com/phillipgreenii/pg-router/internal/handlers/item"
+	"github.com/phillipgreenii/pg-router/internal/handlers/query"
+	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
+)
+
+// The three review precheck skip reasons (INV-CCH-22, bead pg2-5x29j). Each is
+// the reason tag of one precheck outcome. A MOOT outcome (see Moot) is accepted
+// and completed as skipped, its reason carried by the reply's skipped field; a
+// non-moot outcome is the busy-decline reason the handler replies with, so
+// pg-router core's pg_router_failures{class=declined,reason=...} counts each case
+// separately. They share the "skipped-" prefix so one alert matcher can exclude
+// the declines as routine, non-failing ones.
+const (
+	SkipBeadClosed    = "skipped-bead-closed"
+	SkipPRMerged      = "skipped-pr-merged"
+	SkipPendingReview = "skipped-pending-review"
+)
+
+// ReasonConnectorUnavailable is the review precheck's retryable decline reason:
+// the connector answered a PR read with error class "unavailable" (its daemon is
+// briefly down or its budget is reserved), so the dispatch is declined and the
+// router re-offers the event. Unlike the "skipped-" reasons it does NOT prove the
+// dispatch moot, so it deliberately does not carry that prefix: the failure-rate
+// alert, which excludes "skipped-.+" as routine, still sees a sustained outage.
+const ReasonConnectorUnavailable = "connector-unavailable"
+
+// connectorErrorUnavailable is the wire error code of the connector's retryable
+// "unavailable" class (pg-connector's closed error taxonomy).
+const connectorErrorUnavailable = "unavailable"
+
+// ErrConnectorUnavailable marks a connector read that was answered with error
+// class "unavailable". The review precheck declines retryably on it; every other
+// connector error fails open.
+var ErrConnectorUnavailable = errors.New("connector answered unavailable")
+
+// The "ready" precheck's skip reasons (INV-CCH-22, bead pg2-nk6th.3). They share
+// the "skipped-" prefix with the review reasons so the failure-rate alert, which
+// excludes only `skipped-.+`, treats every one as a routine decline.
+const (
+	SkipBeadNotOpen    = "skipped-bead-not-open"
+	SkipBeadClaimed    = "skipped-bead-claimed"
+	SkipBeadHuman      = "skipped-bead-human"
+	SkipBeadNotGroomed = "skipped-bead-not-groomed"
+	SkipBeadDeferred   = "skipped-bead-deferred"
+	SkipBeadBlocked    = "skipped-bead-blocked"
+)
+
+// SkipBeadNotEscalated is the "triage" precheck's reason for a bead that no
+// longer carries the escalated label (de-escalated since the event was queued).
+// Its other reasons are the "ready" set above; like them it starts with
+// "skipped-".
+const SkipBeadNotEscalated = "skipped-bead-not-escalated"
+
+// SkipBeadHumanEscalated is the "triage" precheck's MOOT reason for a bead that
+// carries escalated AND a HUMAN_LABELS label (bead pg2-n7pufu): the precheck
+// commented on the bead and stripped escalated, so no triager work remains. It
+// is deliberately not SkipBeadHuman, which the "ready" precheck shares and must
+// keep declining.
+const SkipBeadHumanEscalated = "skipped-bead-human-escalated"
+
+// SkipBeadNotSplitReview is the "split-triage" precheck's MOOT reason for a bead
+// that no longer carries needs-split-review (a split outcome was already
+// recorded, or the bead was handed to a person).
+const SkipBeadNotSplitReview = "skipped-bead-not-split-review"
+
+// SkipBeadHumanSplitReview is the "split-triage" precheck's MOOT reason for a
+// bead that carries needs-split-review AND a HUMAN_LABELS label: the precheck
+// commented on the bead and stripped needs-split-review.
+const SkipBeadHumanSplitReview = "skipped-bead-human-split-review"
+
+// SkipBeadBlockedTriage and SkipBeadDeferredTriage are the "triage" and
+// "split-triage" prechecks' MOOT reasons for a bead that is dependency-blocked
+// (blocked status or an open blocks dependency) or deferred (deferred status or
+// a future defer_until). The queue is serial and a decline is re-offered until
+// the event expires, so a declined head jammed every later event for up to the
+// whole expiry window. Completing the event as skipped drops it safely only
+// because the bead is outside the role's `ready` discovery query while blocked
+// or deferred, and re-enters it when its last blocker closes or its deferral
+// passes, which the source reports as a fresh event (see the INV-CCH-22 triage
+// item). They are deliberately not SkipBeadBlocked / SkipBeadDeferred, which the
+// "ready" precheck shares and keeps declining: its events are born expired and
+// offered once, so a decline there holds no queue.
+const (
+	SkipBeadBlockedTriage  = "skipped-bead-blocked-triage"
+	SkipBeadDeferredTriage = "skipped-bead-deferred-triage"
+)
+
+// SkipBeadHumanStripFailed is the RETRYABLE decline when the comment or the
+// escalated strip of the SkipBeadHumanEscalated disposition could not be
+// written: the event is re-offered and the write is tried again.
+const SkipBeadHumanStripFailed = "skipped-bead-human-strip-failed"
+
+// labelHasAcceptanceCriteria marks a bead as groomed: the drain query selects
+// on it, so a bead that lost it is no longer one a drain worker may take.
+const labelHasAcceptanceCriteria = "has-acceptance-criteria"
+
+// readyExcludedLabels are the labels that take a bead out of a drain worker's
+// reach (INV-CCH-22): any of them present now declines the dispatch.
+var readyExcludedLabels = []string{beads.LabelHuman, "human-focus-required", beads.LabelNeedsSplitReview, "escalated"}
+
+// precheckEventKind is the event-log record kind written for every skip.
+const precheckEventKind = "precheck_skip"
+
+// connectorCallTimeout bounds one read-only pg-connector call made by the
+// precheck. A call that outlives it is an error, which fails open (only an
+// answer of class "unavailable" declines retryably).
+const connectorCallTimeout = 20 * time.Second
+
+// defaultConnectorBinary is the pg-connector executable resolved on PATH when
+// config.Config.ConnectorBinary is empty.
+const defaultConnectorBinary = "pg-connector"
+
+// reviewRoleName is the role the precheck applies to: the role that works a
+// review-pr bead (the same role-name convention INV-CCH-12 uses).
+const reviewRoleName = "review"
+
+// Moot reports whether a precheck outcome with this reason proves the event moot:
+// nothing it asks for can ever need doing, so the handler ACCEPTS the event and
+// COMPLETES it as skipped instead of declining it (INV-CCH-22, operator ruling
+// 2026-10-26, bead pg2-6t91v7). A decline is re-offered until the event expires,
+// and the queue is a per-handler serial FIFO, so a dead event declined at the head
+// blocks every later event for the handler; a completion settles it on its first
+// offer. Exactly six outcomes are moot (the split-triage analogues and the
+// triage blocked and deferred reasons, SkipBeadBlockedTriage and
+// SkipBeadDeferredTriage, included): the bead is closed, the PR is merged, the
+// bead no longer carries the escalated label (this includes a human bead that lost it
+// through hand-to-human, bead pg2-4u0d0u), and a bead carrying escalated AND a human
+// label whose escalated the triage precheck just stripped (bead pg2-n7pufu). Every other outcome stays a decline
+// because the work still exists and a completion would drop it: a pending review
+// awaiting submission, a human or not-groomed bead, a blocked, deferred, claimed or
+// otherwise not-open bead, and an unavailable connector.
+func Moot(reason string) bool {
+	switch reason {
+	case SkipBeadClosed, SkipPRMerged, SkipBeadNotEscalated, SkipBeadHumanEscalated,
+		SkipBeadNotSplitReview, SkipBeadHumanSplitReview,
+		SkipBeadBlockedTriage, SkipBeadDeferredTriage:
+		return true
+	}
+	return false
+}
+
+// Skip is a precheck decision to launch no session for a dispatch.
+type Skip struct {
+	// Reason is one of the Skip* constants; it is the busy-decline reason tag.
+	Reason string
+	// Detail is a short human-readable account for the log line.
+	Detail string
+	// Retryable is true for a decline that does not prove the dispatch moot: the
+	// router re-offers the event, so the caller replies with a busy decline
+	// rather than a neutral one.
+	Retryable bool
+	// Moot is true when the outcome proves the event moot (Moot(Reason)): the
+	// caller completes the event as skipped rather than declining it.
+	Moot bool
+}
+
+// PendingReview is the part of pg-connector's review_pending record the
+// precheck reads.
+type PendingReview struct {
+	// Pending is false when the acting identity has no pending review.
+	Pending bool
+	// Stale is the connector's own verdict: true only when nothing in the
+	// pending review is anchored to the PR's live head.
+	Stale bool
+}
+
+// PRReader is the read-only view of a pull request the precheck needs. The
+// production implementation (ConnectorReader) goes through pg-connector; tests
+// substitute a fake. Every method MUST be read-only.
+type PRReader interface {
+	// PRMerged reports whether the PR (id "<repo>#<number>") is merged.
+	PRMerged(ctx context.Context, prID string) (bool, error)
+	// PendingReview reports the acting identity's pending review on the PR.
+	PendingReview(ctx context.Context, prID string) (PendingReview, error)
+}
+
+// ConnectorReader is the production PRReader: it runs the read-only
+// `pg-connector pr show <id>` and `pg-connector pr review pending <id>` verbs
+// through the executor's existing argv seam (query.Commander).
+type ConnectorReader struct {
+	Cmd query.Commander
+	// Binary is the pg-connector executable; empty means "pg-connector" on PATH.
+	Binary string
+}
+
+func (c ConnectorReader) binary() string {
+	if c.Binary == "" {
+		return defaultConnectorBinary
+	}
+	return c.Binary
+}
+
+// run executes one pg-connector verb and returns its wire envelope's result,
+// or an error for a failed process or an error envelope.
+func (c ConnectorReader) run(ctx context.Context, args ...string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, connectorCallTimeout)
+	defer cancel()
+	out, runErr := c.Cmd.Run(ctx, append([]string{c.binary()}, args...))
+	what := c.binary() + " " + strings.Join(args, " ")
+	var env struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	decodeErr := json.Unmarshal(out, &env)
+	if runErr != nil {
+		// The connector exits non-zero for an error answer and still writes the
+		// envelope to stdout, so an "unavailable" class is read from the output
+		// even when the process failed. Any other failure (missing binary, a call
+		// that outlived its bound, another error class) is a plain error.
+		if decodeErr == nil && env.Error != nil && env.Error.Code == connectorErrorUnavailable {
+			return nil, fmt.Errorf("%s: %w: %s", what, ErrConnectorUnavailable, env.Error.Message)
+		}
+		return nil, fmt.Errorf("%s: %w", what, runErr)
+	}
+	if decodeErr != nil {
+		return nil, fmt.Errorf("%s: decode output: %w", what, decodeErr)
+	}
+	if env.Error != nil {
+		if env.Error.Code == connectorErrorUnavailable {
+			return nil, fmt.Errorf("%s: %w: %s", what, ErrConnectorUnavailable, env.Error.Message)
+		}
+		return nil, fmt.Errorf("%s: connector error %q: %s", what, env.Error.Code, env.Error.Message)
+	}
+	if len(env.Result) == 0 {
+		return nil, fmt.Errorf("%s: output carries no result", what)
+	}
+	return env.Result, nil
+}
+
+// PRMerged implements PRReader. `pr show` may be answered from the connector's
+// read-through cache; that is safe here because merged is monotonic: a cached
+// "open" only means the precheck launches as it always did, and a cached
+// "merged" is final.
+func (c ConnectorReader) PRMerged(ctx context.Context, prID string) (bool, error) {
+	raw, err := c.run(ctx, "pr", "show", prID)
+	if err != nil {
+		return false, err
+	}
+	var pr struct {
+		State  string `json:"state"`
+		Merged bool   `json:"merged"`
+	}
+	if err := json.Unmarshal(raw, &pr); err != nil {
+		return false, fmt.Errorf("decode pr show result: %w", err)
+	}
+	return pr.Merged || strings.EqualFold(pr.State, "merged"), nil
+}
+
+// PendingReview implements PRReader.
+func (c ConnectorReader) PendingReview(ctx context.Context, prID string) (PendingReview, error) {
+	raw, err := c.run(ctx, "pr", "review", "pending", prID)
+	if err != nil {
+		return PendingReview{}, err
+	}
+	var res struct {
+		Pending bool `json:"pending"`
+		Review  *struct {
+			Stale bool `json:"stale"`
+		} `json:"review"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return PendingReview{}, fmt.Errorf("decode review pending result: %w", err)
+	}
+	if !res.Pending {
+		return PendingReview{}, nil
+	}
+	if res.Review == nil {
+		// A pending result with no record cannot be judged: report an error so
+		// the precheck fails open rather than guessing.
+		return PendingReview{}, errors.New("review pending result is pending but carries no review record")
+	}
+	return PendingReview{Pending: true, Stale: res.Review.Stale}, nil
+}
+
+func (d Deps) prReader() PRReader {
+	if d.PR != nil {
+		return d.PR
+	}
+	return ConnectorReader{Cmd: d.commander(), Binary: d.Cfg.ConnectorBinary}
+}
+
+var (
+	repoPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	prNumPattern = regexp.MustCompile(`^[1-9][0-9]*$`)
+)
+
+// prIDFor builds the pg-connector PR id "<repo>#<number>" from a review item's
+// metadata. ok is false when the metadata names no well-formed PR; the strict
+// shape also keeps a malformed value from being read as a flag by the CLI.
+func prIDFor(it item.Item) (id string, ok bool) {
+	repo, _ := it.Metadata["repo"].(string)
+	if !repoPattern.MatchString(repo) {
+		return "", false
+	}
+	var num string
+	switch v := it.Metadata["pr_number"].(type) {
+	case float64:
+		if v != float64(int64(v)) {
+			return "", false
+		}
+		num = strconv.FormatInt(int64(v), 10)
+	case int:
+		num = strconv.Itoa(v)
+	case int64:
+		num = strconv.FormatInt(v, 10)
+	case json.Number:
+		num = v.String()
+	case string:
+		num = v
+	}
+	if !prNumPattern.MatchString(num) {
+		return "", false
+	}
+	return repo + "#" + num, true
+}
+
+// Precheck runs the dispatch precheck the role opted in to (INV-CCH-22): the
+// role's Precheck setting when set, else the historical default (the role named
+// "review" runs the review precheck, every other role none). It is read-only,
+// fails open, and its single caller is cmd/.../dispatch.go.
+func Precheck(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	if d.Role.CCPool == nil {
+		return Skip{}, false
+	}
+	switch d.Role.CCPool.Precheck {
+	case roles.PrecheckReady:
+		return PrecheckReady(d, deps, iss)
+	case roles.PrecheckTriage:
+		return PrecheckTriage(ctx, d, deps, iss)
+	case roles.PrecheckSplitTriage:
+		return PrecheckSplitTriage(ctx, d, deps, iss)
+	case roles.PrecheckReview:
+		return precheckReview(ctx, d, deps, iss)
+	}
+	return PrecheckReview(ctx, d, deps, iss)
+}
+
+// PrecheckReady decides, at zero model cost, whether a dispatch of a role that
+// works a bead it claims itself (a drain worker) should launch no session at all
+// (INV-CCH-22, bead pg2-nk6th.3). It reads only iss, the bead RefreshItemIssue
+// just fetched from `bd show` (no extra bd call), and declines when, in this
+// order:
+//
+//  1. the bead is not open (a closed, deferred or blocked status gets its own
+//     reason; closed is MOOT, see Moot, the rest are declines);
+//  2. an actor other than the role's own holds or is assigned it;
+//  3. it carries human, human-focus-required, needs-split-review or escalated;
+//  4. it no longer carries has-acceptance-criteria;
+//  5. its defer_until is in the future (the worker's own DEFER-ON-EVENT leaves
+//     exactly open plus a future defer_until);
+//  6. it has an open blocks dependency (the worker's own CONVERT leaves exactly
+//     open plus a blocker edge).
+//
+// A bead that is in_progress and assigned to the role's own actor always
+// proceeds, whatever else it carries: it is the live session of an earlier
+// dispatch, which the absorb path re-adopts after a daemon restart. A nil iss
+// (the bead could not be read) fails open, and so does an unparseable
+// defer_until. A decline writes nothing to the bead.
+func PrecheckReady(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	if d.Role.CCPool == nil || iss == nil {
+		return Skip{}, false
+	}
+	actor := d.Role.CCPool.Actor
+	ownInProgress := iss.Status == "in_progress" && actor != "" && iss.Assignee == actor
+	if ownInProgress {
+		return Skip{}, false
+	}
+	decline := func(reason, detail string) (Skip, bool) {
+		return deps.skip(d, Skip{Reason: reason, Detail: detail}, ""), true
+	}
+	switch iss.Status {
+	case "open":
+	case "closed":
+		return decline(SkipBeadClosed, "the bead is closed")
+	case "deferred":
+		return decline(SkipBeadDeferred, "the bead's status is deferred")
+	case "blocked":
+		return decline(SkipBeadBlocked, "the bead's status is blocked")
+	default:
+		return decline(SkipBeadNotOpen, "the bead's status is "+iss.Status+", not open")
+	}
+	if iss.Assignee != "" && iss.Assignee != actor {
+		return decline(SkipBeadClaimed, "the bead is assigned to another actor")
+	}
+	for _, l := range readyExcludedLabels {
+		if iss.HasLabel(l) {
+			return decline(SkipBeadHuman, "the bead now carries the "+l+" label")
+		}
+	}
+	if !iss.HasLabel(labelHasAcceptanceCriteria) {
+		return decline(SkipBeadNotGroomed, "the bead no longer carries "+labelHasAcceptanceCriteria)
+	}
+	if iss.DeferredUntilAfter(deps.clock()) {
+		return decline(SkipBeadDeferred, "the bead's defer_until is in the future")
+	}
+	if iss.HasOpenBlocker() {
+		return decline(SkipBeadBlocked, "the bead has an open blocks dependency")
+	}
+	return Skip{}, false
+}
+
+// escalatedLabel is the label a triage role's discovery query selects on.
+const escalatedLabel = complete.EscalatedLabel
+
+// PrecheckTriage decides, at zero model cost, whether a dispatch of a
+// close-or-triage role (the escalation triager, which works a bead it does NOT
+// claim) should launch no session at all (INV-CCH-22, bead pg2-p9lcg). It
+// declines unless the bead still matches the role's own discovery query
+// (`ready --label escalated --exclude-label human`), reading only iss, the bead
+// RefreshItemIssue just fetched (no extra bd call). It declines when, in this
+// order:
+//
+//  1. the bead is closed (MOOT, see Moot);
+//  2. it no longer carries escalated (it was de-escalated, or handed to a person
+//     through hand-to-human, which removes escalated and adds human; MOOT, see
+//     Moot, whatever its status or other labels, because no triager work can
+//     remain for the event: bead pg2-4u0d0u);
+//     A bead carrying escalated AND any HUMAN_LABELS label is handled gracefully
+//     (bead pg2-n7pufu): the precheck comments, THEN removes escalated (safe under
+//     LV-4, the human label is already present) and returns the MOOT
+//     SkipBeadHumanEscalated, so the event completes as skipped and the queue
+//     advances; a repeat is moot through the not-escalated check. A failed write
+//     declines retryably (SkipBeadHumanStripFailed). It is the only precheck that
+//     writes to a bead;
+//  3. it is otherwise not open (a deferred or blocked status gets its own MOOT
+//     reason, SkipBeadDeferredTriage / SkipBeadBlockedTriage; the rest is a
+//     not-open decline);
+//  4. (a human bead never reaches here: it is handled above);
+//  5. its defer_until is in the future (MOOT, SkipBeadDeferredTriage);
+//  6. it has an open blocks dependency (MOOT, SkipBeadBlockedTriage).
+//
+// The assignee is deliberately NOT checked: `bd ready` lists an open bead
+// whatever its assignee, and the triager never claims its bead. A nil iss (the
+// bead could not be read) fails open, and so does an unparseable defer_until. A
+// decline writes nothing to the bead; only the human-and-escalated disposition
+// (above) writes.
+func PrecheckTriage(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	return precheckQueue(ctx, d, deps, iss, queueSpec{
+		label: escalatedLabel, who: "Escalation triager", queue: "escalation queue",
+		notLabel: SkipBeadNotEscalated, humanMoot: SkipBeadHumanEscalated,
+	})
+}
+
+// PrecheckSplitTriage is PrecheckTriage for the split triager:
+// the same checks with needs-split-review in place of escalated (its discovery
+// query is `ready --label needs-split-review --exclude-label human`). A bead
+// carrying needs-split-review AND a HUMAN_LABELS label gets a comment, then loses
+// needs-split-review (its human label stays), and completes as the MOOT
+// SkipBeadHumanSplitReview; a bead without needs-split-review is the MOOT
+// SkipBeadNotSplitReview.
+func PrecheckSplitTriage(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	return precheckQueue(ctx, d, deps, iss, queueSpec{
+		label: beads.LabelNeedsSplitReview, who: "Split triager", queue: "split-review queue",
+		notLabel: SkipBeadNotSplitReview, humanMoot: SkipBeadHumanSplitReview,
+	})
+}
+
+// queueSpec parameterises precheckQueue by the label the role's discovery query
+// selects on.
+type queueSpec struct {
+	label, who, queue   string
+	notLabel, humanMoot string
+}
+
+func precheckQueue(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue, q queueSpec) (Skip, bool) {
+	if d.Role.CCPool == nil || iss == nil {
+		return Skip{}, false
+	}
+	decline := func(reason, detail string) (Skip, bool) {
+		return deps.skip(d, Skip{Reason: reason, Detail: detail}, ""), true
+	}
+	retry := func(reason, detail string) (Skip, bool) {
+		return deps.skip(d, Skip{Reason: reason, Detail: detail, Retryable: true}, ""), true
+	}
+	if iss.Status == "closed" {
+		return decline(SkipBeadClosed, "the bead is closed")
+	}
+	// The escalated check runs before the status and human checks: a bead that
+	// lacks escalated is moot whatever else it carries. A human bead without
+	// escalated was handed to a person (hand-to-human), and a head-of-queue event
+	// declined for it jammed the serial FIFO (bead pg2-4u0d0u).
+	if !iss.HasLabel(q.label) {
+		return decline(q.notLabel, "the bead no longer carries the "+q.label+" label")
+	}
+	// A bead carrying escalated AND a human label must never reach a triager
+	// (LV-5). Handle it gracefully instead of declining it forever (bead
+	// pg2-n7pufu): comment, strip escalated, complete as moot.
+	for _, l := range beads.HumanLabels {
+		if !iss.HasLabel(l) {
+			continue
+		}
+		if deps.BD == nil {
+			return retry(SkipBeadHumanStripFailed, "the bead carries "+q.label+" and "+l+" but no bd runner is available to strip it")
+		}
+		note := q.who + " precheck: this bead carried both the " + q.label + " and " + l +
+			" labels, which the " + q.queue + " must never hold (a person is already the blocker). " +
+			"Removed " + q.label + " and launched no session; the bead stays with its human label."
+		if err := beads.Comment(ctx, deps.BD, iss.ID, note); err != nil {
+			return retry(SkipBeadHumanStripFailed, err.Error())
+		}
+		if err := beads.RemoveLabel(ctx, deps.BD, iss.ID, q.label); err != nil {
+			return retry(SkipBeadHumanStripFailed, err.Error())
+		}
+		return decline(q.humanMoot, "the bead carried "+q.label+" and "+l+"; commented and removed "+q.label)
+	}
+	switch iss.Status {
+	case "open":
+	case "deferred":
+		return decline(SkipBeadDeferredTriage, "the bead's status is deferred")
+	case "blocked":
+		return decline(SkipBeadBlockedTriage, "the bead's status is blocked")
+	default:
+		return decline(SkipBeadNotOpen, "the bead's status is "+iss.Status+", not open")
+	}
+	if iss.DeferredUntilAfter(deps.clock()) {
+		return decline(SkipBeadDeferredTriage, "the bead's defer_until is in the future")
+	}
+	if iss.HasOpenBlocker() {
+		return decline(SkipBeadBlockedTriage, "the bead has an open blocks dependency")
+	}
+	return Skip{}, false
+}
+
+// PrecheckReview decides, at zero model cost, whether a review dispatch should
+// launch no session at all (INV-CCH-22, bead pg2-5x29j). It is read-only and
+// runs only for the review role. It declines when, in this order:
+//
+//  1. the review bead is already closed (read from iss, the bead
+//     RefreshItemIssue just fetched: no extra bd call);
+//  2. the PR is merged (pg-connector pr show);
+//  3. the acting identity already has a pending review on the PR that is not
+//     stale, i.e. holds content for the PR's live head (pg-connector pr review
+//     pending).
+//
+// It fails OPEN: an unreadable bead, a PR id the item does not carry, or any
+// connector failure (missing binary, timeout, error envelope) logs a warning
+// and launches exactly as before, with one exception: a connector answer of
+// error class "unavailable" (ErrConnectorUnavailable) declines the dispatch with
+// the retryable reason ReasonConnectorUnavailable, so the router re-offers it
+// once the connector is back. A decline logs a message distinct per reason,
+// writes a precheck_skip event-log record, and (via the busy-decline reason the
+// caller replies with) lands in pg-router core's declined metric by reason.
+func PrecheckReview(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	if d.Role.Name != reviewRoleName || d.Role.CCPool == nil {
+		return Skip{}, false
+	}
+	return precheckReview(ctx, d, deps, iss)
+}
+
+// precheckReview is PrecheckReview without the role-name gate, for a role that
+// opted in with precheck = "review".
+func precheckReview(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	if d.Role.CCPool == nil {
+		return Skip{}, false
+	}
+	if iss != nil && iss.Status == "closed" {
+		return deps.skip(d, Skip{Reason: SkipBeadClosed, Detail: "the review bead is already closed"}, ""), true
+	}
+	prID, ok := prIDFor(d.Item)
+	if !ok {
+		slog.Debug("dispatch precheck: item names no well-formed PR; skipping the PR checks", "role", d.Role.Name, "bead", d.Item.ID)
+		return Skip{}, false
+	}
+	pr := deps.prReader()
+	merged, err := pr.PRMerged(ctx, prID)
+	switch {
+	case errors.Is(err, ErrConnectorUnavailable):
+		return deps.skip(d, unavailableSkip(err), prID), true
+	case err != nil:
+		slog.Warn("dispatch precheck: could not read PR merged state; launching anyway", "role", d.Role.Name, "bead", d.Item.ID, "pr", prID, "err", err)
+	case merged:
+		return deps.skip(d, Skip{Reason: SkipPRMerged, Detail: "the PR is already merged"}, prID), true
+	}
+	pending, err := pr.PendingReview(ctx, prID)
+	switch {
+	case errors.Is(err, ErrConnectorUnavailable):
+		return deps.skip(d, unavailableSkip(err), prID), true
+	case err != nil:
+		slog.Warn("dispatch precheck: could not read pending-review state; launching anyway", "role", d.Role.Name, "bead", d.Item.ID, "pr", prID, "err", err)
+	case pending.Pending && !pending.Stale:
+		return deps.skip(d, Skip{Reason: SkipPendingReview, Detail: "a pending review already holds content for the PR's live head"}, prID), true
+	}
+	return Skip{}, false
+}
+
+// unavailableSkip is the retryable decline for a connector read answered with
+// class "unavailable".
+func unavailableSkip(err error) Skip {
+	return Skip{Reason: ReasonConnectorUnavailable, Detail: err.Error(), Retryable: true}
+}
+
+// skip logs a precheck outcome with a message distinct per reason and records
+// it in the event log, then returns s with Moot set from its reason. pr is ""
+// for the bead-closed case.
+func (d Deps) skip(dc DispatchContext, s Skip, pr string) Skip {
+	s.Moot = Moot(s.Reason)
+	var msg string
+	switch s.Reason {
+	case SkipBeadClosed:
+		msg = "dispatch skipped: bead already closed"
+	case SkipPRMerged:
+		msg = "dispatch skipped: PR already merged"
+	case SkipPendingReview:
+		msg = "dispatch declined: pending review already covers the head"
+	case SkipBeadNotOpen:
+		msg = "dispatch declined: bead is not open"
+	case SkipBeadClaimed:
+		msg = "dispatch declined: bead is held by another actor"
+	case SkipBeadHuman:
+		msg = "dispatch declined: bead is marked for a human"
+	case SkipBeadNotGroomed:
+		msg = "dispatch declined: bead is no longer groomed"
+	case SkipBeadDeferred:
+		msg = "dispatch declined: bead is deferred"
+	case SkipBeadBlocked:
+		msg = "dispatch declined: bead is blocked"
+	case SkipBeadBlockedTriage:
+		msg = "dispatch skipped: bead is blocked; it re-enters the queue's discovery set when unblocked"
+	case SkipBeadDeferredTriage:
+		msg = "dispatch skipped: bead is deferred; it re-enters the queue's discovery set when the deferral passes"
+	case SkipBeadNotEscalated:
+		msg = "dispatch skipped: bead is no longer escalated"
+	case SkipBeadHumanEscalated:
+		msg = "dispatch skipped: bead was escalated and human; commented and stripped escalated"
+	case SkipBeadHumanStripFailed:
+		msg = "dispatch declined: could not strip escalated from a human bead, retry later"
+	case ReasonConnectorUnavailable:
+		msg = "dispatch declined: connector unavailable, retry later"
+	default:
+		msg = "dispatch declined: precheck"
+	}
+	slog.Info(msg, "role", dc.Role.Name, "bead", dc.Item.ID, "pr", pr, "reason", s.Reason)
+	if d.Log != nil {
+		_ = d.Log.Emit("info", precheckEventKind, msg, map[string]any{
+			"role": dc.Role.Name, "bead": dc.Item.ID, "pr": pr, "reason": s.Reason, "detail": s.Detail,
+		})
+	}
+	return s
+}

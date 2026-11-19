@@ -3,39 +3,39 @@
   mkGoApp,
 }:
 
+let
+  members = import ../pg-router/members.nix { inherit lib; };
+in
 mkGoApp {
   pname = "pg-router-ccpool-handler";
 
-  # Pattern B (local `replace => ../pg-router`/`../ccpool`/`../claude-transcript`,
-  # `phillipg-nix-repo-base` ADR 0008): root the fileset at the parent so all
-  # three sit alongside this module in one store copy, mirroring pg-router's
-  # own local-replace of the same two (packages/pg-router/default.nix) —
-  # `../ccpool`'s own sessionmeta subpackage is this module's test-only
-  # dependency (internal/ccpool/sessionmeta_smoke_test.go), and
-  # `../claude-transcript` backs internal/usage's transcript reader plus
-  # ccpoolRun's own needs_input detection. Task 5.2/5.3 (folded per the
-  # operator's 2026-09-11 decision) moved every participant implementation in
-  # and gave the module a real wire-facing CLI entrypoint — see doc.go and
-  # docs/behavior/README.md's Realization gaps.
+  # Pattern B (`phillipg-nix-repo-base` ADR 0008): these binaries are built from
+  # the router module (packages/pg-router, one go.mod). The fileset is exactly the
+  # handlers member's cmd directories, its internal/handlers subtree, its
+  # conformance tests, the shared set and the module files (members.json lists
+  # them; the Go boundary test reads the same file), so a router-engine edit does
+  # not bump this package's `--version` and a handlers-only edit does not bump the
+  # router's. The modules the router's go.mod replaces locally for the handlers
+  # (`../ccpool` for the pool client and its sessionmeta test helper,
+  # `../pg-claude-code-recorder`, `../pg-sqlite`, `../pg-failsig`) and
+  # `../claude-transcript` (internal/usage's transcript reader and ccpoolRun's
+  # needs_input detection) sit beside the module in one store copy.
   src = lib.fileset.toSource {
-    root = ./..;
+    root = members.packagesRoot;
     fileset = lib.fileset.unions [
-      # Exclude this module's OWN behavior docs from its version digest, same
-      # rationale as pg-router's own default.nix: a doc-only edit here should
-      # not bump this package's `--version` (repo CLAUDE.md "Versioning";
-      # ADR 0025).
-      (lib.fileset.difference ./. ./docs)
-      ../pg-router
+      (members.memberFileset "handlers")
       ../ccpool
       ../pg-claude-code-recorder
       ../pg-sqlite
-      ../claude-transcript
       ../pg-failsig
     ];
   };
-  modRoot = "pg-router-handlers";
+  modRoot = "pg-router";
 
-  gomod2nixToml = ./gomod2nix.toml;
+  # go.work is for the editor and go-work-vet only; a build resolves through go.mod.
+  env.GOWORK = "off";
+
+  gomod2nixToml = ../pg-router/gomod2nix.toml;
 
   # Both cmd/ binaries declare `var version = "dev"` in LOWERCASE, but mkGoApp's
   # default ldflag target is capital-V `main.Version`; without this override the

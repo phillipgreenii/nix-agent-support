@@ -7,6 +7,12 @@
     "schemas"
   ],
   "members": {
+    "handlers": {
+      "cmd": ["pg-router-handler-ccpool", "pg-router-handler-command"],
+      "internal": ["handlers"],
+      "extra": ["conformance/handlers"],
+      "stdlibOnly": false
+    },
     "heartbeat": {
       "cmd": ["pg-router-heartbeat"],
       "internal": ["heartbeat"],

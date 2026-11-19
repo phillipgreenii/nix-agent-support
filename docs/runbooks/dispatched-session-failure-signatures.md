@@ -32,7 +32,7 @@ flowchart LR
 ## Recipes
 
 Set `LOG` to the event log path. The recipes were verified against the fixture
-`packages/pg-router-handlers/internal/executor/testdata/dispatch-results.jsonl`, which a Go
+`packages/pg-router/internal/handlers/executor/testdata/dispatch-results.jsonl`, which a Go
 test (`TestRunbookRecipes`) runs when `jq` is on `PATH`.
 
 First occurrence of signature `git-auth` (change the signature to look at another):

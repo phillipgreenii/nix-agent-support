@@ -2319,6 +2319,10 @@
                       (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
                       ./packages/claude-transcript
+                      # the folded handlers member's local-replace modules
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                      ./packages/pg-failsig
                     ];
                   };
                 })
@@ -2335,22 +2339,6 @@
                       ./packages/pg-router/cmd/pg-router-probe
                       # pg-desk/internal/store imports pg-sqlite via a local replace.
                       ./packages/pg-sqlite
-                    ];
-                  };
-                })
-                (goLint {
-                  module = "pg-router-handlers";
-                  modRoot = "pg-router-handlers";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
-                      ./packages/pg-router
-                      ./packages/ccpool
-                      ./packages/pg-claude-code-recorder
-                      ./packages/pg-sqlite
-                      ./packages/claude-transcript
-                      ./packages/pg-failsig
                     ];
                   };
                 })
@@ -2434,6 +2422,9 @@
                       (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
                       ./packages/claude-transcript
+                      ./packages/pg-claude-code-recorder
+                      ./packages/pg-sqlite
+                      ./packages/pg-failsig
                     ];
                   };
                 })
@@ -2453,22 +2444,6 @@
                     ];
                   };
                 })
-                (goLintTagged {
-                  module = "pg-router-handlers";
-                  modRoot = "pg-router-handlers";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
-                      ./packages/pg-router
-                      ./packages/ccpool
-                      ./packages/pg-claude-code-recorder
-                      ./packages/pg-sqlite
-                      ./packages/claude-transcript
-                      ./packages/pg-failsig
-                    ];
-                  };
-                })
               ];
 
               # The router module's folded members (heartbeat, probe, sensors; see
@@ -2480,11 +2455,29 @@
               routerMembers = import ./packages/pg-router/members.nix { inherit lib; };
               memberGoTests =
                 name: extraFlags: post:
-                (pkgs._agentSupportGoBuilders.mkGoTest {
+                memberGoTestsWith name extraFlags post {
                   pname = "pg-router-${name}-go-tests";
+                  extraSrc = [ ];
+                  testDeps = [ ];
+                };
+              memberGoTestsWith =
+                name: extraFlags: post:
+                {
+                  pname,
+                  extraSrc,
+                  testDeps,
+                }:
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  inherit pname testDeps;
                   src = lib.fileset.toSource {
                     root = ./packages;
-                    fileset = lib.fileset.union (routerMembers.memberFileset name) ./packages/pg-router/tests/coverage-gate.sh;
+                    fileset = lib.fileset.unions (
+                      [
+                        (routerMembers.memberFileset name)
+                        ./packages/pg-router/tests/coverage-gate.sh
+                      ]
+                      ++ extraSrc
+                    );
                   };
                   modRoot = "pg-router";
                   gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
@@ -7334,38 +7327,37 @@
               # "New module" section): the seven moved packages' bars are
               # activated FRESH here since none carried an existing
               # pg-router-side bar as of this move.
+              #
+              # The handlers are now a member of the router module (SD-1/SD-2): the
+              # check keeps its name and runs `go test` over the member's subtree
+              # only (cmd/pg-router-handler-*, internal/handlers, conformance/handlers).
               pg-router-ccpool-handler-go-tests =
-                (pkgs._agentSupportGoBuilders.mkGoTest {
-                  pname = "pg-router-ccpool-handler-go-tests";
-                  src = lib.fileset.toSource {
-                    root = ./packages;
-                    fileset = lib.fileset.unions [
-                      (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
-                      ./packages/pg-router
+                memberGoTestsWith "handlers"
+                  [
+                    "-coverprofile=cover.out"
+                    "-covermode=atomic"
+                  ]
+                  ''
+                    echo "=== pg-router-ccpool-handler per-package statement-coverage gate ==="
+                    bash tests/coverage-gate.sh cover.out internal/handlers/coverage-thresholds.txt
+                  ''
+                  {
+                    pname = "pg-router-ccpool-handler-go-tests";
+                    extraSrc = [
+                      # the adapters' alert-contract tests read the router's rule file
+                      # and metric definitions by relative path
+                      ./packages/pg-router/grafana/alerting/alerts.yaml
+                      ./packages/pg-router/internal/metrics/metrics.go
                       ./packages/ccpool
                       ./packages/pg-claude-code-recorder
                       ./packages/pg-sqlite
-                      ./packages/claude-transcript
                       ./packages/pg-failsig
                     ];
+                    # git only: the real-ccpool, tmux, built-binary and re-exec tests
+                    # are tagged `integration` and run in
+                    # pg-router-handlers-integration-tests below.
+                    testDeps = [ pkgs.git ];
                   };
-                  modRoot = "pg-router-handlers";
-                  gomod2nixToml = ./packages/pg-router-handlers/gomod2nix.toml;
-                  testFlags = [
-                    "-coverprofile=cover.out"
-                    "-covermode=atomic"
-                  ];
-                  # git only: the real-ccpool, tmux, built-binary and re-exec tests
-                  # are tagged `integration` and run in
-                  # pg-router-handlers-integration-tests below.
-                  testDeps = [ pkgs.git ];
-                }).overrideAttrs
-                  (old: {
-                    postBuild = (old.postBuild or "") + ''
-                      echo "=== pg-router-ccpool-handler per-package statement-coverage gate ==="
-                      bash tests/coverage-gate.sh cover.out tests/coverage-thresholds.txt
-                    '';
-                  });
 
               # ceta — the finding's primary motivation: internal rule / engine /
               # patheval security tests. git on PATH for the primary-commit
@@ -8397,21 +8389,21 @@
                 src = lib.fileset.toSource {
                   root = ./packages;
                   fileset = lib.fileset.unions [
-                    (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
-                    ./packages/pg-router
+                    (routerMembers.memberFileset "handlers")
+                    ./packages/pg-router/grafana/alerting/alerts.yaml
+                    ./packages/pg-router/internal/metrics/metrics.go
                     ./packages/ccpool
                     ./packages/pg-claude-code-recorder
                     ./packages/pg-sqlite
-                    ./packages/claude-transcript
                     ./packages/pg-failsig
                   ];
                 };
-                modRoot = "pg-router-handlers";
-                gomod2nixToml = ./packages/pg-router-handlers/gomod2nix.toml;
+                modRoot = "pg-router";
+                gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
                 runRegex = "^Test(Terminal|Park|Triage|Split)_RealBD_";
                 testPackages = [
-                  "./internal/watchdog/"
-                  "./internal/executor/"
+                  "./internal/handlers/watchdog/"
+                  "./internal/handlers/executor/"
                   "./cmd/pg-router-handler-command/"
                   "./cmd/pg-router-handler-ccpool/"
                 ];
@@ -21061,20 +21053,23 @@
             pg-router-handlers-integration-tests =
               (pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-router-handlers-integration-tests";
+                # The handlers are a member of the router module: the member's
+                # fileset (its binaries, internal/handlers, conformance/handlers
+                # and the shared set) plus the modules its go.mod replaces.
                 src = lib.fileset.toSource {
                   root = ./packages;
                   fileset = lib.fileset.unions [
-                    (lib.fileset.difference ./packages/pg-router-handlers ./packages/pg-router-handlers/docs)
-                    ./packages/pg-router
+                    ((import ./packages/pg-router/members.nix { inherit lib; }).memberFileset "handlers")
+                    ./packages/pg-router/grafana/alerting/alerts.yaml
+                    ./packages/pg-router/internal/metrics/metrics.go
                     ./packages/ccpool
                     ./packages/pg-claude-code-recorder
                     ./packages/pg-sqlite
-                    ./packages/claude-transcript
                     ./packages/pg-failsig
                   ];
                 };
-                modRoot = "pg-router-handlers";
-                gomod2nixToml = ./packages/pg-router-handlers/gomod2nix.toml;
+                modRoot = "pg-router";
+                gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
                 testDeps = [
                   pkgs.git
                   pkgs.ccpool
@@ -21102,7 +21097,7 @@
                     export GOFLAGS=''${GOFLAGS//-trimpath/}
                     log="$TMPDIR/integration.log"
                     : > "$log"
-                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' ./cmd/pg-router-handler-ccpool ./cmd/pg-router-handler-command ./internal/handlers ./conformance/handlers | xargs -n1 dirname | sort -u)
                     if [ -z "$pkgs" ]; then
                       echo "pg-router-handlers-integration-tests: no test file carries //go:build integration" >&2
                       exit 1

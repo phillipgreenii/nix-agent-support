@@ -624,7 +624,7 @@ let
           continue
         fi
         # branch derives from wt's own basename: internal/worktree's Ensure
-        # (packages/pg-router-handlers/internal/worktree/worktree.go)
+        # (packages/pg-router/internal/handlers/worktree/worktree.go)
         # names the worktree dir <worktreeDir>/<beadID> and its anchor branch
         # pg-router/<beadID> deterministically from the SAME beadID, so the
         # dir's basename recovers it here without needing beads/ccpool state.
