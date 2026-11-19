@@ -450,7 +450,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 			poolDone[jr.pool] = true
 			run.runPass(rctx, passClosedBead, name, jr.deps, func(ctx context.Context) int { return passes.closedBead(ctx, jr.role, jr.cfg, jr.deps) })
 		}
-		// Default-pool pass: the same condition runSweeps keys on, once per run.
+		// Default-pool pass: once per run, when a default pool is configured.
 		if !defaultPoolDone && (jr.role.CCPool.PoolDir != "" || os.Getenv("CCPOOL_POOL") != "") {
 			defaultPoolDone = true
 			run.runPass(rctx, passDefaultPool, name, jr.deps, func(ctx context.Context) int { return passes.defaultPool(ctx, jr.cfg) })
