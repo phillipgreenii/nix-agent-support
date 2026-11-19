@@ -29,10 +29,16 @@ if [ "${#modules[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# Membership test with no pipe: `printf | grep -q` under pipefail is racy, because
+# grep -q exits on the first match and printf can then die of SIGPIPE (141),
+# turning a real match into "not found" when the host is loaded.
 has() {
-  local needle="$1"
+  local needle="$1" item
   shift
-  [ "$#" -gt 0 ] && printf '%s\n' "$@" | grep -Fxq -- "${needle}"
+  for item in "$@"; do
+    [ "${item}" = "${needle}" ] && return 0
+  done
+  return 1
 }
 
 mapfile -t linted_names <"${linted}"

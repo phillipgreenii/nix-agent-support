@@ -54,3 +54,14 @@ run_check() { run bash "$SCRIPT" "$ROOT" "$LINTED" "$EXEMPT"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"ghost: exempt but packages/ghost/go.mod does not exist"* ]]
 }
+
+@test "a match near the top of a very large check list is still found (no SIGPIPE under pipefail)" {
+  # More than a pipe buffer of names after the match: a `printf | grep -q`
+  # membership test dies of SIGPIPE here every time, not only on a loaded host.
+  {
+    printf 'alpha-golangci\nbeta-golangci\n'
+    seq -f 'filler-check-with-a-long-name-%g-golangci' 1 5000
+  } >"$LINTED"
+  run_check
+  [ "$status" -eq 0 ]
+}
