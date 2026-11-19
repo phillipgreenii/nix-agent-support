@@ -24,6 +24,11 @@ type ciRun struct {
 	Status     string
 	Conclusion string
 	URL        string
+	// Required is the optional `required` member: true when the merge gate
+	// requires the check, false when it does not, nil when the view does not
+	// say. A nil Required is treated as required, so a producer that omits
+	// the member changes nothing.
+	Required *bool
 }
 
 // UnmarshalJSON accepts the run id as a string (the documented shape) or a
@@ -36,11 +41,12 @@ func (r *ciRun) UnmarshalJSON(data []byte) error {
 		Status     string          `json:"status"`
 		Conclusion string          `json:"conclusion"`
 		URL        string          `json:"url"`
+		Required   *bool           `json:"required"`
 	}
 	if err := json.Unmarshal(data, &w); err != nil {
 		return err
 	}
-	*r = ciRun{Name: w.Name, Status: w.Status, Conclusion: w.Conclusion, URL: w.URL}
+	*r = ciRun{Name: w.Name, Status: w.Status, Conclusion: w.Conclusion, URL: w.URL, Required: w.Required}
 	if len(w.ID) > 0 && string(w.ID) != "null" {
 		var s string
 		if json.Unmarshal(w.ID, &s) == nil {
@@ -97,9 +103,17 @@ func ciRunPassed(r ciRun) bool {
 	return false
 }
 
+// ciRunNotRequired reports a run the view explicitly marks as not required to
+// merge (`"required": false`). A run with no `required` member is required.
+func ciRunNotRequired(r ciRun) bool { return r.Required != nil && !*r.Required }
+
 // ciRunFailing reports a completed run whose conclusion is anything other than
-// success, neutral or skipped.
-func ciRunFailing(r ciRun) bool { return !ciRunPending(r) && !ciRunPassed(r) }
+// success, neutral or skipped, and that is not explicitly marked as not
+// required to merge: a failing non-required run (a cancelled one included)
+// blocks nothing, so it is not a failure to fix.
+func ciRunFailing(r ciRun) bool {
+	return !ciRunPending(r) && !ciRunPassed(r) && !ciRunNotRequired(r)
+}
 
 // ciGreen reports "CI is green": at least one completed run and none failing
 // or pending. Empty runs, or any pending run, is not green.
@@ -109,6 +123,9 @@ func ciGreen(runs []ciRun) bool {
 		switch {
 		case ciRunPending(r), ciRunFailing(r):
 			return false
+		case ciRunNotRequired(r) && !ciRunPassed(r):
+			// A finished, failed run of a non-required check neither fails nor
+			// counts toward "at least one completed run".
 		default:
 			passed++
 		}

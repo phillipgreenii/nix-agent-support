@@ -60,6 +60,8 @@ var goldenScenarios = []goldenScenario{
 	{name: "reopened_anchor", fixture: "pr_reopened_anchor_closed"},
 	// An ISSUE source selected into the focus plan with no focus bead: the one
 	// focus.item create, the only rule of the issue rule set.
+	// A cancelled run of a check marked not required to merge: no fix-ci item.
+	{name: "ci_cancelled_not_required", fixture: "pr_ci_cancelled_not_required"},
 	{name: "issue_focus_mint", fixture: "issue_focus_selected", typ: "issue", id: "ACME-7"},
 }
 

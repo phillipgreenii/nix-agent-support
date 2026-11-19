@@ -396,3 +396,55 @@ func TestCIRunDecodingToleratesNumericIDAndMissingAttempt(t *testing.T) {
 		t.Fatalf("runs = %+v", runs)
 	}
 }
+
+func TestFixCICancelledRunOfNonRequiredCheckMintsNothing(t *testing.T) {
+	res := fixciEvaluate(t, "cancelled_not_required")
+	if len(res.Actions) != 0 || res.Skip == nil || res.Skip.Reason != action.ReasonNotMatched {
+		t.Fatalf("want not matched, got %+v", res)
+	}
+}
+
+func TestFixCICancelledRunOfNonRequiredCheckReopensNothing(t *testing.T) {
+	res := fixciEvaluate(t, "closed_item_new_cancelled_not_required")
+	if len(res.Actions) != 0 {
+		t.Fatalf("a non-required cancelled run must not reopen or update a closed item, got %+v", res.Actions)
+	}
+}
+
+func TestFixCICancelledRunOfRequiredCheckStillMintsAnItem(t *testing.T) {
+	res := fixciEvaluate(t, "cancelled_required")
+	if len(res.Actions) != 1 || res.Actions[0].Op != action.OpCreate {
+		t.Fatalf("want one create, got %+v", res)
+	}
+}
+
+func TestCIRequiredFlagOnlyExemptsAnExplicitFalse(t *testing.T) {
+	yes, no := true, false
+	r := func(req *bool) ciRun {
+		return ciRun{Status: "completed", Conclusion: "cancelled", Required: req}
+	}
+	if !ciRunFailing(r(nil)) || !ciRunFailing(r(&yes)) {
+		t.Error("an absent or true required flag must leave a cancelled run failing")
+	}
+	if ciRunFailing(r(&no)) {
+		t.Error("a required:false cancelled run must not be failing")
+	}
+	ok := ciRun{Status: "completed", Conclusion: "success"}
+	if !ciGreen([]ciRun{ok, r(&no)}) {
+		t.Error("a failed non-required run must not stop CI being green")
+	}
+	if ciGreen([]ciRun{r(&no)}) {
+		t.Error("only a non-required failed run is not a completed passing run")
+	}
+	if ciGreen([]ciRun{ok, {Status: "in_progress", Required: &no}}) {
+		t.Error("a pending non-required run still blocks green")
+	}
+	v, err := view.Parse([]byte(`{"contract":"pg-desk.view/v1","type":"pr","id":"x","ci":{"runs":[{"id":"1","name":"n","status":"completed","conclusion":"failure","required":false},{"id":"2","name":"m","status":"completed","conclusion":"failure"}]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := ciRuns(v)
+	if runs[0].Required == nil || *runs[0].Required || runs[1].Required != nil {
+		t.Fatalf("decoded required = %v / %v", runs[0].Required, runs[1].Required)
+	}
+}

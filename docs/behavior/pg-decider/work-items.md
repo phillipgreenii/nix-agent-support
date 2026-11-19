@@ -308,9 +308,25 @@ skips as `not matched`. Let the **digest** be the `fbsum` digest of that set, an
 ### `fixci.failing-on-head`
 
 For a `mine` or `co-owned` PR with a head, the rule reads the CI runs of the view. A run is failing
-when it has completed with a conclusion other than success, neutral or skipped; CI is green when at
-least one run completed and none is failing or pending. The
-**build id** of a run is `<run id>:<attempt>`.
+when it has completed with a conclusion other than success, neutral or skipped (a `cancelled`
+conclusion counts, so a cancelled run of a required check is failing and a rerun can fix it), **unless**
+the run carries `"required": false`, which says the merge gate does not require its check. A failing
+run of a non-required check blocks no merge, so it is not failing here: it creates no item and
+reopens no closed one, whatever its conclusion (a run cancelled by concurrency supersession
+included). A run with no `required` member is treated as required, so a view that does not carry it
+behaves as before. CI is green when at least one run completed and passed and none is failing or
+pending; a finished, failed run of a non-required check neither blocks green nor counts toward the
+one passing run, and a pending run of any check still blocks green. The **build id** of a run is
+`<run id>:<attempt>`.
+
+The rule decides nothing about which checks are required: that is the view's `required` member,
+which a producer fills from the repository's branch rules (the required status check contexts of
+the base branch). No check or workflow name is configured or hardcoded in the decider.
+
+Realization gap: pg-desk does not yet emit `required` into the `ci` section of the view, so until it
+does every run is treated as required and the behavior above for a non-required check does not
+occur in a live deployment. The decider side is in place and tested against views that carry the
+member.
 
 | Condition (first that holds)                                                    | Plan                                                                                                   |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
