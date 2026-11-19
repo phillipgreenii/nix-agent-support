@@ -678,9 +678,13 @@ func TestAuditFiguresComeFromEventsAlone(t *testing.T) {
 	f := newFx(t)
 	ctx := t.Context()
 	at := func(op, branch string) *Events {
-		e := *f.ev
+		e := &Events{
+			Path: f.ev.Path, Common: f.ev.Common, Clock: f.ev.Clock,
+			Locks: f.ev.Locks, Owner: f.ev.Owner,
+			RotateAt: f.ev.RotateAt, RotateWait: f.ev.RotateWait,
+		}
 		e.Common.OpID, e.Common.Branch = op, branch
-		return &e
+		return e
 	}
 	// a: lock-lost at clean-up first, then lands. b: transient stop (exit 75).
 	// c: refused stopped-pending, with a settle by a waiter.
