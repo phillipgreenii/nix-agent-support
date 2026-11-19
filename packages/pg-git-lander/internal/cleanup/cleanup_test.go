@@ -88,14 +88,32 @@ func (f *fx) write(dir, file, content string) {
 
 func (f *fx) commit(branch, from, file string) string {
 	f.t.Helper()
-	p := filepath.Join(f.repo.Root(), "scratch-"+strings.ReplaceAll(branch, "/", "-"))
-	f.git(f.repo.Dir, "worktree", "add", "-B", branch, p, from)
-	f.write(p, file, "x\n")
-	f.git(p, "add", file)
-	f.git(p, "commit", "-m", "add "+file)
-	oid := f.git(p, "rev-parse", "HEAD")
-	f.git(f.repo.Dir, "worktree", "remove", "--force", p)
+	// Plumbing instead of a scratch worktree: blob, tree (the parent's flat
+	// top-level entries plus the new file), commit, branch ref.
+	blob := f.gitIn("hash-object", "-w", "--stdin")("x\n")
+	var tree strings.Builder
+	for _, ln := range strings.Split(f.git(f.repo.Dir, "ls-tree", from), "\n") {
+		if ln != "" && !strings.HasSuffix(ln, "\t"+file) {
+			tree.WriteString(ln + "\n")
+		}
+	}
+	tree.WriteString("100644 blob " + blob + "\t" + file + "\n")
+	treeOID := f.gitIn("mktree")(tree.String())
+	oid := f.git(f.repo.Dir, "commit-tree", "-p", from, "-m", "add "+file, treeOID)
+	f.git(f.repo.Dir, "update-ref", "refs/heads/"+branch, oid)
 	return oid
+}
+
+// gitIn returns a runner of one git command in the repo with the given stdin.
+func (f *fx) gitIn(args ...string) func(stdin string) string {
+	return func(stdin string) string {
+		f.t.Helper()
+		r := f.g.RunInput(f.t.Context(), f.repo.Dir, []byte(stdin), args...)
+		if !r.OK() {
+			f.t.Fatalf("git %v: %s", args, r.Stderr)
+		}
+		return strings.TrimSpace(string(r.Stdout))
+	}
 }
 
 func (f *fx) input() cleanup.Input {
