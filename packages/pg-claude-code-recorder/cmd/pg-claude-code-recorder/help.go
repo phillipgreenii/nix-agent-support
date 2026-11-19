@@ -10,7 +10,8 @@ const helpText = `pg-claude-code-recorder records Claude Code state and answers 
 Usage:
   pg-claude-code-recorder serve    [--config FILE] [--metrics-addr HOST:PORT] [--pprof] [--rebuild] [--shutdown-deadline DURATION]
   pg-claude-code-recorder rebuild  [--config FILE]   rebuild index.db from the journal and re-parse (daemon stopped)
-  pg-claude-code-recorder status   [--json|--short] [--watch] [--allow-partial]
+  pg-claude-code-recorder repair-duplicates [--config FILE] [--dry-run] [--json]   retire duplicate append-file rows left by earlier reboots (daemon stopped)
+  pg-claude-code-recorder status  [--json|--short] [--watch] [--allow-partial]
   pg-claude-code-recorder coverage [--view summary|files] [--json] [--wait-caught-up] [--allow-partial]
   pg-claude-code-recorder query    [--request FILE] [--limit N] [--jsonl] [--json]   request JSON on standard input
   pg-claude-code-recorder search   [--request FILE] [--limit N] [--jsonl] [--json]   word or substring search

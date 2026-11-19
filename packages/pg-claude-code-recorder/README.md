@@ -376,6 +376,41 @@ Shutdown overrun: when a stop does not finish before its deadline the daemon log
 (fields `phase`, `phase_elapsed_ms`, `in_flight`) and exits non-zero, and the launch agent restarts it. The Grafana rule
 `pg-ccrec-shutdown-overrun` (warning, `noDataState` OK) fires on any such event in the last 24 hours.
 
+## Duplicate append-file rows from earlier reboots
+
+Before the device-change fix, each reboot gave every append file a second `files` row (same inode,
+birth time and path, new device) that re-cloned and re-parsed the file. The query layer joins
+`records` to `files` on `r.gen=files.cur_gen` with no state filter, so conversation, feed, search and
+aggregate answers returned a duplicated file's records once per row. On a copy of the live index the
+duplicates were 35,125 identities held by 79,271 rows, and 23,784,275 records joined from those rows
+against 10,573,042 distinct (identity, offset, item) records.
+
+`pg-claude-code-recorder repair-duplicates [--dry-run] [--json]` (daemon stopped; it exits with the
+`busy` error while the daemon answers) collapses each identity onto one keeper row:
+
+- Keeper: not deleted, then the row holding the path open (the copier continues that row and re-stamps
+  its device; retiring it would make the next sweep create a third row), then the larger copy, then the
+  lower id.
+- A loser (another device, same inode and birth time) is retired only when its current generation
+  equals the keeper's, the keeper's parse covers the loser's whole copy, and the tail hashes agree
+  when the copies are equally long. Otherwise it is skipped and listed.
+- Records both rows hold (same generation, offset and item: the same bytes parsed twice) are removed
+  from the loser through the parser's generation clear. Records only the loser holds, for example the
+  one-per-hash `api-request-blob` rows, are moved to the keeper, never deleted. The loser is then
+  tombstoned in the journal. Older generations, copies and archive ranges are untouched.
+- One transaction per identity; a second run finds retired rows already deleted with no records and
+  does nothing. `--dry-run` reports the same counts without writing.
+
+Verification query (expect no rows beyond the reported skips):
+
+```sql
+SELECT f.ino, f.birth_ns, p.path, COUNT(*) FROM files f JOIN paths p ON p.file_id=f.id
+WHERE f.mode='append' AND f.state!='deleted' GROUP BY 1,2,3 HAVING COUNT(*)>1;
+```
+
+A full `rebuild` from the journal recreates the duplicate rows' records (the journal replays them);
+run `repair-duplicates` again afterwards.
+
 ## Shutdown
 
 The contract: a stop (SIGTERM or SIGINT) finishes within the shutdown deadline or the daemon hard-exits. The deadline is the `serve --shutdown-deadline` flag (default 8 s); the nix module passes it, so the deployment owns it. Signals and the deadline watchdog come from the shared `x/lifecycle` run group; a second signal takes the default action. A sweep in flight aborts
