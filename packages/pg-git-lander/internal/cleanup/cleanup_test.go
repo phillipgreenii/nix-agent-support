@@ -153,6 +153,7 @@ func (f *fx) wantWorkBranchGone() {
 }
 
 func TestKeepFlagTableLand(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		keepWT, keep bool
@@ -217,6 +218,7 @@ func TestKeepFlagTableLand(t *testing.T) {
 }
 
 func TestNothingToLand(t *testing.T) {
+	t.Parallel()
 	// BRANCH is contained in TARGET already: tips.branch is the base.
 	setup := func(t *testing.T) *fx {
 		f := newFx(t)
@@ -259,6 +261,7 @@ func TestNothingToLand(t *testing.T) {
 }
 
 func TestRebaseLeavesSourceOnBranchAtResult(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	in := f.input()
 	in.Operation = worktrees.Rebase
@@ -287,6 +290,7 @@ func TestRebaseLeavesSourceOnBranchAtResult(t *testing.T) {
 }
 
 func TestRebaseMoveFailureIsStopCheckoutChanged(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	h := filepath.Join(f.repo.Root(), "holder")
 	// SW is not the work worktree here: BRANCH is held in another worktree.
@@ -306,6 +310,7 @@ func TestRebaseMoveFailureIsStopCheckoutChanged(t *testing.T) {
 }
 
 func TestSourceRemovalFailures(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(f *fx){
 		"untracked file": func(f *fx) { f.write(f.sw.Path, "scratch.txt", "mine\n") },
 		"locked":         func(f *fx) { f.git(f.repo.Dir, "worktree", "lock", f.sw.Path) },
@@ -346,6 +351,7 @@ func TestSourceRemovalFailures(t *testing.T) {
 }
 
 func TestBranchKeptWhenItMoved(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.git(f.repo.Dir, "update-ref", "refs/heads/feat", f.git(f.repo.Dir, "commit-tree", "-p", f.tips, "-m", "extra", f.tips+"^{tree}"))
 	moved := f.ref("feat")
@@ -360,6 +366,7 @@ func TestBranchKeptWhenItMoved(t *testing.T) {
 }
 
 func TestBranchKeptWhenTargetDoesNotContainTheResult(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.git(f.repo.Dir, "reset", "--hard", f.base) // TARGET back at the base
 	r := f.run(f.input())
@@ -370,6 +377,7 @@ func TestBranchKeptWhenTargetDoesNotContainTheResult(t *testing.T) {
 }
 
 func TestPlaceholderIsRepointedInItsOwnWorktree(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	// A stale placeholder at the base: it is an ancestor of TARGET, so it
 	// would be listed by git branch --merged both before and after.
@@ -386,6 +394,7 @@ func TestPlaceholderIsRepointedInItsOwnWorktree(t *testing.T) {
 }
 
 func TestPlaceholderNameIsSanitised(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"sw":       "pg-git-lander/idle/sw",
 		"a b/c":    "pg-git-lander/idle/a-b-c",
@@ -400,6 +409,7 @@ func TestPlaceholderNameIsSanitised(t *testing.T) {
 }
 
 func TestKeepBranchMovesInAnotherCleanWorktree(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	h := filepath.Join(f.repo.Root(), "holder")
 	f.git(f.sw.Path, "switch", "--detach")
@@ -420,6 +430,7 @@ func TestKeepBranchMovesInAnotherCleanWorktree(t *testing.T) {
 }
 
 func TestKeepBranchDivergenceIsWarningBranchNotMoved(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	h := filepath.Join(f.repo.Root(), "holder")
 	f.git(f.sw.Path, "switch", "--detach")
@@ -436,6 +447,7 @@ func TestKeepBranchDivergenceIsWarningBranchNotMoved(t *testing.T) {
 }
 
 func TestOtherSwitchedWorktreesAreRestored(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	p := filepath.Join(f.repo.Root(), "dw2")
 	f.git(f.repo.Dir, "worktree", "add", "--detach", p, f.base)
@@ -459,6 +471,7 @@ func TestOtherSwitchedWorktreesAreRestored(t *testing.T) {
 }
 
 func TestSpareSourceWorktreeIsRestoredAndKept(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	p := filepath.Join(f.repo.Root(), "spare")
 	f.git(f.repo.Dir, "worktree", "add", "-b", "spare-b", p, f.base)
@@ -480,6 +493,7 @@ func TestSpareSourceWorktreeIsRestoredAndKept(t *testing.T) {
 }
 
 func TestEveryActionIsIdempotent(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		keepWT, keep bool
@@ -501,6 +515,7 @@ func TestEveryActionIsIdempotent(t *testing.T) {
 }
 
 func TestResumeAfterPartialProgress(t *testing.T) {
+	t.Parallel()
 	// BRANCH moved but the switch of the source worktree is still pending.
 	f := newFx(t)
 	f.git(f.repo.Dir, "update-ref", "refs/heads/feat", f.result)
@@ -537,6 +552,7 @@ func TestWorkingDirectoryMovesToTheRepositoryRootBeforeRemoval(t *testing.T) {
 }
 
 func TestLockRecordCheckedInTheDelete(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	p := filepath.Join(f.repo.Root(), "blob")
 	f.write(f.repo.Root(), "blob", "rec")
@@ -570,6 +586,7 @@ func TestLockRecordCheckedInTheDelete(t *testing.T) {
 // the BRANCH delete with lock-lost although the lock never changed hands;
 // Fence.Current re-reads them at the delete.
 func TestRenewalDuringCleanupDoesNotLoseTheLock(t *testing.T) {
+	t.Parallel()
 	ref := "refs/pg-git-lander/lock/one"
 	setup := func() (*fx, string, func() string) {
 		f := newFx(t)

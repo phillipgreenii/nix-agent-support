@@ -98,6 +98,7 @@ func hk(argv ...string) config.Hook {
 }
 
 func TestEnvironmentGolden(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	facts := f.facts()
 	facts.Context = []hooks.ContextPair{{Key: "ticket-id", Value: "X-1"}, {Key: "a.b c", Value: "v"}}
@@ -148,6 +149,7 @@ func TestEnvironmentGolden(t *testing.T) {
 }
 
 func TestHookSeesEnvironmentAndRunsInListOrder(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	out := filepath.Join(f.scripts, "out")
 	first := f.script("first", `echo "first $PG_GIT_LANDER_HOOK $PG_GIT_LANDER_CONTEXT_K $EXTRA $PG_GIT_LANDER_OPERATION" >> `+out)
@@ -174,6 +176,7 @@ func TestHookSeesEnvironmentAndRunsInListOrder(t *testing.T) {
 }
 
 func TestHookEnvValuesNeverReachALogLine(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	h := hk(f.script("ok", "true"))
 	h.Env = map[string]string{"API_TOKEN": "s3cr3t-value"}
@@ -193,6 +196,7 @@ func TestHookEnvValuesNeverReachALogLine(t *testing.T) {
 }
 
 func TestExitCodeContract(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	noExec := filepath.Join(f.scripts, "noexec")
 	if err := os.WriteFile(noExec, []byte("#!/bin/sh\ntrue\n"), 0o644); err != nil {
@@ -268,6 +272,7 @@ func TestExitCodeContract(t *testing.T) {
 }
 
 func TestFailureEffectByPoint(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	fail := hk(f.script("nine", "exit 9"))
 	trans := hk(f.script("t75", "exit 75"))
@@ -301,6 +306,7 @@ func TestFailureEffectByPoint(t *testing.T) {
 }
 
 func TestOldPointNamesAreRejectedByTheRunner(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	for _, p := range []string{"before", "after_rebase", "before_move", "after"} {
 		if _, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: p, Facts: f.facts()}); err == nil {
@@ -312,6 +318,7 @@ func TestOldPointNamesAreRejectedByTheRunner(t *testing.T) {
 // A pre-merge-verify entry is read-only: a change to a tracked file or a moved
 // HEAD fails the point and the work worktree is put back where it was.
 func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
+	t.Parallel()
 	head := func(f *fx) string { return f.git(f.work, "rev-parse", "HEAD") }
 	t.Run("modifies a tracked file", func(t *testing.T) {
 		f := newFx(t, 2)
@@ -393,6 +400,7 @@ func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
 }
 
 func TestUnknownPointIsRejected(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	if _, err := f.r.RunPoint(t.Context(), hooks.PointInput{Point: "during", Facts: f.facts()}); err == nil {
 		t.Fatal("want an error")
@@ -400,6 +408,7 @@ func TestUnknownPointIsRejected(t *testing.T) {
 }
 
 func TestFailureStopsLaterHooks(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	marker := filepath.Join(f.scripts, "later-ran")
 	res := f.run(hooks.PointPreMergeVerify, hk(f.script("bad", "exit 1")), hk(f.script("later", "touch "+marker)))
@@ -412,6 +421,7 @@ func TestFailureStopsLaterHooks(t *testing.T) {
 }
 
 func TestCwdDefaults(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	pwd := f.script("pwd", `pwd -P > "$1"`)
 	check := func(point, cwd, want string) {
@@ -444,6 +454,7 @@ const formatter = `grep -q fixed f.txt || { echo fixed >> f.txt; exit 1; }`
 func (f *fx) log() string { return f.git(f.work, "log", "--format=%s", "main..work") }
 
 func TestAutofixCommitsAndRunsAgain(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	facts := f.facts()
 	facts.Context = []hooks.ContextPair{{Key: "ticket", Value: "TICKET-77"}}
@@ -467,6 +478,7 @@ func TestAutofixCommitsAndRunsAgain(t *testing.T) {
 }
 
 func TestAutofixIsBoundedByAttempts(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{1, 2, 3} {
 		f := newFx(t, n)
 		always := f.script("always", `echo more >> f.txt; exit 0`)
@@ -484,6 +496,7 @@ func TestAutofixIsBoundedByAttempts(t *testing.T) {
 }
 
 func TestFailingHookThatChangesNothingStopsAtOnce(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 5)
 	res := f.run(hooks.PointPostRebaseFix, hk(f.script("bad", "exit 1")))
 	if res.Failure == nil || res.Failure.Kind != hooks.FailedExit || len(res.Records) != 1 {
@@ -495,6 +508,7 @@ func TestFailingHookThatChangesNothingStopsAtOnce(t *testing.T) {
 }
 
 func TestAutofixLeavesUntrackedUncommitted(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	h := hk(f.script("mk", `touch new.txt; grep -q fixed f.txt || { echo fixed >> f.txt; }`))
 	res := f.run(hooks.PointPostRebaseFix, h)
@@ -507,6 +521,7 @@ func TestAutofixLeavesUntrackedUncommitted(t *testing.T) {
 }
 
 func TestAutofixAfterAPassingHookAndASkippedOne(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	skip := hk(f.script("fmt-skip", `grep -q fixed f.txt || { echo fixed >> f.txt; exit 4; }`))
 	skip.SkipExitCodes = []int{4}
@@ -533,6 +548,7 @@ func (f *fx) stageChange() {
 }
 
 func TestCommitRetriesWhenAHookRejectsAndLeavesChanges(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	f.plantCommitHook(`grep -q fixed f.txt || { echo fixed >> f.txt; exit 1; }`)
 	f.stageChange()
@@ -549,6 +565,7 @@ func TestCommitRetriesWhenAHookRejectsAndLeavesChanges(t *testing.T) {
 }
 
 func TestCommitRejectedAfterAttempts(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{1, 2, 3} {
 		f := newFx(t, n)
 		f.plantCommitHook(`echo again >> f.txt; echo "hint: do the thing" >&2; echo "bad format" >&2; exit 1`)
@@ -567,6 +584,7 @@ func TestCommitRejectedAfterAttempts(t *testing.T) {
 }
 
 func TestCommitRejectionThatLeavesNothingStopsAtOnce(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 5)
 	f.plantCommitHook(`exit 1`)
 	f.stageChange()
@@ -577,6 +595,7 @@ func TestCommitRejectionThatLeavesNothingStopsAtOnce(t *testing.T) {
 }
 
 func TestCommitSkipsGitHooksWhenConfiguredOff(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	f.r.RunGitHooks = false
 	f.plantCommitHook(`exit 1`)
@@ -588,6 +607,7 @@ func TestCommitSkipsGitHooksWhenConfiguredOff(t *testing.T) {
 }
 
 func TestAutofixCommitRejectedByGitHook(t *testing.T) {
+	t.Parallel()
 	f := newFx(t, 2)
 	f.plantCommitHook(`echo again >> f.txt; exit 1`)
 	res := f.run(hooks.PointPostRebaseFix, hk(f.script("always", `echo more >> f.txt`)))
@@ -600,6 +620,7 @@ func TestAutofixCommitRejectedByGitHook(t *testing.T) {
 }
 
 func TestLogTailDropsHintsAndKeepsFifty(t *testing.T) {
+	t.Parallel()
 	var b strings.Builder
 	for i := 0; i < 80; i++ {
 		b.WriteString("line\n")

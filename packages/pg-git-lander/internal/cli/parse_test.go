@@ -29,6 +29,7 @@ func wantUsage(t *testing.T, contains string, args ...string) {
 }
 
 func TestParseRebaseFullForm(t *testing.T) {
+	t.Parallel()
 	c := mustParse(t, "rebase", "feature/x", "--onto", "main", "--source-worktree", "/s", "--work-worktree=/w",
 		"--wait", "90s", "--context", "a=b", "--context", "c=d=e", "--json", "--repo", "/r")
 	if c.Kind != cli.KindRebase || c.Branch != "feature/x" || c.Onto != "main" || c.SourceWorktree != "/s" ||
@@ -44,6 +45,7 @@ func TestParseRebaseFullForm(t *testing.T) {
 }
 
 func TestParseLandFullForm(t *testing.T) {
+	t.Parallel()
 	c := mustParse(t, "land", "--into", "develop", "feature/x", "--target-worktree", "/t", "--source-worktree", "/s",
 		"--work-worktree", "/w", "--keep-source-worktree", "--keep-source-branch", "--wait", "1m", "--json")
 	if c.Kind != cli.KindLand || c.Branch != "feature/x" || c.Into != "develop" || c.TargetWorktree != "/t" ||
@@ -53,12 +55,14 @@ func TestParseLandFullForm(t *testing.T) {
 }
 
 func TestParseLandDefaultsTargetToEmpty(t *testing.T) {
+	t.Parallel()
 	if c := mustParse(t, "land", "b"); c.Into != "" {
 		t.Fatalf("into = %q", c.Into)
 	}
 }
 
 func TestParseResumeForms(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"rebase", "land"} {
 		for _, flag := range []string{"--continue", "--skip", "--abort", "--quit"} {
 			c := mustParse(t, kind, "b", flag, "--wait", "5s", "--json", "--repo", "/r")
@@ -74,6 +78,7 @@ func TestParseResumeForms(t *testing.T) {
 }
 
 func TestParseStatusLogConfigCheck(t *testing.T) {
+	t.Parallel()
 	if c := mustParse(t, "status", "--json", "--repo", "/r"); c.Kind != cli.KindStatus || c.Branch != "" || !c.JSON {
 		t.Fatalf("%+v", c)
 	}
@@ -92,6 +97,7 @@ func TestParseStatusLogConfigCheck(t *testing.T) {
 }
 
 func TestEveryFormAcceptsRepo(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"rebase", "b", "--onto", "main"},
 		{"land", "b"},
@@ -109,6 +115,7 @@ func TestEveryFormAcceptsRepo(t *testing.T) {
 }
 
 func TestUsageErrors(t *testing.T) {
+	t.Parallel()
 	wantUsage(t, "subcommand is required")
 	wantUsage(t, "unknown subcommand", "frobnicate")
 	wantUsage(t, "needs BRANCH", "rebase", "--onto", "main")
@@ -127,15 +134,18 @@ func TestUsageErrors(t *testing.T) {
 }
 
 func TestBranchEqualToTargetIsAUsageError(t *testing.T) {
+	t.Parallel()
 	wantUsage(t, "BRANCH and TARGET are both feature/x", "land", "feature/x", "--into", "feature/x")
 }
 
 func TestKeepFlagsWithRebaseAreUsageErrors(t *testing.T) {
+	t.Parallel()
 	wantUsage(t, "--keep-source-worktree", "rebase", "b", "--onto", "main", "--keep-source-worktree")
 	wantUsage(t, "--keep-source-branch", "rebase", "b", "--onto", "main", "--keep-source-branch")
 }
 
 func TestResumeRejectsFreshOnlyFlags(t *testing.T) {
+	t.Parallel()
 	for _, extra := range [][]string{
 		{"--context", "k=v"},
 		{"--source-worktree", "/s"},
@@ -153,6 +163,7 @@ func TestResumeRejectsFreshOnlyFlags(t *testing.T) {
 }
 
 func TestUsageErrorKnowsJSON(t *testing.T) {
+	t.Parallel()
 	if _, err := cli.Parse([]string{"land", "--json"}); err == nil || !err.JSON {
 		t.Fatalf("%+v", err)
 	}
@@ -161,6 +172,7 @@ func TestUsageErrorKnowsJSON(t *testing.T) {
 func envOf(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
 func TestApplyEnvFillsAbsentFlagsOnly(t *testing.T) {
+	t.Parallel()
 	env := envOf(map[string]string{
 		cli.EnvTargetWorktree: "/et", cli.EnvSourceWorktree: "/es", cli.EnvWorkWorktree: "/ew",
 	})
@@ -172,6 +184,7 @@ func TestApplyEnvFillsAbsentFlagsOnly(t *testing.T) {
 }
 
 func TestApplyEnvForRebaseSkipsTargetWorktree(t *testing.T) {
+	t.Parallel()
 	c := mustParse(t, "rebase", "b", "--onto", "main")
 	c.ApplyEnv(envOf(map[string]string{cli.EnvTargetWorktree: "/et", cli.EnvSourceWorktree: "/es"}))
 	if c.TargetWorktree != "" || c.SourceWorktree != "/es" {
@@ -180,6 +193,7 @@ func TestApplyEnvForRebaseSkipsTargetWorktree(t *testing.T) {
 }
 
 func TestApplyEnvIsIgnoredOnResume(t *testing.T) {
+	t.Parallel()
 	c := mustParse(t, "land", "b", "--continue")
 	c.ApplyEnv(envOf(map[string]string{
 		cli.EnvTargetWorktree: "/et", cli.EnvSourceWorktree: "/es", cli.EnvWorkWorktree: "/ew",
@@ -190,6 +204,7 @@ func TestApplyEnvIsIgnoredOnResume(t *testing.T) {
 }
 
 func TestEnvNamesAvoidTheHookPrefix(t *testing.T) {
+	t.Parallel()
 	for _, n := range []string{cli.EnvTargetWorktree, cli.EnvSourceWorktree, cli.EnvWorkWorktree} {
 		if strings.HasPrefix(n, "PG_GIT_LANDER_") || !strings.HasPrefix(n, "PGL_") {
 			t.Errorf("%s", n)
@@ -198,6 +213,7 @@ func TestEnvNamesAvoidTheHookPrefix(t *testing.T) {
 }
 
 func TestNoVerifyIsAcceptedWithLandRebaseContinueAndSkip(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"land", "b", "--no-verify"},
 		{"rebase", "b", "--onto", "main", "--no-verify"},
@@ -215,6 +231,7 @@ func TestNoVerifyIsAcceptedWithLandRebaseContinueAndSkip(t *testing.T) {
 }
 
 func TestNoVerifyIsAUsageErrorWithAbortAndQuitAndOnOtherCommands(t *testing.T) {
+	t.Parallel()
 	wantUsage(t, "--no-verify has no meaning with --abort", "land", "b", "--abort", "--no-verify")
 	wantUsage(t, "--no-verify has no meaning with --quit", "rebase", "--quit", "--no-verify")
 	wantUsage(t, "does not take the flag --no-verify", "status", "--no-verify")
@@ -222,5 +239,6 @@ func TestNoVerifyIsAUsageErrorWithAbortAndQuitAndOnOtherCommands(t *testing.T) {
 }
 
 func TestNoVerifyValueIsRejected(t *testing.T) {
+	t.Parallel()
 	wantUsage(t, "takes no value", "land", "b", "--no-verify=1")
 }

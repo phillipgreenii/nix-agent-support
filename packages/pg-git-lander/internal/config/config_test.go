@@ -107,6 +107,7 @@ func asErr(t *testing.T, err error) *config.Error {
 const land = "refs/heads/main"
 
 func TestNoConfigurationMeansDefaults(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	c := f.mustLoad(land)
 	if len(c.Rules) != 0 || len(c.Hooks) != 0 || c.ConflictDefault != nil {
@@ -129,6 +130,7 @@ func TestNoConfigurationMeansDefaults(t *testing.T) {
 }
 
 func TestEveryKeyAcceptedFromXDGDefaults(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.writeXDG(`
 [defaults]
@@ -163,6 +165,7 @@ resolve = ["d"]
 }
 
 func TestLayeringKeyByKeyAndHookListReplacedWhole(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.xdgFor(`trust_repo_config = true
 max_conflict_rounds = 4
@@ -213,6 +216,7 @@ post-rebase-fix = [{ run = ["repo-fix"] }]
 }
 
 func TestRuleOrderAndIDs(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.xdgFor(`trust_repo_config = true
 [[repo.conflict]]
@@ -253,6 +257,7 @@ timeout = "3m"
 }
 
 func TestTrust(t *testing.T) {
+	t.Parallel()
 	cmds := map[string]string{config.RepoFileName: "[hooks.land]\npre-merge-verify = [{ run = [\"x\"] }]\n"}
 
 	t.Run("untrusted repo naming commands refuses with the XDG line", func(t *testing.T) {
@@ -320,6 +325,7 @@ func mustFail(t *testing.T, f *fx, ref string) error {
 }
 
 func TestIgnoreRepoConfigSkipsTheFileEntirely(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.xdgFor("ignore_repo_config = true\n", "")
 	// Broken and command-naming: neither matters.
@@ -334,6 +340,7 @@ func TestIgnoreRepoConfigSkipsTheFileEntirely(t *testing.T) {
 }
 
 func TestRepoFileIsReadFromTheTipNotTheTreeOrBranch(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("main cfg", map[string]string{config.RepoFileName: "max_race_retries = 3\n"})
 
@@ -367,6 +374,7 @@ func TestRepoFileIsReadFromTheTipNotTheTreeOrBranch(t *testing.T) {
 }
 
 func TestReloadSeesTheNewTipAndResume(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("v1", map[string]string{config.RepoFileName: "max_race_retries = 3\n"})
 	pre, err := f.ldr.LoadXDG(t.Context(), f.repo.Dir)
@@ -392,6 +400,7 @@ func TestReloadSeesTheNewTipAndResume(t *testing.T) {
 }
 
 func TestRepoConfigErrorNamesFileLineKeyLayer(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, file, key string
 		line            int
@@ -430,6 +439,7 @@ func TestRepoConfigErrorNamesFileLineKeyLayer(t *testing.T) {
 }
 
 func TestUnknownKeysInTheRepoFileAreWarnings(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("cfg", map[string]string{config.RepoFileName: "from_the_future = 1\nmax_race_retries = 3\n[autofix]\nattempts = 2\nmode = \"x\"\n"})
 	c := f.mustLoad(land)
@@ -449,6 +459,7 @@ func TestUnknownKeysInTheRepoFileAreWarnings(t *testing.T) {
 }
 
 func TestRepoFileCannotSetPreLockKeys(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("cfg", map[string]string{config.RepoFileName: "primary = \"evil\"\ntrust_repo_config = true\nignore_repo_config = true\n[lock]\nwait = \"1s\"\n"})
 	c := f.mustLoad(land)
@@ -461,6 +472,7 @@ func TestRepoFileCannotSetPreLockKeys(t *testing.T) {
 }
 
 func TestInvalidXDGIsConfigError(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, file, key string
 		line            int
@@ -487,6 +499,7 @@ func TestInvalidXDGIsConfigError(t *testing.T) {
 }
 
 func TestEntryMatchesAnyWorktreeOfTheClone(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.xdgFor("trust_repo_config = true\nmax_race_retries = 9\n", "")
 	wt := filepath.Join(f.repo.Root(), "linked")
@@ -514,6 +527,7 @@ func TestEntryMatchesAnyWorktreeOfTheClone(t *testing.T) {
 }
 
 func TestPrimaryResolutionOrder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newFx(t)
 	pre, _ := f.ldr.LoadXDG(ctx, f.repo.Dir)
@@ -540,6 +554,7 @@ func TestPrimaryResolutionOrder(t *testing.T) {
 }
 
 func TestLockKeysComeFromXDGOnlyBeforeAnyLock(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.xdgFor("[repo.lock]\nwait = \"5s\"\n", "[defaults.lock]\nlease_ttl = \"9s\"\n")
 	pre, err := f.ldr.LoadXDG(t.Context(), f.repo.Dir)
@@ -552,6 +567,7 @@ func TestLockKeysComeFromXDGOnlyBeforeAnyLock(t *testing.T) {
 }
 
 func TestMissingRepoFileAndBadRef(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	c := f.mustLoad(land)
 	if len(c.Sources) != 2 || c.Sources[1].Present || len(c.Sources[1].Tip) != 40 {
@@ -563,6 +579,7 @@ func TestMissingRepoFileAndBadRef(t *testing.T) {
 }
 
 func TestRevalidateKey(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"none", "paths", "full"} {
 		f := newFx(t)
 		f.commit("cfg", map[string]string{config.RepoFileName: "revalidate = \"" + v + "\"\n"})

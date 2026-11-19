@@ -30,6 +30,7 @@ func (f *fx) usageMsg(r result) string {
 }
 
 func TestLandFromANonGitCwdUsesTheRepoOfTheWorktreeFlag(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	r := f.cli(t.TempDir(), "land", "feature/x", "--source-worktree", f.wt, "--json")
@@ -39,6 +40,7 @@ func TestLandFromANonGitCwdUsesTheRepoOfTheWorktreeFlag(t *testing.T) {
 }
 
 func TestRebaseFromANonGitCwdUsesTheRepoOfTheWorktreeFlag(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.commit(f.repo.Dir, "m.txt", "m\n")
@@ -49,6 +51,7 @@ func TestRebaseFromANonGitCwdUsesTheRepoOfTheWorktreeFlag(t *testing.T) {
 }
 
 func TestLandFromANonGitCwdUsesThePGLVariable(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.env[cli.EnvSourceWorktree] = f.wt
@@ -59,6 +62,7 @@ func TestLandFromANonGitCwdUsesThePGLVariable(t *testing.T) {
 }
 
 func TestRepoFlagThatAgreesWithTheWorktreeFlagWins(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	r := f.cli(t.TempDir(), "land", "feature/x", "--repo", f.repo.Dir, "--source-worktree", f.wt, "--json")
@@ -68,6 +72,7 @@ func TestRepoFlagThatAgreesWithTheWorktreeFlagWins(t *testing.T) {
 }
 
 func TestWorktreeFlagsInDifferentReposAreRefused(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	sib, err := f.repo.NewSibling(t.Context(), "beta", gitfixture.RepoOptions{InitialCommit: true})
@@ -86,6 +91,7 @@ func TestWorktreeFlagsInDifferentReposAreRefused(t *testing.T) {
 }
 
 func TestRepoFlagInAnotherRepoThanTheWorktreeFlagIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	sib, err := f.repo.NewSibling(t.Context(), "beta", gitfixture.RepoOptions{InitialCommit: true})
@@ -99,6 +105,7 @@ func TestRepoFlagInAnotherRepoThanTheWorktreeFlagIsRefused(t *testing.T) {
 }
 
 func TestWorktreeFlagsInTwoClonesOfOneRepoAreRefused(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	cl, err := f.repo.Clone(t.Context(), "clone")
@@ -113,6 +120,7 @@ func TestWorktreeFlagsInTwoClonesOfOneRepoAreRefused(t *testing.T) {
 }
 
 func TestANonexistentWorktreePathIsAUsageErrorNamingIt(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	bogus := filepath.Join(t.TempDir(), "no-such-worktree")
@@ -123,6 +131,7 @@ func TestANonexistentWorktreePathIsAUsageErrorNamingIt(t *testing.T) {
 }
 
 func TestAWorktreePathOutsideAnyRepoIsAUsageErrorNamingIt(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	plain := t.TempDir()
@@ -133,6 +142,7 @@ func TestAWorktreePathOutsideAnyRepoIsAUsageErrorNamingIt(t *testing.T) {
 }
 
 func TestACwdInAnotherCloneThanTheFlagsIsRefusedNotFollowed(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	sib, err := f.repo.NewSibling(t.Context(), "beta", gitfixture.RepoOptions{InitialCommit: true})
@@ -146,6 +156,7 @@ func TestACwdInAnotherCloneThanTheFlagsIsRefusedNotFollowed(t *testing.T) {
 }
 
 func TestACwdInAnotherWorktreeOfTheSameCloneIsAccepted(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	r := f.cli(f.repo.Dir, "land", "feature/x", "--source-worktree", f.wt, "--json")
@@ -155,6 +166,7 @@ func TestACwdInAnotherWorktreeOfTheSameCloneIsAccepted(t *testing.T) {
 }
 
 func TestNoFlagsAndANonGitCwdKeepTheNotInsideARepositoryError(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	dir := t.TempDir()
 	msg := f.usageMsg(f.cli(dir, "land", "b", "--json"))
@@ -164,6 +176,7 @@ func TestNoFlagsAndANonGitCwdKeepTheNotInsideARepositoryError(t *testing.T) {
 }
 
 func TestResumeFlagsWithoutRepoOutsideARepoSayToPassRepo(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	for _, fl := range []string{"--continue", "--skip", "--abort", "--quit"} {
 		msg := f.usageMsg(f.cli(t.TempDir(), "land", fl, "--json"))

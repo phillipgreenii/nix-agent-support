@@ -126,6 +126,7 @@ func (f *fx) jsonOutcome(r result) map[string]any {
 }
 
 func TestLandPrintsOneHumanLineAndExitsZero(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	r := f.cli(f.repo.Dir, "land", "feature/x", "--into", f.main)
@@ -138,6 +139,7 @@ func TestLandPrintsOneHumanLineAndExitsZero(t *testing.T) {
 }
 
 func TestLandDefaultsTargetToThePrimaryBranchAndPrintsJSON(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	r := f.cli(f.repo.Dir, "land", "feature/x", "--json")
@@ -148,6 +150,7 @@ func TestLandDefaultsTargetToThePrimaryBranchAndPrintsJSON(t *testing.T) {
 }
 
 func TestLandOfThePrimaryBranchWithoutIntoIsAUsageError(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	r := f.cli(f.repo.Dir, "land", f.main, "--json")
 	if r.code != 2 || f.jsonOutcome(r)["outcome"] != "usage-error" {
@@ -156,6 +159,7 @@ func TestLandOfThePrimaryBranchWithoutIntoIsAUsageError(t *testing.T) {
 }
 
 func TestRebaseRunsAndPrintsRebased(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.commit(f.repo.Dir, "m.txt", "m\n")
@@ -169,6 +173,7 @@ func TestRebaseRunsAndPrintsRebased(t *testing.T) {
 }
 
 func TestUsageErrorsExitTwoWithOneOutcome(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	r := f.cli(f.repo.Dir, "land", "a", "--into", "a")
 	if r.code != 2 || !strings.HasPrefix(r.stdout, "usage-error") || strings.Count(r.stdout, "\n") != 1 || !strings.Contains(r.err, "usage:") {
@@ -181,6 +186,7 @@ func TestUsageErrorsExitTwoWithOneOutcome(t *testing.T) {
 }
 
 func TestNotARepositoryIsAUsageError(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	r := f.cli(t.TempDir(), "land", "b", "--json")
 	if r.code != 2 || f.jsonOutcome(r)["outcome"] != "usage-error" {
@@ -189,6 +195,7 @@ func TestNotARepositoryIsAUsageError(t *testing.T) {
 }
 
 func TestConfigCheck(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	r := f.cli(f.repo.Dir, "config", "check", "--json")
 	if r.code != 0 || f.jsonOutcome(r)["outcome"] != "config-ok" {
@@ -214,6 +221,7 @@ func TestConfigCheck(t *testing.T) {
 }
 
 func TestStatusPrintsItsOwnJSONObjectAndExitsZero(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	r := f.cli(f.repo.Dir, "status", "--json")
 	var m map[string]any
@@ -234,6 +242,7 @@ func TestStatusPrintsItsOwnJSONObjectAndExitsZero(t *testing.T) {
 }
 
 func TestStatusShowsAStoppedOperationWithItsNextCommands(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, stop := f.conflict()
 	r := f.cli(f.repo.Dir, "status", "--json")
@@ -261,6 +270,7 @@ func joinAny(a []any) string {
 }
 
 func TestStatusOutsideARepositoryIsNotExitZero(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	if r := f.cli(t.TempDir(), "status", "--json"); r.code != 2 || f.jsonOutcome(r)["outcome"] != "usage-error" {
 		t.Fatalf("%+v", r)
@@ -268,6 +278,7 @@ func TestStatusOutsideARepositoryIsNotExitZero(t *testing.T) {
 }
 
 func TestLogByOpIDAndByBranchWithTail(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, stop := f.conflict()
 	opID := stop["op_id"].(string)
@@ -301,6 +312,7 @@ func (f *fx) conflict(repoFlag ...string) (work string, stop map[string]any) {
 }
 
 func TestStopRepeatsRepoInEveryNextCommand(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, stop := f.conflict("--repo", f.repo.Dir)
 	next := stop["next"].([]any)
@@ -315,6 +327,7 @@ func TestStopRepeatsRepoInEveryNextCommand(t *testing.T) {
 }
 
 func TestStopWithoutRepoPrintsNoRepoInNextCommands(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, stop := f.conflict()
 	for _, n := range stop["next"].([]any) {
@@ -325,6 +338,7 @@ func TestStopWithoutRepoPrintsNoRepoInNextCommands(t *testing.T) {
 }
 
 func TestHumanStopPrintsNextCommands(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.commit(f.repo.Dir, "x.txt", "main\n")
@@ -335,6 +349,7 @@ func TestHumanStopPrintsNextCommands(t *testing.T) {
 }
 
 func TestResumeWithBranchOmittedFromTheWorkWorktree(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	work, _ := f.conflict()
 	// PGL_* variables must not be read on a resume: a bogus value would
@@ -349,6 +364,7 @@ func TestResumeWithBranchOmittedFromTheWorkWorktree(t *testing.T) {
 }
 
 func TestResumeWithBranchOmittedOutsideTheWorkWorktreeIsNothingStopped(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflict()
 	r := f.cli(f.repo.Dir, "land", "--abort", "--json")
@@ -359,6 +375,7 @@ func TestResumeWithBranchOmittedOutsideTheWorkWorktreeIsNothingStopped(t *testin
 }
 
 func TestResumeOperationMismatch(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	work, _ := f.conflict()
 	r := f.cli(work, "rebase", "--abort", "--json")
@@ -369,6 +386,7 @@ func TestResumeOperationMismatch(t *testing.T) {
 }
 
 func TestResumeWithBranchGiven(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.conflict()
 	r := f.cli(f.repo.Dir, "land", "feature/x", "--quit", "--json")
@@ -378,6 +396,7 @@ func TestResumeWithBranchGiven(t *testing.T) {
 }
 
 func TestPGLVariablesAreUsedOnAFreshOperation(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.feature()
 	f.env[cli.EnvWorkWorktree] = "/does/not/exist"
@@ -394,6 +413,7 @@ func TestPGLVariablesAreUsedOnAFreshOperation(t *testing.T) {
 }
 
 func TestLogPruningRunsAtTheStartOfEveryInvocation(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	common := f.git(f.repo.Dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	old := oplog.LogPath(common, "20200101T000000Z-aaaaaaaa")
@@ -414,6 +434,7 @@ func TestLogPruningRunsAtTheStartOfEveryInvocation(t *testing.T) {
 }
 
 func TestVersionAndHelp(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	if r := f.cli(f.repo.Dir, "--version"); r.code != 0 || r.stdout != "pg-git-lander test\n" {
 		t.Fatalf("%+v", r)
@@ -426,6 +447,7 @@ func TestVersionAndHelp(t *testing.T) {
 // --help documents --no-verify, what it skips and what it keeps, and the two
 // hook names.
 func TestHelpDocumentsNoVerifyAndTheHookNames(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	r := f.cli(f.repo.Dir, "land", "--help")
 	if r.code != 0 {

@@ -38,6 +38,7 @@ func hasWarn(o *outcome.Outcome, w outcome.Warning, detailPart string) bool {
 }
 
 func TestCheckCleanConfigIsOKWithNoWarnings(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.xdgFor("", "[defaults]\nrun_git_hooks = true\n")
 	o := f.check("")
@@ -47,6 +48,7 @@ func TestCheckCleanConfigIsOKWithNoWarnings(t *testing.T) {
 }
 
 func TestCheckNoFilesIsOK(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	if o := f.check(""); o.Outcome != outcome.ConfigOK {
 		t.Fatalf("got %+v", o)
@@ -54,6 +56,7 @@ func TestCheckNoFilesIsOK(t *testing.T) {
 }
 
 func TestCheckXDGErrorsNameFileLineKeyAndLayer(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, body, key string
 		line            int
@@ -84,6 +87,7 @@ func TestCheckXDGErrorsNameFileLineKeyAndLayer(t *testing.T) {
 }
 
 func TestCheckXDGRootOutsideGitCloneIsRejected(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	notClone := t.TempDir()
 	f.writeXDG("[defaults]\n\n[[repo]]\nroot = \"" + notClone + "\"\n")
@@ -98,6 +102,7 @@ func TestCheckXDGRootOutsideGitCloneIsRejected(t *testing.T) {
 }
 
 func TestCheckRepoFileUnknownKeyIsWarning(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("cfg", map[string]string{".pg-git-lander.toml": "run_git_hooks = true\nfuture_key = 1\n"})
 	o := f.check("")
@@ -110,6 +115,7 @@ func TestCheckRepoFileUnknownKeyIsWarning(t *testing.T) {
 }
 
 func TestCheckRepoFileErrorIsRepoConfigErrorWithLocation(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("cfg", map[string]string{".pg-git-lander.toml": "max_race_retries = 1\nmax_conflict_rounds = \"x\"\n"})
 	o := f.check("")
@@ -123,6 +129,7 @@ func TestCheckRepoFileErrorIsRepoConfigErrorWithLocation(t *testing.T) {
 }
 
 func TestCheckFileValidatesAnUncommittedRepoFile(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	// The committed file is broken; the uncommitted fix passes.
 	f.commit("cfg", map[string]string{".pg-git-lander.toml": "max_race_retries = \"bad\"\n"})
@@ -152,6 +159,7 @@ func TestCheckFileValidatesAnUncommittedRepoFile(t *testing.T) {
 }
 
 func TestCheckRelativeAndMissingCommands(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("cfg", map[string]string{".pg-git-lander.toml": `
 [[conflict]]
@@ -180,6 +188,7 @@ resolve = ["./update-deps.sh"]
 }
 
 func TestCheckXDGCommandsAreChecked(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.writeXDG("[[defaults.conflict]]\nglob = \"*.lock\"\nresolve = [\"/no/such/absolute/tool\"]\n")
 	o := f.check("")
@@ -258,6 +267,7 @@ func TestCheckAllCommandsPresentIsOK(t *testing.T) {
 }
 
 func TestCheckRelativeCommandPathStaysWarning(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("cfg", map[string]string{".pg-git-lander.toml": "[[hooks.land.pre-merge-verify]]\nrun = [\"./x.sh\"]\n", "x.sh": "#!/bin/sh\n"})
 	o := f.check("")
@@ -267,6 +277,7 @@ func TestCheckRelativeCommandPathStaysWarning(t *testing.T) {
 }
 
 func TestCheckLossyKeepOursDriverFromConfigAndAttribute(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.git("config", "merge.flake-lock-keep-ours.driver", "true")
 	f.git("config", "merge.flake-lock-keep-ours.name", "keep ours")
@@ -281,6 +292,7 @@ func TestCheckLossyKeepOursDriverFromConfigAndAttribute(t *testing.T) {
 }
 
 func TestCheckLossyDriverFromAttributeNameAlone(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("attrs", map[string]string{".gitattributes": "*.lock merge=keep-ours\n"})
 	if o := f.check(""); !hasWarn(o, outcome.WarnLossyMergeDriver, "keep-ours") {
@@ -289,6 +301,7 @@ func TestCheckLossyDriverFromAttributeNameAlone(t *testing.T) {
 }
 
 func TestCheckHarmlessMergeDriverDoesNotWarn(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.git("config", "merge.lockfile.driver", "my-merge %O %A %B")
 	f.commit("attrs", map[string]string{".gitattributes": "flake.lock merge=lockfile\n*.txt merge=union\n"})
@@ -298,6 +311,7 @@ func TestCheckHarmlessMergeDriverDoesNotWarn(t *testing.T) {
 }
 
 func TestCheckLossyDriverRecognisedByItsCommand(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.git("config", "merge.mine.driver", "true") // innocuous name, keeps %A whole
 	f.commit("attrs", map[string]string{".gitattributes": "flake.lock merge=mine\n"})
@@ -309,6 +323,7 @@ func TestCheckLossyDriverRecognisedByItsCommand(t *testing.T) {
 // An old hook key is a configuration error naming the replacement or the
 // removal, with file and line, in the repo file and in the XDG file.
 func TestOldHookKeysAreConfigErrors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		old, want string
 	}{
@@ -379,6 +394,7 @@ func dirRuleFiles(runPer string, dirs, withScript []string) map[string]string {
 }
 
 func TestCheckRunPerDirResolvesCommandInEachMatchedDir(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("all", dirRuleFiles("dir", []string{"a", "b"}, []string{"a", "b"}))
 	if o := f.check(""); hasWarn(o, outcome.WarnCommandNotFound, "") || !hasWarn(o, outcome.WarnRelativeCommandPath, "update.sh") {
@@ -400,6 +416,7 @@ func TestCheckRunPerDirResolvesCommandInEachMatchedDir(t *testing.T) {
 }
 
 func TestCheckRunPerDirTruncatesMissingList(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.commit("many", dirRuleFiles("dir", []string{"g", "f", "e", "d", "c", "b", "a"}, nil))
 	o := f.check("")
@@ -409,6 +426,7 @@ func TestCheckRunPerDirTruncatesMissingList(t *testing.T) {
 }
 
 func TestCheckRunPerFileStillChecksRepoRoot(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	// The script exists only in a subdirectory, not at the repo root.
 	f.commit("file rule", dirRuleFiles("file", []string{"a"}, []string{"a"}))
