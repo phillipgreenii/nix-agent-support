@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite
 
-go 1.26.8
+go 1.26.10
 
 require modernc.org/sqlite v1.61.1
 

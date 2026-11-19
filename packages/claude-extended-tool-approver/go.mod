@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/claude-extended-tool-approver
 
-go 1.26.8
+go 1.26.10
 
 require (
 	github.com/phillipgreenii/x v0.0.0-20261118145935-46d6423c44db

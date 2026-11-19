@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-keep-awake
 
-go 1.26.8
+go 1.26.10
 
 require (
 	github.com/BurntSushi/toml v1.6.0

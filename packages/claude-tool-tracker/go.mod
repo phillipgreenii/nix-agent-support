@@ -1,6 +1,6 @@
 module github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/claude-tool-tracker
 
-go 1.26.8
+go 1.26.10
 
 require github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite v0.0.0
 
