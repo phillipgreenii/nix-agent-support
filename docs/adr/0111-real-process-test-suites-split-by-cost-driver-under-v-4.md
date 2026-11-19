@@ -298,3 +298,19 @@ Recorded here for the orchestrator to file; this spike files nothing and changes
    tests; make the Appendix A guard cover `GO_WANT_CONFORMANCE_HELPER_PROCESS`.**
 5. **Correct the class B list in the `x` ADR, Appendix A bead 9 and bead 10** (repo `x`): only
    `pg-rescue/internal/runner` and `scriptout/conformance` re-exec; `claude-hook-router` does not.
+
+## Amendment 2026-11-19: the suites moved out of `checks`
+
+The two suites this ADR names as `checks.<system>.pg-rescue-integration-tests` and
+`checks.<system>.claude-hook-router-e2e` are no longer attributes of `checks.<system>`. Per the
+operator ruling of Phillip, 2026-11-18 (recorded in ADR 0024 of `nix-repo-base`), verbatim: "there
+isn't supposed to be integration or load tests as part of nix flake check", they now live under
+`legacyPackages.<system>.integration-checks` and are built by name:
+
+- `nix build .#integration-checks.pg-rescue-integration-tests`
+- `nix build .#integration-checks.claude-hook-router-e2e`
+
+Wherever this ADR's text above says `checks.<system>.<name>` for either suite, read
+`integration-checks.<name>`. The original decision text is left unchanged as the point-in-time
+record. New guidance: a guard or follow-up that targets either suite MUST address it at
+`integration-checks`, and MUST NOT re-add it to `checks.<system>`.
