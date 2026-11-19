@@ -153,6 +153,34 @@ toml() {
   [[ "$stderr" != *"[mod] entry github.com/BurntSushi/toml"* ]]
 }
 
+@test "scope: a [mod] version go.sum has no source hash for is stale and fails" {
+  toml alpha
+  printf "\n  [mod.'github.com/BurntSushi/toml']\n    version = 'v1.0.0'\n" >>"$ROOT/packages/alpha/gomod2nix.toml"
+  printf 'github.com/BurntSushi/toml v1.1.0 h1:x=\ngithub.com/BurntSushi/toml v1.0.0/go.mod h1:y=\n' >"$ROOT/packages/alpha/go.sum"
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"alpha: stale gomod2nix.toml: [mod] entry github.com/BurntSushi/toml is at v1.0.0, which go.sum has no source hash for"* ]]
+}
+
+@test "scope: a [mod] version differing from the go.mod requirement is stale and fails" {
+  printf 'module example.com/alpha\n\ngo 1.26.8\n\nrequire (\n\tgithub.com/BurntSushi/toml v1.1.0 // indirect\n)\n' >"$ROOT/packages/alpha/go.mod"
+  toml alpha
+  printf "\n  [mod.'github.com/BurntSushi/toml']\n    version = 'v1.0.0'\n" >>"$ROOT/packages/alpha/gomod2nix.toml"
+  printf 'github.com/BurntSushi/toml v1.0.0 h1:x=\ngithub.com/BurntSushi/toml v1.1.0 h1:y=\n' >"$ROOT/packages/alpha/go.sum"
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 3 ]
+  [[ "$stderr" == *"alpha: stale gomod2nix.toml: [mod] entry github.com/BurntSushi/toml is at v1.0.0 but go.mod requires v1.1.0"* ]]
+}
+
+@test "scope: a [mod] version matching go.mod and go.sum passes" {
+  printf 'module example.com/alpha\n\ngo 1.26.8\n\nrequire github.com/BurntSushi/toml v1.1.0\n' >"$ROOT/packages/alpha/go.mod"
+  toml alpha
+  printf "\n  [mod.'github.com/BurntSushi/toml']\n    version = 'v1.1.0'\n" >>"$ROOT/packages/alpha/gomod2nix.toml"
+  printf 'github.com/BurntSushi/toml v1.1.0 h1:x=\ngithub.com/BurntSushi/toml v1.1.0/go.mod h1:y=\n' >"$ROOT/packages/alpha/go.sum"
+  run --separate-stderr bash "$SCOPE" "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
 @test "scope: naming one module checks only that module" {
   toml beta 'example.com/alpha/x'
   run --separate-stderr bash "$SCOPE" "$ROOT" alpha

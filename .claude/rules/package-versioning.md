@@ -27,8 +27,10 @@ bump only via `update-locks.sh`. Authority: `phillipg-nix-repo-base` ADR 0006; s
 NOT `nix-update`; there is no `vendorHash` for this family). `--with-deps` is REQUIRED
 (`phillipg-nix-repo-base` ADR 0031): it writes the `cachePackages` list that primes the Go build
 cache, and a plain `generate` silently removes it. Every `packages/*/gomod2nix.toml` module has an
-`update-deps.sh` wrapper and is refreshed by `update-locks.sh`'s module loop; the `go-deps-wired`
-flake check fails if one is missed. A local `replace => ../sibling` (e.g. `../claude-transcript`) is
+`update-deps.sh` wrapper. `update-locks.sh` schedules a refresh (`go get -u` + `update-deps.sh`)
+only for `GO_GET_U_MODULES`; the other modules change only when their own code or `go.mod` does, so
+they get no scheduled step and the `go-deps-wired` flake check instead fails when one has no wrapper
+or a stale `gomod2nix.toml` (run `packages/<pkg>/update-deps.sh` to fix it). A local `replace => ../sibling` (e.g. `../claude-transcript`) is
 resolved natively — use the rooted-fileset + `modRoot` form (Pattern B). Authority and the full
 A/B pattern: `phillipg-nix-repo-base` ADR 0008 and its `CLAUDE.md` "Go packages" section. Do not
 reintroduce `vendorHash`/`buildGoModule`/`localReplaceModules` for these packages.
@@ -39,8 +41,9 @@ workspace, `gomod2nix generate --with-deps` walks every module's `all` scope and
 packages into `cachePackages`, which breaks the `go-cache-env` build ("import lookup disabled by
 -mod=vendor"; this happened on 2026-11-18). `scripts/check-gomod2nix-cache-scope.sh` enforces the
 result: a first-party `cachePackages` entry MUST lie in a module that `go.mod` replaces with a local
-path (the builder drops only those, never the module's own packages), and every `[mod]` entry MUST
-be in `go.sum`. The updater runs it for the regenerated module, library modules included, and exits
+path (the builder drops only those, never the module's own packages), every `[mod]` entry MUST
+be in `go.sum`, and its version MUST be one `go.sum` hashes and equal the `go.mod` requirement (the
+staleness rule). The updater runs it for the regenerated module, library modules included, and exits
 3 before `update-locks.sh` can commit; the `go-deps-wired` check runs it over every module. Tests:
 `tests/check-go-deps-wired.bats`, `tests/update-gomod2nix-deps-build.bats`.
 

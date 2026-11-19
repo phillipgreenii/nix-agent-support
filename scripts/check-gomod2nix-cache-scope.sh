@@ -17,6 +17,11 @@
 #      `=> ./x`, single-line or `replace ( ... )` block). The module's own
 #      packages are NOT allowed: the builder does not drop them either.
 #   2. Every [mod] entry MUST be a module named in this module's go.sum.
+#   3. Staleness (the scheduled refresh no longer regenerates modules that get no
+#      `go get -u`, so this is what catches a go.mod/go.sum edit that left the toml
+#      behind): every [mod] entry's version MUST be a version go.sum holds a source
+#      hash (`h1:`) for, and where go.mod requires a module at a version, the toml
+#      entry for that module (when present) MUST carry that same version.
 #
 # The toml is read in gomod2nix's fixed output layout (`cachePackages = [`, one
 # quoted entry per line, `]`; `[mod.'path']` headers), so no TOML tool is needed
@@ -73,6 +78,29 @@ cache_entries() {
 # mod_entries <toml>: the module paths of the [mod.'path'] tables
 mod_entries() {
   sed -nE "s/^[[:space:]]*\[mod\.['\"]([^'\"]+)['\"]\][[:space:]]*$/\1/p" "$1"
+}
+
+# mod_versions <toml>: "<path> <version>" for each [mod.'path'] table
+mod_versions() {
+  awk '
+    /^[[:space:]]*\[mod\./ {
+      p = $0; sub(/^[[:space:]]*\[mod\.[\x27"]/, "", p); sub(/[\x27"]\].*$/, "", p); path = p; next
+    }
+    path != "" && /^[[:space:]]*version[[:space:]]*=/ {
+      v = $0; sub(/^[^=]*=[[:space:]]*[\x27"]/, "", v); sub(/[\x27"].*$/, "", v)
+      print path, v; path = ""
+    }
+  ' "$1"
+}
+
+# require_versions <go.mod>: "<path> <version>" for each requirement
+require_versions() {
+  awk '
+    /^[[:space:]]*require[[:space:]]*\(/ { blk = 1; next }
+    blk && /^[[:space:]]*\)/ { blk = 0; next }
+    blk { sub(/\/\/.*/, ""); if (NF >= 2) print $1, $2; next }
+    /^[[:space:]]*require[[:space:]]+[^(]/ { sub(/\/\/.*/, ""); print $2, $3 }
+  ' "$1"
 }
 
 # under <path> <prefix>: path is prefix itself or inside it
@@ -136,19 +164,36 @@ for mod in "${modules[@]}"; do
     fi
   done < <(cache_entries "${dir}/gomod2nix.toml")
 
-  declare -A summed=()
+  declare -A summed=() summedver=() required=()
   if [ -f "${dir}/go.sum" ]; then
-    while read -r m _; do
+    while read -r m v _; do
       [ -n "${m}" ] && summed["${m}"]=1
+      # A source hash line is `path vX h1:...`; the `vX/go.mod` lines are not it.
+      case "${v}" in
+      */go.mod) ;;
+      *) [ -n "${v}" ] && summedver["${m} ${v}"]=1 ;;
+      esac
     done <"${dir}/go.sum"
   fi
+  # go.mod requirements (single-line and block form).
+  while read -r m v; do
+    [ -n "${m}" ] && required["${m}"]="${v}"
+  done < <(require_versions "${dir}/go.mod")
   while IFS= read -r m; do
     [ -n "${m}" ] || continue
     if [ -z "${summed[${m}]:-}" ]; then
       problems+=("${mod}: [mod] entry ${m} is not in go.sum")
     fi
   done < <(mod_entries "${dir}/gomod2nix.toml")
-  unset summed
+  while read -r m v; do
+    [ -n "${m}" ] || continue
+    if [ -n "${summed[${m}]:-}" ] && [ -z "${summedver["${m} ${v}"]:-}" ]; then
+      problems+=("${mod}: stale gomod2nix.toml: [mod] entry ${m} is at ${v}, which go.sum has no source hash for")
+    elif [ -n "${required[${m}]:-}" ] && [ "${required[${m}]}" != "${v}" ]; then
+      problems+=("${mod}: stale gomod2nix.toml: [mod] entry ${m} is at ${v} but go.mod requires ${required[${m}]}")
+    fi
+  done < <(mod_versions "${dir}/gomod2nix.toml")
+  unset summed summedver required
 done
 
 if [ "${#problems[@]}" -gt 0 ]; then

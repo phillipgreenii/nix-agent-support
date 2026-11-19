@@ -11,8 +11,9 @@ export GOWORK=off
 WORKSPACE_ROOT="${SCRIPT_DIR}/.."
 
 # Every Go module in this repo is identified by a committed gomod2nix.toml beside
-# its go.mod. The refresh loop below iterates THIS list, so a new Go package is
-# wired the moment its toml exists (the `go-deps-wired` flake check asserts it).
+# its go.mod. This list is the module universe the `go-deps-wired` flake check
+# covers (wrapper present, toml in scope and not stale); the scheduled refresh
+# below runs only the GO_GET_U_MODULES subset.
 #
 # Emitted in dependency order (a module AFTER the sibling modules it reaches via
 # `replace => ../sibling`) so a dependent's `go mod tidy` sees the sibling's
@@ -53,7 +54,7 @@ case "${1:-}" in
   shift
   ;;
 --list-go-modules)
-  # Read-only: print the module dirs the refresh loop covers, then exit (used by
+  # Read-only: print every Go module dir, then exit (used by
   # the go-deps-wired flake check; touches no tree state, needs no nix).
   go_module_dirs
   exit 0
@@ -61,7 +62,7 @@ case "${1:-}" in
 -h | --help)
   echo "Usage: $0 [--ci | --list-go-modules]"
   echo "  --ci               Disable laptop-only checks (nix daemon health, time-based cache)"
-  echo "  --list-go-modules  Print the Go module dirs the refresh loop covers, then exit"
+  echo "  --list-go-modules  Print every Go module dir (the go-deps-wired universe), then exit"
   exit 0
   ;;
 "") ;;
@@ -95,22 +96,22 @@ ul_run_step "nix-flake-update" \
   "update-locks: update nix flake.lock" \
   nix flake update
 
-# One step per Go module (every packages/*/gomod2nix.toml). The step name keeps
-# the historical `update-deps-<name>` form so existing step caches still match.
+# One scheduled step per BUMPED Go module (GO_GET_U_MODULES). The other modules get
+# no scheduled step: `go mod tidy` + `gomod2nix generate --with-deps` changes their
+# files only when that module's own code or go.mod changed (no upstream moves), and
+# that is already enforced at check time: the `go-deps-wired` flake check runs
+# scripts/check-gomod2nix-cache-scope.sh over EVERY module and fails when a
+# gomod2nix.toml is stale against go.mod/go.sum. The step name keeps the historical
+# `update-deps-<name>` form so existing step caches still match.
 while IFS= read -r go_mod; do
   go_get_u=false
   for m in "${GO_GET_U_MODULES[@]}"; do
     [ "${m}" = "${go_mod}" ] && go_get_u=true
   done
-  if [ "${go_get_u}" = true ]; then
-    ul_run_step "update-deps-${go_mod}" \
-      "update-locks: update ${go_mod} Go deps + gomod2nix.toml" \
-      refresh_go_module_with_bump "${go_mod}"
-  else
-    ul_run_step "update-deps-${go_mod}" \
-      "update-locks: update ${go_mod} Go deps + gomod2nix.toml" \
-      refresh_go_module "${go_mod}"
-  fi
+  [ "${go_get_u}" = true ] || continue
+  ul_run_step "update-deps-${go_mod}" \
+    "update-locks: update ${go_mod} Go deps + gomod2nix.toml" \
+    refresh_go_module_with_bump "${go_mod}"
 done < <(go_module_dirs)
 
 # The Go steps above run with GOWORK=off, so they never write the root go.work.sum
