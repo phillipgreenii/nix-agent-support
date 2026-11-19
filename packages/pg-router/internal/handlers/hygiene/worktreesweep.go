@@ -174,7 +174,7 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 	grace := worktreeSweepGrace(deps)
 	var candidates []leakedWorktree
 	var leftovers []leftoverDir
-	purgeTrash(ctx, dir, now, grace)
+	env.ports.purgeTrash(ctx, dir, now, grace)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue

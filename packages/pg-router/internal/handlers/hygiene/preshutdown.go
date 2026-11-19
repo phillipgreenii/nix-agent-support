@@ -50,8 +50,8 @@ import (
 // touching the branch it was created on, so every session purged through
 // this function orphaned its pg-router/<beadID> anchor branch forever until
 // now.
-func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session) bool {
-	return closeSession(ctx, cc, open, repoRoot, worktreeDir, s, false)
+func (tp teardownPorts) closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session) bool {
+	return tp.closeSession(ctx, cc, open, repoRoot, worktreeDir, s, false)
 }
 
 // closeSession is closeSessionAndWorktree with an explicit keepWorktree
@@ -69,7 +69,7 @@ func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktre
 // leak). Every other CWD ("none"/"path"/"workforest" isolation, an empty
 // worktreeDir) and keepWorktree=true keep the single-phase purge with no
 // marker.
-func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
+func (tp teardownPorts) closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
 	// A "bead-worktree" session's directory is a drain worker's worktree this
 	// handler never created (bead pg2-b49ydt, R3): purge the row, remove nothing.
 	// The type travels on the row (ccpool.MetaKeyKeepWorktree) because this
@@ -83,7 +83,7 @@ func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, r
 		keepWorktree = false
 	}
 	if keepWorktree || (!leased && !twoPhaseEligible(s, repoRoot, worktreeDir)) {
-		return closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
+		return tp.closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
 	}
 	// The marker goes on BEFORE the non-purge close: a handler-closed idle row
 	// WITHOUT it is a settled duplicate that a redelivered dispatch absorbs
@@ -92,7 +92,7 @@ func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, r
 	if err := cc.SetMeta(ctx, s.ExternalID, ccpool.MetaKeyPurgePending, purgeMarkerValue); err != nil {
 		slog.Warn("teardown: could not mark the row purge_pending; falling back to single-phase purge",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
-		return closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
+		return tp.closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
 	}
 	if err := cc.Close(ctx, s.ExternalID, false); err != nil {
 		// The row stays open and marked; the next reconcile retries it.
@@ -101,12 +101,12 @@ func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, r
 	}
 	slog.Info("teardown: purge deferred until worktree removed (purge_pending)",
 		"session", s.ExternalID, "cwd", s.CWD)
-	return finishPurge(ctx, cc, open, repoRoot, worktreeDir, s, false)
+	return tp.finishPurge(ctx, cc, open, repoRoot, worktreeDir, s, false)
 }
 
 // closeSinglePhase is the pre-pg2-kqegi teardown: purge the row first, then
 // best-effort remove the worktree (unless keepWorktree) and its anchor branch.
-func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot string, s ccpool.Session, keepWorktree bool) bool {
+func (tp teardownPorts) closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot string, s ccpool.Session, keepWorktree bool) bool {
 	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
 		slog.Warn("teardown: close failed", "session", s.ExternalID, "err", err)
 		return false
@@ -117,7 +117,7 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 		return true
 	}
 	if gwmLeased(s) {
-		endGWMLease(ctx, gwmClientFor(teardownGWM, repoRoot), open, repoRoot, s)
+		endGWMLease(ctx, gwmClientFor(tp.gwm, repoRoot), open, repoRoot, s)
 		return true
 	}
 	if keepWorktree {
@@ -125,7 +125,7 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 			"session", s.ExternalID, "cwd", s.CWD)
 		return true
 	}
-	if worktreeHeldByStranger(ctx, s) {
+	if tp.worktreeHeldByStranger(ctx, s) {
 		return true
 	}
 	if wm, err := open(ctx, s.CWD); errors.Is(err, gitclient.ErrNotARepository) {
@@ -138,7 +138,7 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 	} else if err != nil {
 		slog.Warn("teardown: worktree remove failed (cannot open the cwd's git repository)",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
-	} else if err := worktree.RemoveWithin(ctx, wm, s.CWD, true, teardownRemoveTimeout, worktree.PruneVia(open, repoRoot)); err != nil {
+	} else if err := worktree.RemoveWithin(ctx, wm, s.CWD, true, tp.removeTimeout, worktree.PruneVia(open, repoRoot)); err != nil {
 		slog.Warn("teardown: worktree remove failed (cwd may not be a linked worktree)",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
 	} else {

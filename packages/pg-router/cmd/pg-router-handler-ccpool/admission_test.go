@@ -17,7 +17,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
-	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
@@ -322,7 +321,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 	cfg.WorktreeDir = wtDir
 	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
 	cc := &poolCC{OrphanCC: &dtest.OrphanCC{}}
-	r := (hygiene.Sweeper{}).NewAdmission(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
+	r := sweeper.NewAdmission(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
 	if err := r.ReclaimLeakedWorktree(context.Background(), "zr-w"); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +333,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 			t.Fatalf("%q: %v", bad, err)
 		}
 	}
-	if (hygiene.Sweeper{}).NewAdmission(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
+	if sweeper.NewAdmission(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
 		t.Fatal("a role without a ccpool block has no reconciler")
 	}
 }

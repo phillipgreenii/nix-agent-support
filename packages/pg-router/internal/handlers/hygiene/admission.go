@@ -73,7 +73,8 @@ type poolReconciler struct {
 	// nil means the production probe, the sweeper's liveCWDs. It never means "no probe": a
 	// failed or unavailable probe keeps the directory.
 	cwds cwdProbe
-	// sweeper supplies the ports (gauge, sweep bounds, live-process probe).
+	// sweeper supplies the ports (gauge, sweep bounds, live-process probe,
+	// teardown and bulk-delete ports).
 	sweeper Sweeper
 }
 
@@ -149,8 +150,7 @@ func (p poolReconciler) ReconcileClosedBeads(ctx context.Context) (executor.Reco
 		return executor.ReconcileOutcome{Skipped: true}, nil
 	}
 	t0 := time.Now()
-	useRemoveTimeout(p.cfg)
-	closed := reconcileClosedBeadSessions(ctx, p.deps.CC, worktree.GitOpener, p.deps.BD, p.cfg.SessionPrefix, p.cfg.RepoRoot, p.cfg.WorktreeDir, newTranscriptQuietCheck(p.cfg.WorktreeQuietWindow, nil, nil))
+	closed := p.sweeper.ports.withRemoveTimeout(p.cfg).reconcileClosedBeadSessions(ctx, p.deps.CC, worktree.GitOpener, p.deps.BD, p.cfg.SessionPrefix, p.cfg.RepoRoot, p.cfg.WorktreeDir, newTranscriptQuietCheck(p.cfg.WorktreeQuietWindow, nil, nil))
 	recordSweepPass("dispatch", p.role.Name, "closed_bead_reconcile", closed, time.Since(t0), p.deps)
 	if closed > 0 {
 		slog.Info("dispatch: reconciled sessions with closed beads under capacity pressure", "closed", closed)

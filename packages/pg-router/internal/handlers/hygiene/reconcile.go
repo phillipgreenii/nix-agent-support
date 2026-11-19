@@ -88,8 +88,8 @@ import (
 // transcript or subagent transcripts were written within the configured
 // window is skipped this sweep (idle-with-running-subagents, pg2-9fwft) and
 // retried by the next one. nil disables the guard.
-func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck) (closed int) {
-	return reconcileClosedBeadSessionsGuarded(ctx, cc, open, br, prefix, repoRoot, worktreeDir, quiet, newWorkPreservingGuard(open, repoRoot), "reconcile: list failed")
+func (tp teardownPorts) reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck) (closed int) {
+	return tp.reconcileClosedBeadSessionsGuarded(ctx, cc, open, br, prefix, repoRoot, worktreeDir, quiet, newWorkPreservingGuard(open, repoRoot), "reconcile: list failed")
 }
 
 // newWorkPreservingGuard is the role-pool guard: the clean-and-pushed part of the
@@ -114,7 +114,7 @@ type sessionGuard func(ctx context.Context, s ccpool.Session) (ok bool, reason s
 // optional guard (see sessionGuard) and the log line used when the pool cannot
 // be listed. reconcileStaleDefaultPoolSessions (stalesession.go) uses it to
 // widen the sweep to the default pool safely.
-func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck, guard sessionGuard, listFailMsg string) (closed int) {
+func (tp teardownPorts) reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck, guard sessionGuard, listFailMsg string) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
 		slog.Warn(listFailMsg, "err", err)
@@ -135,7 +135,7 @@ func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, o
 		if attemptedOne {
 			continue // left for the next pass: at most one retry per pass
 		}
-		purged, attempted := retryPurgePending(ctx, cc, open, repoRoot, worktreeDir, quiet, sessions, s)
+		purged, attempted := tp.retryPurgePending(ctx, cc, open, repoRoot, worktreeDir, quiet, sessions, s)
 		if purged {
 			closed++
 		}
@@ -173,7 +173,7 @@ func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, o
 			return closed // cut: the cursor stays on the last finished candidate
 		}
 		counts.examined()
-		closed += reconcileOneClosedBead(ctx, cc, open, br, repoRoot, worktreeDir, quiet, guard, sessions, s)
+		closed += tp.reconcileOneClosedBead(ctx, cc, open, br, repoRoot, worktreeDir, quiet, guard, sessions, s)
 		if resumable && ctx.Err() == nil {
 			cursor.save(s.ExternalID)
 		}
@@ -185,7 +185,7 @@ func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, o
 }
 
 // reconcileOneClosedBead examines one candidate and returns 1 when it closed it.
-func reconcileOneClosedBead(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot, worktreeDir string, quiet quietCheck, guard sessionGuard, sessions []ccpool.Session, s ccpool.Session) int {
+func (tp teardownPorts) reconcileOneClosedBead(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot, worktreeDir string, quiet quietCheck, guard sessionGuard, sessions []ccpool.Session, s ccpool.Session) int {
 	if !beadAlreadyClosed(ctx, br, s) {
 		return 0
 	}
@@ -199,7 +199,7 @@ func reconcileOneClosedBead(ctx context.Context, cc ccpool.Runner, open worktree
 		slog.Info("reconcile: session transcript still active; deferring", "session", s.ExternalID)
 		return 0
 	}
-	if closeSession(ctx, cc, open, repoRoot, worktreeDir, s, worktreeInUseByPeer(sessions, s)) {
+	if tp.closeSession(ctx, cc, open, repoRoot, worktreeDir, s, worktreeInUseByPeer(sessions, s)) {
 		return 1
 	}
 	return 0

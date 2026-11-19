@@ -343,9 +343,7 @@ func TestLeftover_sweepFinishesHalfDrainedTrashPaced(t *testing.T) {
 	h.age(trash)
 
 	var pauses []time.Duration
-	old := pacedRemoval
-	t.Cleanup(func() { pacedRemoval = old })
-	pacedRemoval = pacedRemover{worktree.Removal{
+	h.env.ports.removal = &pacedRemover{worktree.Removal{
 		BatchSize: 20,
 		Pause:     time.Second,
 		Sleep: func(_ context.Context, d time.Duration) error {

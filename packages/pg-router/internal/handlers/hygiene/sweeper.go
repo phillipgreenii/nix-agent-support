@@ -37,6 +37,9 @@ type Sweeper struct {
 	// worktreeSweepMaxPerPass and worktreeSweepMaxExamined lower the sweep's
 	// per-pass bounds (test only; zero selects the production bounds).
 	worktreeSweepMaxPerPass, worktreeSweepMaxExamined int
+	// ports are the teardown and bulk-delete ports; the zero value is
+	// production.
+	ports teardownPorts
 }
 
 // liveCWDs is the live-process probe: the port when set, else lsof.
@@ -63,11 +66,13 @@ func (s Sweeper) diagExpiry() time.Time {
 	return defaultListDiagExpiry()
 }
 
-// env stamps the Sweeper's gauge and sweep bounds onto an orphanEnv, leaving
-// every field the caller set (open, quiet, cwds, lockDir) alone.
+// env stamps the Sweeper's gauge, sweep bounds and teardown ports onto an
+// orphanEnv, leaving every field the caller set (open, quiet, cwds, lockDir)
+// alone.
 func (s Sweeper) env(e orphanEnv) orphanEnv {
 	e.gauge = s.orphanGaugeEmit
 	e.maxPerPass, e.maxExamined = s.worktreeSweepMaxPerPass, s.worktreeSweepMaxExamined
+	e.ports = s.ports
 	return e
 }
 
@@ -75,14 +80,15 @@ func (s Sweeper) env(e orphanEnv) orphanEnv {
 // ccpool OTel emitter; the handler binary calls it once at start.
 func (s *Sweeper) InstallProductionGauges() { s.orphanGaugeEmit = ccpoolGaugeEmit }
 
-// DisableTeardownProbe makes the closed-bead teardown see no live process, so a
-// test of the embedding command does not depend on lsof. Test use only.
-func DisableTeardownProbe() {
-	teardownProbe = func(context.Context) ([]string, error) { return nil, nil }
+// DisableTeardownProbe makes the closed-bead teardown of this Sweeper see no
+// live process, so a test of the embedding command does not depend on lsof.
+// Test use only.
+func (s *Sweeper) DisableTeardownProbe() {
+	s.ports.probe = noLiveProcess
 }
 
 // ReconcileDefaultPool runs the guarded default-pool stale-session pass and
 // returns how many sessions it closed.
-func (Sweeper) ReconcileDefaultPool(ctx context.Context, cfg config.Config) int {
-	return reconcileDefaultPool(ctx, cfg)
+func (s Sweeper) ReconcileDefaultPool(ctx context.Context, cfg config.Config) int {
+	return s.ports.reconcileDefaultPool(ctx, cfg)
 }

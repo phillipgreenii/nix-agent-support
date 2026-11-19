@@ -9,7 +9,6 @@ import (
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/corecall"
-	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 )
 
@@ -56,7 +55,7 @@ func TestMain(m *testing.M) {
 	// No test depends on a pg-origin-guard installed on the machine running it.
 	// No test depends on lsof: the closed-bead teardown sees no live process
 	// unless a test sets its own probe.
-	hygiene.DisableTeardownProbe()
+	sweeper.DisableTeardownProbe()
 	dir, err := os.MkdirTemp("", "ccpool-adapter-state-")
 	if err != nil {
 		panic(err)

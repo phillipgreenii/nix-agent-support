@@ -1,7 +1,6 @@
 package hygiene
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
@@ -30,7 +29,6 @@ func TestMain(m *testing.M) {
 	for _, k := range ambientEnvInputs {
 		_ = os.Unsetenv(k)
 	}
-	teardownProbe = func(context.Context) ([]string, error) { return nil, nil }
 	dir, err := os.MkdirTemp("", "ccpool-hygiene-state-")
 	if err != nil {
 		panic(err)

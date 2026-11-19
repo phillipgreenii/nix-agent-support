@@ -219,9 +219,7 @@ func TestPurgeTrash_drainBudgetFollowsTheRoleShare(t *testing.T) {
 	h := newSweepHarness(t)
 	h.trashWith("zr-k")
 	var left time.Duration
-	old := pacedRemoval
-	t.Cleanup(func() { pacedRemoval = old })
-	pacedRemoval = pacedRemover{worktree.Removal{
+	h.env.ports.removal = &pacedRemover{worktree.Removal{
 		BatchSize: 20,
 		Pause:     time.Second,
 		Sleep: func(ctx context.Context, _ time.Duration) error {
@@ -243,9 +241,7 @@ func TestPurgeTrash_oncePerDirWithinOneRun(t *testing.T) {
 	h := newSweepHarness(t)
 	trash := h.trashWith("zr-k")
 	var pauses int
-	old := pacedRemoval
-	t.Cleanup(func() { pacedRemoval = old })
-	pacedRemoval = pacedRemover{worktree.Removal{
+	h.env.ports.removal = &pacedRemover{worktree.Removal{
 		BatchSize: 20,
 		Pause:     time.Second,
 		Sleep: func(_ context.Context, _ time.Duration) error {

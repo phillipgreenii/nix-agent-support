@@ -111,9 +111,11 @@ func (s Sweeper) prodJanitorPasses() janitorPasses {
 	return janitorPasses{
 		handlerVersion: s.Version,
 		closedBead: func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int {
-			return reconcileClosedBeadSessions(withResume(ctx, deps.LockDir, rolePool(role)), deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil))
+			return s.ports.withRemoveTimeout(cfg).reconcileClosedBeadSessions(withResume(ctx, deps.LockDir, rolePool(role)), deps.CC, worktree.GitOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil))
 		},
-		defaultPool: func(ctx context.Context, cfg config.Config) int { return reconcileDefaultPool(ctx, cfg) },
+		defaultPool: func(ctx context.Context, cfg config.Config) int {
+			return s.ports.withRemoveTimeout(cfg).reconcileDefaultPool(ctx, cfg)
+		},
 		orphan: func(ctx context.Context, role roles.Role, cfg config.Config, deps executor.Deps) int {
 			reclaimed, stopped := reconcileOrphanSessions(ctx, role, deps, s.env(orphanEnv{
 				open:    worktree.GitOpener,
@@ -389,7 +391,6 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		fmt.Fprintln(os.Stderr, "janitor:", err)
 		return conformance.ExitUsage
 	}
-	useRemoveTimeout(cfg)
 	jroles, err := loadJanitorRoles(opts, mkDeps)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "janitor:", err)

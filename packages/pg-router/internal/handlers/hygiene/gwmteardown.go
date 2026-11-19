@@ -21,10 +21,6 @@ import (
 // peer-sharing rule and no live-process guard. A session without the key (one
 // in flight when the lease code was applied) tears down the old way.
 
-// teardownGWM is the pg-gwm client the closed-bead teardown uses; nil means the
-// production CLI client at the repo root. Tests substitute a fake.
-var teardownGWM gwm.Client
-
 // gwmClientFor returns c, or the production client for repoRoot when c is nil.
 func gwmClientFor(c gwm.Client, repoRoot string) gwm.Client {
 	if c != nil {

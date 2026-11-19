@@ -253,7 +253,7 @@ func reclaimLeftoverDir(ctx context.Context, role roles.Role, deps executor.Deps
 		slog.Warn("worktree sweep: cannot move the leftover directory aside; keeping it", "bead", l.bead, "path", l.path, "err", err)
 		return false
 	}
-	if err := pacedRemoval.DrainErr(ctx, trash); err != nil {
+	if err := env.ports.pacedRemoval().DrainErr(ctx, trash); err != nil {
 		slog.Warn("worktree sweep: leftover directory moved aside but not fully deleted (a later sweep purges the trash)", "bead", l.bead, "trash", trash, "err", err)
 	}
 	slog.Info("worktree sweep: unregistered leftover directory reclaimed", "bead", l.bead, "path", l.path, "role", role.Name, "age", l.age)
@@ -262,11 +262,6 @@ func reclaimLeftoverDir(ctx context.Context, role roles.Role, deps executor.Deps
 	})
 	return true
 }
-
-// pacedRemoval is the rate-limit every bulk delete here uses (a worktree or
-// leftover tree is tens of thousands of files, and each unlink is a filesystem
-// event for every listener). Tests substitute a recording Sleep.
-var pacedRemoval = pacedRemover{worktree.Removal{Limiter: worktree.SharedLimiter}}
 
 // pacedRemover adds the error-only drain the leftover reclaim wants.
 type pacedRemover struct{ worktree.Removal }
@@ -285,11 +280,11 @@ func (p pacedRemover) DrainErr(ctx context.Context, path string) error {
 // It runs once per distinct dir within one janitor run (firstPurge), and its drain
 // budget is bounded by the time the pass context has left (trashBudget), so a
 // large trash cannot consume the whole role share the sweep's later stages need.
-func purgeTrash(ctx context.Context, dir string, now time.Time, grace time.Duration) {
+func (tp teardownPorts) purgeTrash(ctx context.Context, dir string, now time.Time, grace time.Duration) {
 	if !firstPurge(ctx, dir) {
 		return
 	}
-	removal := pacedRemoval
+	removal := tp.pacedRemoval()
 	base := removal.Budget
 	if base <= 0 {
 		base = worktree.DefaultBudget

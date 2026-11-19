@@ -54,6 +54,9 @@ import (
 // orphanEnv carries the ambient dependencies the orphan reconcile needs beyond
 // executor.Deps; zero values select production behavior.
 type orphanEnv struct {
+	// ports are the bulk-delete rate limit and teardown ports the leftover
+	// reclaim and trash purge use; the zero value is production.
+	ports teardownPorts
 	// open anchors a gitclient for worktree removal / branch deletion.
 	open worktree.Opener
 	// quiet is the non-blocking transcript-quiet guard (newTranscriptQuietCheck);

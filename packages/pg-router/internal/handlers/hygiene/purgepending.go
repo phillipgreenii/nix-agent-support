@@ -13,7 +13,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/procprobe"
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
-	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/worktree"
 )
 
@@ -89,7 +88,7 @@ func pathStrictlyUnder(path, dir string) bool {
 // (non-purge): remove the worktree (unless keepWorktree) and its anchor branch,
 // and only then purge the row. It returns true iff the row was purged; on any
 // failure the row is left, still carrying purge_pending, for the next retry.
-func finishPurge(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
+func (tp teardownPorts) finishPurge(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
 	// A bead-worktree session's directory is never ours to remove, even if a
 	// stray purge_pending marker reached its row (bead pg2-b49ydt).
 	if s.KeepsWorktree() {
@@ -98,15 +97,15 @@ func finishPurge(ctx context.Context, cc ccpool.Runner, open worktree.Opener, re
 	} else if gwmLeased(s) {
 		// pg-gwm owns the worktree: a failed release leaves the purge pending;
 		// an already-over lease counts as released.
-		if !endGWMLease(ctx, gwmClientFor(teardownGWM, repoRoot), open, repoRoot, s) {
+		if !endGWMLease(ctx, gwmClientFor(tp.gwm, repoRoot), open, repoRoot, s) {
 			return false
 		}
 	} else if keepWorktree {
 		slog.Info("teardown: worktree kept -- another live session still uses it",
 			"session", s.ExternalID, "cwd", s.CWD)
-	} else if worktreeHeldByStranger(ctx, s) {
+	} else if tp.worktreeHeldByStranger(ctx, s) {
 		// kept: the row is still purged (the sweep reclaims the worktree later).
-	} else if !removeWorktreeForPurge(ctx, open, repoRoot, worktreeDir, s) {
+	} else if !tp.removeWorktreeForPurge(ctx, open, repoRoot, worktreeDir, s) {
 		return false
 	}
 	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
@@ -123,7 +122,7 @@ func finishPurge(ctx context.Context, cc ccpool.Runner, open worktree.Opener, re
 // directory that no longer exists, or an unregistered husk under worktreeDir
 // (no .git, or a .git git no longer knows), counts as gone; the husk is deleted
 // and the registrations pruned.
-func removeWorktreeForPurge(ctx context.Context, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session) bool {
+func (tp teardownPorts) removeWorktreeForPurge(ctx context.Context, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session) bool {
 	if err := ctx.Err(); err != nil {
 		slog.Warn("teardown: interrupted before worktree removal; purge stays deferred",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
@@ -140,7 +139,7 @@ func removeWorktreeForPurge(ctx context.Context, open worktree.Opener, repoRoot,
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
 		return false
 	}
-	rmErr := worktree.RemoveWithin(ctx, root, s.CWD, true, teardownRemoveTimeout, worktree.PruneVia(open, repoRoot))
+	rmErr := worktree.RemoveWithin(ctx, root, s.CWD, true, tp.removeTimeout, worktree.PruneVia(open, repoRoot))
 	if rmErr == nil {
 		slog.Info("teardown: worktree removed", "session", s.ExternalID, "cwd", s.CWD)
 		deleteAnchorBranch(ctx, open, repoRoot, s.ExternalID, s.Meta[ccpool.MetaKeyBead])
@@ -152,7 +151,7 @@ func removeWorktreeForPurge(ctx context.Context, open worktree.Opener, repoRoot,
 		return true
 	}
 	if unregisteredWorktreeDir(s.CWD, worktreeDir) {
-		if err := pacedRemoval.RemoveTree(ctx, s.CWD); err != nil {
+		if err := tp.pacedRemoval().RemoveTree(ctx, s.CWD); err != nil {
 			slog.Warn("teardown: could not delete the unregistered worktree directory; purge stays deferred",
 				"session", s.ExternalID, "cwd", s.CWD, "err", err)
 			return false
@@ -226,7 +225,7 @@ func worktreeHeldByLivePeer(sessions []ccpool.Session, s ccpool.Session) bool {
 //   - a still-open row is closed (non-purge) again first;
 //   - ANY other Live session on the same CWD keeps the worktree: the row is
 //     purged without removing anything (INV-CCH-15).
-func retryPurgePending(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, quiet quietCheck, sessions []ccpool.Session, s ccpool.Session) (purged, attempted bool) {
+func (tp teardownPorts) retryPurgePending(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, quiet quietCheck, sessions []ccpool.Session, s ccpool.Session) (purged, attempted bool) {
 	stillOpen := s.CloseReason == "" || s.Live
 	if stillOpen {
 		switch s.State {
@@ -261,7 +260,7 @@ func retryPurgePending(ctx context.Context, cc ccpool.Runner, open worktree.Open
 		}
 	}
 	keep := !gwmLeased(s) && worktreeHeldByLivePeer(sessions, s)
-	if !finishPurge(ctx, cc, open, repoRoot, worktreeDir, s, keep) {
+	if !tp.finishPurge(ctx, cc, open, repoRoot, worktreeDir, s, keep) {
 		return fail("worktree removal or purge did not complete", nil)
 	}
 	slog.Info("reconcile: purge_pending teardown completed",
@@ -269,21 +268,17 @@ func retryPurgePending(ctx context.Context, cc ccpool.Runner, open worktree.Open
 	return true, true
 }
 
-// teardownProbe is the live-process probe the closed-bead teardown uses; nil
-// means the production probe (procprobe.CWDs). Tests substitute a fake.
-var teardownProbe cwdProbe
-
 // worktreeHeldByStranger reports whether the teardown of s MUST keep its
 // worktree because a live process has it, or a directory inside it, as its
 // working directory, or because that cannot be determined (a failed probe
 // keeps it). The session's own process is already gone: every caller has
 // closed the session (non-purge) before it removes the worktree. A session
 // without a working directory has nothing to protect.
-func worktreeHeldByStranger(ctx context.Context, s ccpool.Session) bool {
+func (tp teardownPorts) worktreeHeldByStranger(ctx context.Context, s ccpool.Session) bool {
 	if s.CWD == "" {
 		return false
 	}
-	keep, err := procprobe.Keep(ctx, teardownProbe, s.CWD)
+	keep, err := procprobe.Keep(ctx, tp.probe, s.CWD)
 	if err != nil {
 		slog.Warn("teardown: live-process probe failed; keeping the worktree",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
@@ -295,13 +290,3 @@ func worktreeHeldByStranger(ctx context.Context, s ccpool.Session) bool {
 	}
 	return keep
 }
-
-// teardownRemoveTimeout is the deadline of one worktree removal in the
-// closed-bead teardown (preshutdown and the purge_pending retry). The teardown
-// entry points have no config in hand, so the process-wide value is set once,
-// where each loads its launch config (useRemoveTimeout). Zero means
-// worktree.DefaultRemoveTimeout.
-var teardownRemoveTimeout time.Duration
-
-// useRemoveTimeout adopts cfg's worktree removal deadline for the teardown.
-func useRemoveTimeout(cfg config.Config) { teardownRemoveTimeout = cfg.WorktreeRemoveTimeout }

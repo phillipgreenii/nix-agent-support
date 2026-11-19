@@ -55,8 +55,8 @@ const staleSessionMinIdle = 7 * 24 * time.Hour
 
 // reconcileStaleDefaultPoolSessions runs the closed-bead reconcile against cc
 // (the default pool) with guard applied; it returns how many sessions it closed.
-func reconcileStaleDefaultPoolSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck, guard sessionGuard) int {
-	return reconcileClosedBeadSessionsGuarded(ctx, cc, open, br, prefix, repoRoot, worktreeDir, quiet, guard, "reconcile: list failed (default pool)")
+func (tp teardownPorts) reconcileStaleDefaultPoolSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck, guard sessionGuard) int {
+	return tp.reconcileClosedBeadSessionsGuarded(ctx, cc, open, br, prefix, repoRoot, worktreeDir, quiet, guard, "reconcile: list failed (default pool)")
 }
 
 // reconcileDefaultPool is the production wiring of reconcileStaleDefaultPoolSessions
@@ -64,9 +64,9 @@ func reconcileStaleDefaultPoolSessions(ctx context.Context, cc ccpool.Runner, op
 // CCPOOL_POOL this process inherited), the bd tracker at cfg.RepoRoot, the
 // real git opener, and the real clock and transcript scan. A session whose
 // bead lives in another tracker fails the bd lookup and is preserved.
-func reconcileDefaultPool(ctx context.Context, cfg config.Config) int {
+func (tp teardownPorts) reconcileDefaultPool(ctx context.Context, cfg config.Config) int {
 	guard := newStaleSessionGuard(worktree.GitOpener, cfg.RepoRoot, staleSessionMinIdle, nil, nil)
-	return reconcileStaleDefaultPoolSessions(ctx, ccpool.NewCLIRunnerDefaultPool(cfg), worktree.GitOpener,
+	return tp.reconcileStaleDefaultPoolSessions(ctx, ccpool.NewCLIRunnerDefaultPool(cfg), worktree.GitOpener,
 		beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir,
 		newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil), guard)
 }

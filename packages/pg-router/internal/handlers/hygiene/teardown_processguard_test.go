@@ -14,12 +14,8 @@ import (
 // purging the row; and that it removes the worktree when nobody holds it. The
 // repository and worktree are real (temporary); the probe is injected.
 
-func withTeardownProbe(t *testing.T, p cwdProbe) {
-	t.Helper()
-	old := teardownProbe
-	teardownProbe = p
-	t.Cleanup(func() { teardownProbe = old })
-}
+// portsWithProbe is a teardownPorts whose live-process probe is p.
+func portsWithProbe(p cwdProbe) teardownPorts { return teardownPorts{probe: p} }
 
 func TestTeardown_processGuardOnTheWorktreeRemoval(t *testing.T) {
 	cases := []struct {
@@ -39,18 +35,18 @@ func TestTeardown_processGuardOnTheWorktreeRemoval(t *testing.T) {
 	}
 	paths := []struct {
 		name string
-		do   func(t *testing.T, h *sweepHarness, cc *fakeCC, s ccpool.Session) bool
+		do   func(t *testing.T, tp teardownPorts, h *sweepHarness, cc *fakeCC, s ccpool.Session) bool
 	}{
-		{"closeSession (two-phase)", func(t *testing.T, h *sweepHarness, cc *fakeCC, s ccpool.Session) bool {
-			return closeSession(t.Context(), cc, h.opener, h.repo, h.wtDir, s, false)
+		{"closeSession (two-phase)", func(t *testing.T, tp teardownPorts, h *sweepHarness, cc *fakeCC, s ccpool.Session) bool {
+			return tp.closeSession(t.Context(), cc, h.opener, h.repo, h.wtDir, s, false)
 		}},
-		{"retryPurgePending", func(t *testing.T, h *sweepHarness, cc *fakeCC, s ccpool.Session) bool {
+		{"retryPurgePending", func(t *testing.T, tp teardownPorts, h *sweepHarness, cc *fakeCC, s ccpool.Session) bool {
 			s.Meta[ccpool.MetaKeyPurgePending] = purgeMarkerValue
-			purged, attempted := retryPurgePending(t.Context(), cc, h.opener, h.repo, h.wtDir, nil, []ccpool.Session{s}, s)
+			purged, attempted := tp.retryPurgePending(t.Context(), cc, h.opener, h.repo, h.wtDir, nil, []ccpool.Session{s}, s)
 			return purged && attempted
 		}},
-		{"closeSinglePhase", func(t *testing.T, h *sweepHarness, cc *fakeCC, s ccpool.Session) bool {
-			return closeSinglePhase(t.Context(), cc, h.opener, h.repo, s, false)
+		{"closeSinglePhase", func(t *testing.T, tp teardownPorts, h *sweepHarness, cc *fakeCC, s ccpool.Session) bool {
+			return tp.closeSinglePhase(t.Context(), cc, h.opener, h.repo, s, false)
 		}},
 	}
 	base := newSweepHarness(t)
@@ -59,13 +55,13 @@ func TestTeardown_processGuardOnTheWorktreeRemoval(t *testing.T) {
 			t.Run(p.name+"/"+tc.name, func(t *testing.T) {
 				h := base.forRow(t)
 				wt := h.leak("zr-k")
-				withTeardownProbe(t, tc.probe(wt))
+				tp := portsWithProbe(tc.probe(wt))
 				s := ccpool.Session{
 					ExternalID: "pg-router-worker-zr-k", State: ccpool.StateIdle, CWD: wt,
 					Meta: map[string]string{ccpool.MetaKeyBead: "zr-k"},
 				}
 				cc := &fakeCC{ListSeq: [][]ccpool.Session{{s}}}
-				if !p.do(t, h, cc, s) {
+				if !p.do(t, tp, h, cc, s) {
 					t.Fatal("the row must be purged whether or not the worktree is kept")
 				}
 				if len(cc.ClosedPurge) == 0 || !cc.ClosedPurge[len(cc.ClosedPurge)-1] {

@@ -32,14 +32,13 @@ func hasArgs(args []string, want ...string) bool {
 	return strings.Contains(" "+strings.Join(args, " ")+" ", " "+strings.Join(want, " ")+" ")
 }
 
-// useGWMFake installs a pg-gwm fake as the teardown client for the test.
-func useGWMFake(t *testing.T, repo string) *cmdruntest.Fake {
+// useGWMFake returns teardown ports whose pg-gwm client is a fake, and the fake.
+func useGWMFake(t *testing.T, repo string) (teardownPorts, *cmdruntest.Fake) {
 	t.Helper()
 	f := cmdruntest.New(t)
-	old := teardownGWM
-	teardownGWM = &gwm.CLI{Exec: f.Runner(), RepoRoot: repo}
-	t.Cleanup(func() { teardownGWM = old })
-	return f
+	tp := testPorts()
+	tp.gwm = &gwm.CLI{Exec: f.Runner(), RepoRoot: repo}
+	return tp, f
 }
 
 func gwmRow(bead, cwd string) ccpool.Session {
@@ -59,11 +58,11 @@ func TestReconcileReleasesByName(t *testing.T) {
 	t.Run("releases by name and never removes the worktree", func(t *testing.T) {
 		h := newSweepHarness(t)
 		wt := h.leak("zr-k")
-		f := useGWMFake(t, h.repo)
+		tp, f := useGWMFake(t, h.repo)
 		f.On(gwmVerb("release")).Return(cmdrun.Result{})
 		cc := &fakeCC{}
 		s := gwmRow("zr-k", wt)
-		if !closeSession(t.Context(), cc, h.opener, h.repo, h.wtDir, s, false) {
+		if !tp.closeSession(t.Context(), cc, h.opener, h.repo, h.wtDir, s, false) {
 			t.Fatal("the row must be purged")
 		}
 		rel := gwmArgs(f, "release")
@@ -83,9 +82,9 @@ func TestReconcileReleasesByName(t *testing.T) {
 	t.Run("an anchor branch with no unique commit and no worktree is deleted", func(t *testing.T) {
 		h := newSweepHarness(t)
 		h.git(h.repo, "branch", "pg-router/zr-m")
-		f := useGWMFake(t, h.repo)
+		tp, f := useGWMFake(t, h.repo)
 		f.On(gwmVerb("release")).Return(cmdrun.Result{})
-		if !closeSession(t.Context(), &fakeCC{}, h.opener, h.repo, h.wtDir, gwmRow("zr-m", h.wtDir+"/gone"), false) {
+		if !tp.closeSession(t.Context(), &fakeCC{}, h.opener, h.repo, h.wtDir, gwmRow("zr-m", h.wtDir+"/gone"), false) {
 			t.Fatal("the row must be purged")
 		}
 		if h.branchExists("zr-m") {
@@ -97,9 +96,9 @@ func TestReconcileReleasesByName(t *testing.T) {
 		wt := h.addWorktree("zr-u")
 		h.git(wt, "commit", "--allow-empty", "-m", "unique")
 		h.git(h.repo, "worktree", "remove", "--force", wt)
-		f := useGWMFake(t, h.repo)
+		tp, f := useGWMFake(t, h.repo)
 		f.On(gwmVerb("release")).Return(cmdrun.Result{})
-		if !closeSession(t.Context(), &fakeCC{}, h.opener, h.repo, h.wtDir, gwmRow("zr-u", wt), false) {
+		if !tp.closeSession(t.Context(), &fakeCC{}, h.opener, h.repo, h.wtDir, gwmRow("zr-u", wt), false) {
 			t.Fatal("the row must be purged")
 		}
 		if !h.branchExists("zr-u") {
@@ -108,10 +107,10 @@ func TestReconcileReleasesByName(t *testing.T) {
 	})
 	t.Run("a dirty tree is expired by name", func(t *testing.T) {
 		h := newSweepHarness(t)
-		f := useGWMFake(t, h.repo)
+		tp, f := useGWMFake(t, h.repo)
 		f.On(gwmVerb("release")).Return(gwmRefusal(23, "dirty"))
 		f.On(gwmVerb("expire")).Return(cmdrun.Result{})
-		if !closeSession(t.Context(), &fakeCC{}, h.opener, h.repo, h.wtDir, gwmRow("zr-d", h.wtDir+"/gone"), false) {
+		if !tp.closeSession(t.Context(), &fakeCC{}, h.opener, h.repo, h.wtDir, gwmRow("zr-d", h.wtDir+"/gone"), false) {
 			t.Fatal("the row must be purged")
 		}
 		exp := gwmArgs(f, "expire")
@@ -124,10 +123,10 @@ func TestReconcileReleasesByName(t *testing.T) {
 func TestSessionWithoutGWMLeaseTearsDownTheLegacyWay(t *testing.T) {
 	h := newSweepHarness(t)
 	wt := h.leak("zr-l")
-	f := useGWMFake(t, h.repo) // no rule: any pg-gwm call fails the test
+	tp, f := useGWMFake(t, h.repo) // no rule: any pg-gwm call fails the test
 	s := gwmRow("zr-l", wt)
 	delete(s.Meta, ccpool.MetaKeyGWMLease)
-	if !closeSession(t.Context(), &fakeCC{}, h.opener, h.repo, h.wtDir, s, false) {
+	if !tp.closeSession(t.Context(), &fakeCC{}, h.opener, h.repo, h.wtDir, s, false) {
 		t.Fatal("the row must be purged")
 	}
 	if h.exists(wt) || h.branchExists("zr-l") {
@@ -140,14 +139,14 @@ func TestSessionWithoutGWMLeaseTearsDownTheLegacyWay(t *testing.T) {
 
 func TestPurgePendingReleaseFails(t *testing.T) {
 	h := newSweepHarness(t)
-	f := useGWMFake(t, h.repo)
+	tp, f := useGWMFake(t, h.repo)
 	s := gwmRow("zr-p", h.wtDir+"/gone")
 	s.CloseReason = "handler"
 	s.Meta[ccpool.MetaKeyPurgePending] = purgeMarkerValue
 
 	f.On(gwmVerb("release")).Nth(1).Return(cmdrun.Result{Code: 1, Stderr: []byte("boom")})
 	cc := &fakeCC{}
-	purged, attempted := retryPurgePending(t.Context(), cc, h.opener, h.repo, h.wtDir, nil, []ccpool.Session{s}, s)
+	purged, attempted := tp.retryPurgePending(t.Context(), cc, h.opener, h.repo, h.wtDir, nil, []ccpool.Session{s}, s)
 	if purged || !attempted {
 		t.Fatalf("purged=%v attempted=%v, want a failed attempt", purged, attempted)
 	}
@@ -159,7 +158,7 @@ func TestPurgePendingReleaseFails(t *testing.T) {
 
 	// not-found counts as a completed release step.
 	f.On(gwmVerb("release")).Return(gwmRefusal(4, "not-found"))
-	purged, attempted = retryPurgePending(t.Context(), cc, h.opener, h.repo, h.wtDir, nil, []ccpool.Session{s}, s)
+	purged, attempted = tp.retryPurgePending(t.Context(), cc, h.opener, h.repo, h.wtDir, nil, []ccpool.Session{s}, s)
 	if !purged || !attempted {
 		t.Fatalf("after not-found: purged=%v attempted=%v, want purged", purged, attempted)
 	}
