@@ -1,7 +1,6 @@
 package alertrules
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -46,39 +45,12 @@ const (
 // than treat hours of sleep as hours of idle consumer.
 var laneEnd = parseUTC("2026-10-13T00:25:00Z")
 
-// stalledRoles is the type-to-role table the rule's label_replace chain encodes:
-// one entry per role of the daemon config (20 roles: the PR lane refactor made
-// pr-change the one role that binds pr.changed and removed pr.reconcile, and the
-// escalation-watchdog timer role, pg-rescue-triage and the two pg-review roles were added), in the
-// order of the chain. A role added to the config MUST be added here and to the rule;
-// the deployment derives the pairs it must find in the rule from its own roles.
-var stalledRoles = []struct{ typeRE, role string }{
-	{"drain[.]zr", "drain-zr"},
-	{"drain[.]pg2", "drain-pg2"},
-	{"review[.]ready", "review"},
-	{"feedback[.]ready", "feedback"},
-	{"work[.]ready", "worker"},
-	{"resolve-conflict[.]ready", "resolve-conflict-script"},
-	{"fix-ci[.]ready", "fix-ci-script"},
-	{"pr[.]changed", "pr-change"},
-	{"issue[.]changed", "issue-decider"},
-	{"thread[.]changed", "desk-thread"},
-	{"desk[.]heartbeat", "desk-heartbeat"},
-	{"pg-router-probe[.]tick", "pg-router-probe"},
-	{"ccpool-probe[.]tick", "ccpool-probe"},
-	{"escalated[.]pg2", "pg2-escalation-triager"},
-	{"escalated[.]zr", "zr-escalation-triager"},
-	{"split-review[.]pg2", "pg2-split-triager"},
-	{"escalation-watchdog[.]tick", "escalation-watchdog"},
-	{"pg-rescue[.]item", "pg-rescue-triage"},
-	{"review[.]run", "review-run"},
-	{"review[.]maintain", "review-maintain"},
-}
-
-// stalledTypes is every event type the daemon config binds, with the
-// role that binds it.
+// stalledTypes is every event type a daemon config binds, with the role that binds
+// it (neutral names for the two tracker-specific lanes: the rule must not know a
+// deployment's role names, it joins on pg_router_binding_info). The runner roles
+// are exempt and not listed (queue-stalled-exempt-roles.json).
 var stalledTypes = map[string]string{
-	"drain.zr":                 "drain-zr",
+	"drain.a":                  "drain-a",
 	"drain.pg2":                "drain-pg2",
 	"review.ready":             "review",
 	"feedback.ready":           "feedback",
@@ -92,7 +64,7 @@ var stalledTypes = map[string]string{
 	"pg-router-probe.tick":     "pg-router-probe",
 	"ccpool-probe.tick":        "ccpool-probe",
 	"escalated.pg2":            "pg2-escalation-triager",
-	"escalated.zr":             "zr-escalation-triager",
+	"escalated.a":              "a-escalation-triager",
 	"split-review.pg2":         "pg2-split-triager",
 	"escalation-watchdog.tick": "escalation-watchdog",
 	"pg-rescue.item":           "pg-rescue-triage",
@@ -100,16 +72,17 @@ var stalledTypes = map[string]string{
 	"review.maintain":          "review-maintain",
 }
 
-// wantStalledExpr is the expr of rule pg-router-queue-stalled, built from the table
-// above so a role cannot be in one and missing from the other.
+// stalledJoin is the type-to-role join every rule of this family uses: the router's own
+// binding info metric (value 1 per binding of an enabled role), so no role name is in the
+// rule text. The stalled rule drops the exempt runner roles on the info side.
+const stalledJoin = ` * on(type) group_left(role) `
+
+// wantStalledExpr is the expr of rule pg-router-queue-stalled.
 func wantStalledExpr() string {
 	var b strings.Builder
-	b.WriteString("max without (role) (")
-	b.WriteString(strings.Repeat("label_replace(", len(stalledRoles)))
+	b.WriteString("max without (role) ((")
 	b.WriteString(`min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18`)
-	for _, r := range stalledRoles {
-		fmt.Fprintf(&b, `, "role", %q, "type", %q)`, r.role, r.typeRE)
-	}
+	b.WriteString(")" + stalledJoin + `pg_router_binding_info{role!~"repo-verify|repo-sync"}`)
 	b.WriteString(` and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0) unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1))`)
 	return b.String()
 }
@@ -269,55 +242,30 @@ func TestStalledRuleMatchesModel(t *testing.T) {
 	}
 }
 
-// The label_replace chain is the type-to-role join. Apply its clauses the way
-// PromQL does (the regex is anchored, the first label_replace to match sets role,
-// later ones leave a series that already has one) and pin the mapping for every
-// type the daemon binds, so a clause cannot drift from the config it mirrors.
-func TestStalledTypeToRoleTable(t *testing.T) {
-	expr := ruleExpr(t, ruleBlock(t, "pg-router-queue-stalled"))
-	if got := strings.Count(expr, "label_replace("); got != len(stalledRoles) {
-		t.Fatalf("expr has %d label_replace clauses, the table has %d roles", got, len(stalledRoles))
-	}
-	clauses := regexp.MustCompile(`, "role", "([^"]+)", "type", "([^"]+)"\)`).FindAllStringSubmatch(expr, -1)
-	if len(clauses) != len(stalledRoles) {
-		t.Fatalf("parsed %d clauses, want %d", len(clauses), len(stalledRoles))
-	}
-	roleFor := func(typ string) string {
-		for _, c := range clauses {
-			if regexp.MustCompile("^(?:" + c[2] + ")$").MatchString(typ) {
-				return c[1]
+// The type-to-role join is the router's binding info metric, not a table in the rule:
+// the three rules that need a role for a type carry the join, none carries a
+// label_replace chain, and no role name of a configuration appears in any of them.
+func TestRulesJoinOnBindingInfoNotARoleTable(t *testing.T) {
+	for _, uid := range []string{"pg-router-queue-stalled", "pg-router-queue-depth-growing", "pg-router-ccpool-no-launch-while-queued"} {
+		expr := ruleExpr(t, ruleBlock(t, uid))
+		if strings.Contains(expr, "label_replace(") {
+			t.Errorf("%s still carries a label_replace table: %q", uid, expr)
+		}
+		if got := strings.Count(expr, "group_left(role) pg_router_binding_info"); got != 1 {
+			t.Errorf("%s joins on pg_router_binding_info %d times, want 1: %q", uid, got, expr)
+		}
+		for typ, role := range stalledTypes {
+			if strings.Contains(expr, `"`+role+`"`) || strings.Contains(expr, "|"+role+"|") {
+				t.Errorf("%s names the role %q (type %q); roles reach the rule only as label values", uid, role, typ)
 			}
 		}
-		return ""
 	}
-	for typ, want := range stalledTypes {
-		if got := roleFor(typ); got != want {
-			t.Errorf("type %q maps to role %q, want %q", typ, got, want)
-		}
-	}
-	roles := map[string]bool{}
-	for _, role := range stalledTypes {
-		roles[role] = true
-	}
-	if len(roles) != len(stalledRoles) {
-		t.Errorf("the config has %d distinct roles, the rule's table has %d", len(roles), len(stalledRoles))
-	}
-	// Anchoring: a type that merely contains or extends a bound one is not mapped.
-	for _, typ := range []string{"drain.other", "xdrain.pg2", "drain.pg2.extra", "pr.changed2", "pr.reconcile", "desk.reconcile", "desk.other", "review", ""} {
-		if got := roleFor(typ); got != "" {
-			t.Errorf("unbound type %q maps to role %q, want none", typ, got)
-		}
-	}
-	// A bound type matches exactly one clause.
-	for typ := range stalledTypes {
-		n := 0
-		for _, c := range clauses {
-			if regexp.MustCompile("^(?:" + c[2] + ")$").MatchString(typ) {
-				n++
-			}
-		}
-		if n != 1 {
-			t.Errorf("type %q matches %d clauses, want exactly 1", typ, n)
+	// The ccpool-only selector is a pattern, not a list of trackers.
+	expr := ruleExpr(t, ruleBlock(t, "pg-router-ccpool-no-launch-while-queued"))
+	for _, typ := range []string{"drain.a", "drain.b", "escalated.a", "escalated.b", "review.ready"} {
+		re := regexp.MustCompile(`type=~"([^"]*)"`).FindStringSubmatch(expr)
+		if re == nil || !regexp.MustCompile("^(?:"+re[1]+")$").MatchString(typ) {
+			t.Errorf("no-launch selector does not select %q", typ)
 		}
 	}
 }

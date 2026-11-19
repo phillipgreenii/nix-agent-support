@@ -299,6 +299,7 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		}
 	}
 	metricsOpts = append(metricsOpts, metrics.WithRoleProgress(enabledRoles...))
+	metricsOpts = append(metricsOpts, metrics.WithBindings(bindingInfo(cfg.Roles)))
 	// The level gauges read the projection built further down (levelProjRef is
 	// stored as soon as it exists; a collect before then reports no level
 	// series), and role_paused starts at 0 for every enabled role.
@@ -2020,4 +2021,17 @@ func runDaemon(ctx context.Context, g *lifecycle.Group, pr preparedRun, drainTim
 		case <-ticker.C:
 		}
 	}
+}
+
+// bindingInfo lists the (role, event type) pairs of every configured role, the series
+// of pg_router_binding_info. A disabled role is included: its type still has a queue
+// and the binding is configuration, not liveness (the listener gauges say whether it runs).
+func bindingInfo(rs roles.RoleSet) []metrics.Binding {
+	var out []metrics.Binding
+	for _, r := range rs {
+		for _, t := range r.Binds {
+			out = append(out, metrics.Binding{Role: r.Name, Type: t})
+		}
+	}
+	return out
 }

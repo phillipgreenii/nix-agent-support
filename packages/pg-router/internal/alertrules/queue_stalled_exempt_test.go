@@ -6,16 +6,17 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
-// pg2-e0myo4: the pg-router-queue-stalled role map has an explicit, named exemption
+// pg2-e0myo4: the pg-router-queue-stalled role join has an explicit, named exemption
 // list for runner roles (grafana/alerting/queue-stalled-exempt-roles.json). A runner
 // (repo-verify, repo-sync) answers exit 9 "not now" and is re-offered, so a non-empty
 // queue with nothing completing is its routine, and the rule would page it. The
-// deployment's check reads the list: every (role, type) pair a daemon config binds MUST
-// be covered by a clause of the chain or exempt here. These tests pin the list, the
-// disjointness of the two sets, and the classification the deployment applies.
+// deployment's check reads the list: every (role, type) pair a daemon config binds is
+// covered by the pg_router_binding_info join or exempt here. These tests pin the list,
+// that the rule excludes exactly the listed roles, and the classification the deployment applies.
 
 const exemptFile = "../../grafana/alerting/queue-stalled-exempt-roles.json"
 
@@ -47,34 +48,29 @@ func loadExempt(t *testing.T) exemptList {
 	return l
 }
 
-type chainClause struct{ role, typeRE string }
-
-func stalledClauses(t *testing.T) []chainClause {
+// stalledExcludedRoles is the set of roles the rule drops from the type-to-role join:
+// the roles of the `pg_router_binding_info{role!~"a|b"}` selector, a plain alternation.
+func stalledExcludedRoles(t *testing.T) []string {
 	t.Helper()
 	expr := ruleExpr(t, ruleBlock(t, "pg-router-queue-stalled"))
-	var out []chainClause
-	for _, c := range regexp.MustCompile(`, "role", "([^"]+)", "type", "([^"]+)"\)`).FindAllStringSubmatch(expr, -1) {
-		out = append(out, chainClause{c[1], c[2]})
+	m := regexp.MustCompile(`pg_router_binding_info\{role!~"([^"]+)"\}`).FindStringSubmatch(expr)
+	if m == nil {
+		t.Fatalf("queue-stalled has no pg_router_binding_info{role!~...} exclusion: %q", expr)
 	}
-	return out
+	return strings.Split(m[1], "|")
 }
 
 // coverage is the classification the deployment applies to one bound pair: covered by
-// a clause of the chain, exempt by the named list, or uncovered (a failed check).
-func coverage(clauses []chainClause, exempt exemptList, role, typ string) string {
-	for _, c := range clauses {
-		if c.role == role && regexp.MustCompile("^(?:"+c.typeRE+")$").MatchString(typ) {
-			return "covered"
-		}
+// the join (its role is not excluded), exempt (excluded and on the named list), or
+// uncovered (excluded without being listed; a failed check). excluded is the rule's
+// exclusion set; nil means the rule excludes nothing.
+func coverage(excluded []string, exempt exemptList, role, typ string) string {
+	if !slices.Contains(excluded, role) {
+		return "covered"
 	}
 	for _, e := range exempt.ExemptRoles {
-		if e.Role != role {
-			continue
-		}
-		for _, et := range e.Types {
-			if et == typ {
-				return "exempt"
-			}
+		if e.Role == role && slices.Contains(e.Types, typ) {
+			return "exempt"
 		}
 	}
 	return "uncovered"
@@ -113,72 +109,62 @@ func TestStalledExemptListShape(t *testing.T) {
 		}
 	}
 	for _, want := range []struct{ role, typ string }{{"repo-verify", "repo.tip"}, {"repo-sync", "repo.sync"}} {
-		if got := coverage(nil, l, want.role, want.typ); got != "exempt" {
+		if got := coverage([]string{want.role}, l, want.role, want.typ); got != "exempt" {
 			t.Errorf("(%s, %s) is %s, want exempt", want.role, want.typ, got)
 		}
 	}
 }
 
-// The two sets are disjoint: an exempt role has no clause in the chain (a clause would
-// page its exit-9 backlog) and no exempt type is mapped by any clause.
-func TestStalledExemptRolesHaveNoClause(t *testing.T) {
+// The rule's exclusion set is EXACTLY the exempt roles of the list (so a role cannot be
+// excluded without a reason and a reason, or be listed and still paged), and no
+// exempt type is one a non-exempt bound role binds.
+func TestStalledExcludedRolesAreTheExemptRoles(t *testing.T) {
 	l := loadExempt(t)
-	clauses := stalledClauses(t)
+	var want []string
 	for _, e := range l.ExemptRoles {
-		for _, c := range clauses {
-			if c.role == e.Role {
-				t.Errorf("exempt role %q also has a clause for %q", e.Role, c.typeRE)
-			}
-			for _, typ := range e.Types {
-				if regexp.MustCompile("^(?:" + c.typeRE + ")$").MatchString(typ) {
-					t.Errorf("exempt type %q is mapped by the clause for role %q", typ, c.role)
-				}
-			}
-		}
-		for _, r := range stalledRoles {
-			if r.role == e.Role {
-				t.Errorf("exempt role %q is in the modelled role table", e.Role)
-			}
-		}
+		want = append(want, e.Role)
 		for typ, role := range stalledTypes {
 			if role == e.Role || slices.Contains(e.Types, typ) {
 				t.Errorf("exempt entry %q/%v collides with the bound pair %s/%s", e.Role, e.Types, role, typ)
 			}
 		}
 	}
+	got := stalledExcludedRoles(t)
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("rule excludes roles %v, the exemption list names %v", got, want)
+	}
 }
 
 // A runner role is exempt and a non-runner role is not: every non-runner pair the
-// daemon binds is covered by a clause (and so is not exempt), a pair that is neither is
-// uncovered, and with the list withdrawn the runner pairs are uncovered, which is the
-// failure the deployment check reported before this list existed.
+// daemon binds is covered (and so is not exempt), a runner pair is exempt, an
+// unlisted pair of an excluded role is uncovered, and with the list withdrawn the
+// runner pairs are uncovered.
 func TestStalledCoverageClassification(t *testing.T) {
 	l := loadExempt(t)
-	clauses := stalledClauses(t)
+	excluded := stalledExcludedRoles(t)
 	for typ, role := range stalledTypes {
-		if got := coverage(clauses, l, role, typ); got != "covered" {
+		if got := coverage(excluded, l, role, typ); got != "covered" {
 			t.Errorf("non-runner pair (%s, %s) is %s, want covered", role, typ, got)
-		}
-		if got := coverage(nil, l, role, typ); got != "uncovered" {
-			t.Errorf("non-runner pair (%s, %s) is %s without the chain, want uncovered: it is not exempt", role, typ, got)
 		}
 	}
 	for _, p := range []struct{ role, typ, want string }{
 		{"repo-verify", "repo.tip", "exempt"},
 		{"repo-sync", "repo.sync", "exempt"},
-		// The exemption is per (role, type): the role with another type, or another
-		// role with the runner's type, is not exempt.
+		// The exemption is per (role, type): an excluded role with another type is not exempt.
 		{"repo-verify", "repo.sync", "uncovered"},
 		{"repo-sync", "repo.tip", "uncovered"},
 		{"repo-verify", "other.thing", "uncovered"},
-		{"workspace-build", "workspace.tips", "uncovered"},
-		{"some-new-role", "some-new.type", "uncovered"},
+		// A role the rule does not exclude is covered whatever its type.
+		{"workspace-build", "workspace.tips", "covered"},
+		{"some-new-role", "some-new.type", "covered"},
 	} {
-		if got := coverage(clauses, l, p.role, p.typ); got != p.want {
+		if got := coverage(excluded, l, p.role, p.typ); got != p.want {
 			t.Errorf("(%s, %s) is %s, want %s", p.role, p.typ, got, p.want)
 		}
 		if p.want == "exempt" {
-			if got := coverage(clauses, exemptList{}, p.role, p.typ); got != "uncovered" {
+			if got := coverage(excluded, exemptList{}, p.role, p.typ); got != "uncovered" {
 				t.Errorf("(%s, %s) is %s with an empty list, want uncovered", p.role, p.typ, got)
 			}
 		}

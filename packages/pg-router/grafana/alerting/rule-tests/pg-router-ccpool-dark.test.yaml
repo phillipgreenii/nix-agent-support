@@ -58,6 +58,9 @@ tests:
   - name: no-launch fires when ccpool work waited 2h with no launch, and the lone old launch sample does not hide it
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="review",type="review.ready",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="review.ready"}
         values: "2x600"
       # One launch at t=90m (index 180) and none after.
@@ -78,6 +81,9 @@ tests:
   - name: no-launch fires for the escalation triager queue too, and a plain failed launch counts as a launch
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="pg2-escalation-triager",type="escalated.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="escalated.pg2"}
         values: "1x600"
       - series: ccpool_launch_outcome_total{pool="p",route="brand_new",outcome="timeout",pgrouter_role="x"}
@@ -96,6 +102,17 @@ tests:
   - name: no-launch is quiet for a command-role queue, a backlog that drained, and a short backlog
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="disk-check",type="disk.check",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="drain-a",type="drain.a",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="pr-change",type="pr.changed",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="repo-sync",type="repo.sync",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="worker",type="work.ready",job="pg-router"}
+        values: "1x2880"
       # Command roles launch no ccpool session.
       - series: pg_router_queue_depth{type="pr.changed"}
         values: "5x600"
@@ -107,7 +124,7 @@ tests:
       - series: pg_router_queue_depth{type="work.ready"}
         values: "2x300 0 2x299"
       # ccpool-backed, but only 40 scrapes (20 minutes) of data.
-      - series: pg_router_queue_depth{type="drain.zr"}
+      - series: pg_router_queue_depth{type="drain.a"}
         values: "_x560 2x40"
     alert_rule_test:
       - eval_time: 250m
@@ -117,6 +134,9 @@ tests:
   - name: no-launch is quiet while the consumer role of the queue is paused
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="review",type="review.ready",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="review.ready"}
         values: "2x600"
       - series: pg_router_role_paused{role="review",job="pg-router"}
@@ -129,6 +149,9 @@ tests:
   - name: no-launch still fires when an UNRELATED role is paused
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="review",type="review.ready",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="review.ready"}
         values: "2x600"
       - series: pg_router_role_paused{role="review",job="pg-router"}

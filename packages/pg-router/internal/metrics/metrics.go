@@ -207,6 +207,15 @@ const (
 	// (daemon-mode only), so it is an optional member outside the ten-member core
 	// catalog.
 	MetricBuildInfo = "pg_router_build_info"
+	// MetricBindingInfo is an info metric: one constant series of value 1 per
+	// configured (role, event type) binding, labelled role and
+	// type. It is the only series that carries both labels, so an alert rule joins a
+	// type-labelled series (pg_router_queue_depth) to the role that consumes it with
+	// `* on(type) group_left(role) pg_router_binding_info`, instead of listing
+	// deployment role names in rule text. The values come from the router config at
+	// startup, so the series set changes only on a restart. Registered ONLY when New
+	// is given WithBindings.
+	MetricBindingInfo = "pg_router_binding_info"
 	// MetricDispatchLatency is the catalog's original Histogram: the time from an
 	// event's enqueue to a settling dispatch outcome, in milliseconds. See
 	// RecordDispatchLatency's doc for why this task builds and exposes it
@@ -626,6 +635,7 @@ type options struct {
 	isLive          func() bool
 	buildVersion    string
 	buildInfo       bool
+	bindings        []Binding
 	now             func() time.Time
 	pullSources     map[string]time.Duration
 	sourceStatePath string
@@ -774,6 +784,17 @@ func WithLiveness(isLive func() bool) Option {
 // does not pass it.
 func WithBuildInfo(version string) Option {
 	return func(o *options) { o.buildVersion, o.buildInfo = version, true }
+}
+
+// Binding is one (role, event type) pair of the router config, the label set of one
+// MetricBindingInfo series.
+type Binding struct{ Role, Type string }
+
+// WithBindings registers MetricBindingInfo, an ObservableGauge that reports 1 for
+// each binding in bs (duplicates collapse to one series). Without the option, or
+// with no bindings, the metric is not registered.
+func WithBindings(bs []Binding) Option {
+	return func(o *options) { o.bindings = bs }
 }
 
 // New registers the instruments above on a meter from mp and returns an Emitter.
@@ -1159,6 +1180,30 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 			metric.WithDescription("constant 1 labelled with the running daemon's version; daemon-mode only"),
 			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
 				o.Observe(1, metric.WithAttributes(attribute.String("version", ver)))
+				return nil
+			}),
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(cfg.bindings) > 0 {
+		seen := map[Binding]struct{}{}
+		var attrs []attribute.Set
+		for _, b := range cfg.bindings {
+			if _, dup := seen[b]; dup {
+				continue
+			}
+			seen[b] = struct{}{}
+			attrs = append(attrs, attribute.NewSet(attribute.String("role", b.Role), attribute.String("type", b.Type)))
+		}
+		if _, err := m.Int64ObservableGauge(
+			MetricBindingInfo,
+			metric.WithDescription("constant 1 per configured (role, event type) binding of any configured role, labelled role and type; join key between type-labelled and role-labelled series"),
+			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				for _, a := range attrs {
+					o.Observe(1, metric.WithAttributeSet(a))
+				}
 				return nil
 			}),
 		); err != nil {

@@ -232,7 +232,7 @@ groups:
       # Retention is not a backlog (DEC-OBS-12), same as pg-router-queue-stalled: a depth
       # that rises only because events every listener already settled are retained for
       # their time to live (pr.changed, 6 hours) is not a queue falling behind. The rule
-      # therefore maps type to role with the same label_replace chain as queue-stalled and
+      # therefore maps type to role with the same pg_router_binding_info join as queue-stalled and
       # applies `unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0)`,
       # which drops a role whose pending gauge read 0 on every scrape of 10 minutes. It is an
       # exclusion, not a requirement: a type no role binds, or a scrape with no pending
@@ -258,7 +258,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2"), "role", "escalation-watchdog", "type", "escalation-watchdog[.]tick"), "role", "pg-rescue-triage", "type", "pg-rescue[.]item"), "role", "review-run", "type", "review[.]run"), "role", "review-maintain", "type", "review[.]maintain") unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0))
+              expr: max without (role) ((delta(pg_router_queue_depth[1h]) >= 25 and delta(pg_router_queue_depth[30m]) >= 10 and delta(pg_router_queue_depth[15m]) >= 5 and delta(pg_router_queue_depth[15m] offset 15m) >= 5 and delta(pg_router_queue_depth[30m]) > 0.25 * avg_over_time(pg_router_queue_depth[30m]) and count_over_time(pg_router_queue_depth[30m]) >= 54) * on(type) group_left(role) pg_router_binding_info unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0))
           - refId: B
             datasourceUid: __expr__
             model:
@@ -398,29 +398,25 @@ groups:
       # resource held below best is pg-router-gate-held's job.
       #
       # Type to role. The depth gauge carries `type` and the in-flight gauge `role`;
-      # the binding between them is configuration, not a metric, so the join is the
-      # explicit label_replace table below, one clause per role of the daemon config
-      # (the same shape as the pool mapping of pg-router-pool-full-idle, and without
-      # capture-group references so nothing in the provisioning layer can expand them).
-      # A type missing from the table and from the exemption list below is NOT
-      # covered, and this table is the only idle-consumer detection for the types it lists (pr.changed included: a role
-      # removed from the config leaves its clause dead, a role renamed or added
-      # leaves its type silent until the clause follows). A new role MUST be added to
-      # the table, to the type-to-role cases in rule-tests/pg-router-queue-stalled.test.yaml
-      # and to stalledRoles in internal/alertrules/queue_stalled_test.go. The
-      # deployment derives the expected (role, type) pairs from the roles it renders
-      # and checks every one against this rendered rule, so a role bound without a
-      # clause or an exemption fails its build instead of going silent. `max without
-      # (role)` drops the helper label again, so the alert keeps the labels of the rule
-      # it replaced (rule uid, alertname, severity, type, instance, job,
+      # the binding between them is configuration, and the router exports it as the
+      # info metric pg_router_binding_info{role,type} (value 1 per configured
+      # binding). The rule joins on it with
+      # `* on(type) group_left(role) pg_router_binding_info`, so no deployment role
+      # name appears here: a role added to the config is covered as soon as the
+      # router restarts. A type no role binds has no info series and drops
+      # out of the join (unconsumed events are another rule's job). The join needs
+      # one role per type; two roles binding one type fail the evaluation. `max
+      # without (role)` drops the helper label again, so the alert keeps the labels
+      # of the rule it replaced (rule uid, alertname, severity, type, instance, job,
       # otel_scope_name) and an open bead for that fingerprint keeps matching.
       #
       # Exempt runner roles (pg2-e0myo4). The pg-repo-runner roles repo-verify (type
-      # repo.tip) and repo-sync (type repo.sync) are NOT in the table, by an explicit and
+      # repo.tip) and repo-sync (type repo.sync) are excluded from the join
+      # (`pg_router_binding_info{role!~"repo-verify|repo-sync"}`), by an explicit and
       # named exemption: queue-stalled-exempt-roles.json beside this file. A runner
       # answers exit 9 "not now" (load, the lease shared by the runner roles, the kill
       # switch, canonical busy) and pg-router re-offers the event until it expires, so its
-      # queue is non-empty with nothing completing BY DESIGN, and a clause would page that
+      # queue is non-empty with nothing completing BY DESIGN, and a covered role would page that
       # routine shed after about 15 minutes (a declined offer is in flight for a second
       # or two, never for 6 scrapes). The sustained decline is paged by
       # pg-router-role-busy-long (4h, lower severity), a runner that fails by
@@ -471,7 +467,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "resolve-conflict-script", "type", "resolve-conflict[.]ready"), "role", "fix-ci-script", "type", "fix-ci[.]ready"), "role", "pr-change", "type", "pr[.]changed"), "role", "issue-decider", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2"), "role", "escalation-watchdog", "type", "escalation-watchdog[.]tick"), "role", "pg-rescue-triage", "type", "pg-rescue[.]item"), "role", "review-run", "type", "review[.]run"), "role", "review-maintain", "type", "review[.]maintain") and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0) unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1))
+              expr: max without (role) ((min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18) * on(type) group_left(role) pg_router_binding_info{role!~"repo-verify|repo-sync"} and on(role) (max by (role) (max_over_time(min_over_time(pg_router_listener_in_flight[3m])[10m:30s])) == 0) unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0) unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1))
           - refId: B
             datasourceUid: __expr__
             model:
@@ -1506,8 +1502,8 @@ groups:
       # ROLE -> POOL MAPPING depends on the nix `pg-router-ccpool-<role>` poolDir
       # convention (home/programs/pg-router-ccpool-handler/default.nix): the review,
       # worker and feedback roles have dedicated pools named pg-router-ccpool-<role>
-      # (pool = pool dir basename), as do the drain-zr and drain-pg2 roles
-      # (pg-router-ccpool-drain-zr / pg-router-ccpool-drain-pg2, bead pg2-nk6th.6);
+      # (pool = pool dir basename), as do the drain-* roles
+      # (pg-router-ccpool-drain-<tracker>, bead pg2-nk6th.6);
       # the triagers (*triager) have no poolDir and share
       # the handler pool `pg-router-ccpool`; command roles (desk-*) have no pool at
       # all. So the mapping is EXPLICIT per role group -- mapping every role with
@@ -1546,7 +1542,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback|drain-(zr|pg2)"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="counted"}[10m])) >= on(pool) max by (pool)(last_over_time(ccpool_pool_capacity{dim="max_sessions"}[10m]))) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0) unless on(pool) (sum by (pool)(last_over_time(ccpool_session_background_agents[10m])) > 0)
+              expr: (label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback|drain-.+"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="counted"}[10m])) >= on(pool) max by (pool)(last_over_time(ccpool_pool_capacity{dim="max_sessions"}[10m]))) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0) unless on(pool) (sum by (pool)(last_over_time(ccpool_session_background_agents[10m])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -2308,8 +2304,8 @@ groups:
       # period a lone sample makes increase() empty, hence count_over_time (a sample in
       # the window = a launch). ccpool-backed queue types (the bound role's pool; same
       # role->type bindings as pg-router-queue-stalled): review.ready (review),
-      # feedback.ready (feedback), work.ready (worker), drain.zr / drain.pg2 (drain-zr,
-      # drain-pg2), escalated.zr / escalated.pg2 (the triagers). Command roles (pr.changed,
+      # feedback.ready (feedback), work.ready (worker), drain.<tracker> (drain-<tracker>),
+      # escalated.<tracker> (the triagers); the selector takes any one-word tracker. Command roles (pr.changed,
       # repo.sync, disk.check, ...) launch no ccpool session and are NOT in the selector.
       # The backlog clause needs depth > 0 on EVERY scrape of the 2h (at least 200 scrapes,
       # so a laptop sleep or a restart that left gaps cannot satisfy it on a few points,
@@ -2327,7 +2323,7 @@ groups:
           severity: warning
         annotations:
           summary: "work has waited for a ccpool role for 2 hours and no ccpool session launched"
-          description: "pg_router_queue_depth stayed above 0 on every scrape of the last 2 hours for a ccpool-backed queue (review.ready, feedback.ready, work.ready, drain.zr, drain.pg2, escalated.zr, escalated.pg2) while ccpool_launch_outcome_total recorded no launch of any kind in that window, and that held for another 15 minutes. First check ccpool_pool_capacity (pg-router-ccpool-pool-capacity-absent fires when the recorder is down), then `pg-router status` for the roles' decline backoff and `ccpool --pool <pool> list --json`. A five_hour or spend usage window that stayed at its limit for more than 2 hours looks the same and is not a defect."
+          description: "pg_router_queue_depth stayed above 0 on every scrape of the last 2 hours for a ccpool-backed queue (review.ready, feedback.ready, work.ready, drain.<tracker>, escalated.<tracker>) while ccpool_launch_outcome_total recorded no launch of any kind in that window, and that held for another 15 minutes. First check ccpool_pool_capacity (pg-router-ccpool-pool-capacity-absent fires when the recorder is down), then `pg-router status` for the roles' decline backoff and `ccpool --pool <pool> list --json`. A five_hour or spend usage window that stayed at its limit for more than 2 hours looks the same and is not a defect."
         data:
           - refId: A
             relativeTimeRange:
@@ -2338,7 +2334,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: max(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) >= 200, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2") unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1)) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)
+              expr: max((min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.][a-z0-9]+|escalated[.][a-z0-9]+"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.][a-z0-9]+|escalated[.][a-z0-9]+"}[2h]) >= 200) * on(type) group_left(role) pg_router_binding_info unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1)) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)
           - refId: B
             datasourceUid: __expr__
             model:
@@ -2370,13 +2366,13 @@ groups:
       #   - highest max of a healthy role: review 7994 s (2.2 h), repo-verify 5123 s (1.4 h),
       #     feedback 5056 s (1.4 h), drain-pg2 4275 s (1.2 h), repo-sync 4099 s (1.1 h);
       #   - the two escalation triagers and the split triager are slower by design:
-      #     zr-escalation-triager max 12472 s (3.5 h), pg2-split-triager max 9523 s (2.6 h);
+      #     the tracker-A escalation triager max 12472 s (3.5 h), pg2-split-triager max 9523 s (2.6 h);
       #   - pg2-escalation-triager max 21737 s (6.0 h), reached only in the last 12 h of the
       #     window and above 6 h for 0.07 % of samples: a real backlog (the triager jam),
       #     which is what this rule must catch.
       # Threshold: 14400 s (4 h) = 1.8 x the highest healthy-role max (review, 7994 s, so
       # 14400 / 7994 = 1.80) and 1.15 x the largest triager max that was a normal busy spell
-      # (zr-escalation-triager, 12472 s; 14400 / 12472 = 1.15), while staying below the
+      # (the tracker-A escalation triager, 12472 s; 14400 / 12472 = 1.15), while staying below the
       # real jam (21737 s). With this threshold the only role that would have fired in the
       # window is pg2-escalation-triager, for the jam. `for: 30m` so one slow item that
       # drains does not fire. Severity warning: the notifier pages on critical only. The

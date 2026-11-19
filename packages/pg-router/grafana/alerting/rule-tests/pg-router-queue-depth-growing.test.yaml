@@ -36,6 +36,9 @@ tests:
   - name: issue.changed growing 113 an hour from a near-empty queue fires after the window plus for
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="issue-decider",type="issue.changed",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
         values: "2+0.941667x1440"
     alert_rule_test:
@@ -56,6 +59,9 @@ tests:
   - name: issue.changed growing 130 an hour from a near-empty queue fires after the window plus for
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="issue-decider",type="issue.changed",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
         values: "2+1.083333x1440"
     alert_rule_test:
@@ -76,6 +82,9 @@ tests:
   - name: arrivals equal to completions hold the depth flat and never fire
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="issue-decider",type="issue.changed",job="pg-router"}
+        values: "1x2880"
       # 113 an hour in, 113 an hour out: the gauge does not move.
       - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
         values: "6x1440"
@@ -94,6 +103,9 @@ tests:
   - name: a large standing backlog hides a steady 113 an hour from the ratio term, slow-growth is the rule that catches it
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="issue-decider",type="issue.changed",job="pg-router"}
+        values: "1x2880"
       # Starts at 400, so the 30m delta of 56 is under 0.25 times the 30m average (about 107
       # at the start, more as it grows). Not firing here is a property of the rule, not of the
       # test: see the finding in the file header. The same shape fires
@@ -108,6 +120,11 @@ tests:
   - name: a depth rising only through settled retained events is not a backlog, pending at 0 keeps the rule quiet
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="issue-decider",type="issue.changed",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="pr-change",type="pr.changed",job="pg-router"}
+        values: "1x2880"
       # The pr.changed shape under a 6 hour retention window: depth climbs 113 an hour while
       # every event is already settled, so the role's pending gauge reads 0 throughout.
       - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}

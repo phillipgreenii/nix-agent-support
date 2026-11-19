@@ -6,7 +6,6 @@
 package alertrules
 
 import (
-	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -31,19 +30,11 @@ const (
 	scrape      = 30 * time.Second
 )
 
-// wantExpr is the expr of rule pg-router-queue-depth-growing: growthCore with the same
-// type-to-role chain as pg-router-queue-stalled (stalledRoles), minus the roles whose
-// pending gauge read 0 on every scrape of 10 minutes (settled, retained events only).
+// wantExpr is the expr of rule pg-router-queue-depth-growing: growthCore joined to the
+// consuming role through pg_router_binding_info, minus the roles whose pending gauge
+// read 0 on every scrape of 10 minutes (settled, retained events only).
 func wantExpr() string {
-	var b strings.Builder
-	b.WriteString("max without (role) (")
-	b.WriteString(strings.Repeat("label_replace(", len(stalledRoles)))
-	b.WriteString(growthCore)
-	for _, r := range stalledRoles {
-		fmt.Fprintf(&b, `, "role", %q, "type", %q)`, r.role, r.typeRE)
-	}
-	b.WriteString(` unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0))`)
-	return b.String()
+	return "max without (role) ((" + growthCore + ")" + stalledJoin + `pg_router_binding_info unless on(role) (min by (role) (min_over_time(pg_router_listener_pending[10m])) == 0))`
 }
 
 type sample struct {

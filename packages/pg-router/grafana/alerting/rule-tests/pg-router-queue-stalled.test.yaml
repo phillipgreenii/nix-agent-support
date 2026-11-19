@@ -25,6 +25,9 @@ tests:
   - name: an idle lane with a backlog fires after the window plus for, labelled with its type
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "3x240"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
@@ -55,6 +58,9 @@ tests:
   - name: a dispatch in flight is not a stall, however long it runs and however deep the backlog
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       # The 2026-10-12 shape: depth 12, the role in flight for the whole hour.
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "12x240"
@@ -75,6 +81,9 @@ tests:
   - name: a dispatch in flight for part of the window is enough, a 150s hand-off is not a stall
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "12x240"
       # In flight 20m, idle 150s (5 scrapes), repeated.
@@ -99,6 +108,9 @@ tests:
   - name: declined offers caught in flight on one or two scrapes are not activity, a decline storm pages
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "20x240"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
@@ -132,29 +144,34 @@ tests:
   - name: a dispatch in flight for three minutes or more is processing, a stretch of a few scrapes is not
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-a",type="drain.a",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       # drain.pg2: one dispatch in flight on 10 consecutive scrapes (5m to 9m30s), idle before and after.
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "3x240"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
         values: "0x9 1x9 0x220"
-      # drain.zr: declined offers caught on 5 consecutive scrapes (5m to 7m), one short of a run,
+      # drain.a: declined offers caught on 5 consecutive scrapes (5m to 7m), one short of a run,
       # idle otherwise. The recorded storm never reads more than 4 in a row (queue_stalled_test.go).
-      - series: pg_router_queue_depth{type="drain.zr",job="pg-router"}
+      - series: pg_router_queue_depth{type="drain.a",job="pg-router"}
         values: "3x240"
-      - series: pg_router_listener_in_flight{role="drain-zr",job="pg-router"}
+      - series: pg_router_listener_in_flight{role="drain-a",job="pg-router"}
         values: "0x9 1x4 0x226"
     alert_rule_test:
-      # drain.zr is idle from 9m and pages at 14m whatever happened at 5m.
+      # drain.a is idle from 9m and pages at 14m whatever happened at 5m.
       - eval_time: 12m
         alertname: pg-router-queue-stalled
         exp_alerts: []
       # drain.pg2's dispatch ran until 9m30s, so its window is clear only from 19m30s and it pages
-      # after `for`: at 20m only drain.zr is firing, at 30m both are.
+      # after `for`: at 20m only drain.a is firing, at 30m both are.
       - eval_time: 20m
         alertname: pg-router-queue-stalled
         exp_alerts:
           - exp_labels:
-              type: drain.zr
+              type: drain.a
               job: pg-router
               severity: warning
       - eval_time: 30m
@@ -165,7 +182,7 @@ tests:
               job: pg-router
               severity: warning
           - exp_labels:
-              type: drain.zr
+              type: drain.a
               job: pg-router
               severity: warning
 
@@ -182,6 +199,9 @@ tests:
   - name: the real decline storm of 2026-10-13 pages through its blips and stops once the dispatches run (recorded Prometheus series)
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "32x22 33x7 32x6 33x42 32x7 35x79 32x1 29x1 32 28 25 27 26 23 21 25x1 24 21 24x2 21 18 24 23 22 19 24x1 25 23 20 25 22 25 22 21 24 21 25 24 21 23 19 25 22 25 23 20 25 24x1 21 20 24 21 25 24 25 21 19 23x1 24 21 25 24 22 24 21 25x1 22 20 25x1 22 23 20 25 23 24 22 25x1 23x1 20 25 22 24 22 20 24 21 25 23x1 22 19 24x1 25 22 19 25 22 24 21 25x1 22 24 21x1 22 20 25x2 22 19 24 23x1 20 25 23 25 22 19 25 23x1 20 25x4 24 25x3 24 25x4 24x1 25x2 24x1 25x9 24 25x3 24 25x3 24x1 25x2 24x1 25x2 24x1 25x2 24"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
@@ -241,6 +261,9 @@ tests:
   - name: the real daemon restart of 2026-10-12 reads 0 in flight for 4.5 minutes while the session works, and nothing pages (recorded Prometheus series)
     interval: 1s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "17 _x29 17 _x29 17 _x29 17 _x29 17 _x29 17 _x29 17 _x29 19 _x29 19 _x29 19 _x29 19 _x30 19 _x28 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 20 _x29 20 _x29 21 _x29 21 _x29 21 _x29 21 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x31 19 _x87 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x61 19 _x27 19 _x29 19 _x29 19 _x29 19 _x31 19 _x27 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x29 19 _x68 19 _x29 19 _x29 19 _x29 19 _x37 19 _x75 19 _x5 19 _x33 19 _x27 19 _x27 19 _x29 19 _x29 19 _x29 19 _x29 20 _x29 20 _x38 20 _x21 20 _x28 20 _x29 20 _x29 20 _x29 20 _x29 20 _x29 20 _x40 20 _x18 20 _x29 20 _x29 20 _x29 20 _x29 20 _x30 20 _x28 20 _x29 20 _x29 20 _x59 20 _x29 20 _x30 20 _x29 20 _x28 20 _x30 20 _x46 20 _x12 20 _x28 20 _x30 20 _x28 20 _x29 20 _x29 20 _x32 21 _x26 21 _x59 21 _x37 21 _x45 21 _x7 21 _x28 21 _x28 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x30 21 _x29 21 _x28 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x29 21 _x31 21 _x27 21 _x29 21 _x29 21 _x30 21 _x28 21 _x29 25 _x29 25 _x29 25 _x29 27 _x29 27 _x29 27 _x29 28 _x29 28 _x30 28 _x36 28 _x28 28 _x22 28 _x29 28 _x29 28 _x29 28 _x29 28 _x29 28 _x29 26 _x29 24 _x29 21 _x29 19"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
@@ -319,6 +342,9 @@ tests:
   - name: a pace-limited fast role that is never caught in flight is not idle while its dispatches keep settling
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="issue-decider",type="issue.changed",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
         values: "15x240"
       - series: pg_router_listener_in_flight{role="issue-decider",job="pg-router"}
@@ -349,14 +375,19 @@ tests:
   - name: the join is by the bound role, so a busy neighbour does not excuse an idle lane
     interval: 30s
     input_series:
-      # drain.pg2 is idle with a backlog while the drain-zr lane next to it is busy with its own.
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-a",type="drain.a",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
+      # drain.pg2 is idle with a backlog while the drain-a lane next to it is busy with its own.
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "3x240"
-      - series: pg_router_queue_depth{type="drain.zr",job="pg-router"}
+      - series: pg_router_queue_depth{type="drain.a",job="pg-router"}
         values: "5x240"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
         values: "0x240"
-      - series: pg_router_listener_in_flight{role="drain-zr",job="pg-router"}
+      - series: pg_router_listener_in_flight{role="drain-a",job="pg-router"}
         values: "1x240"
     alert_rule_test:
       - eval_time: 20m
@@ -370,6 +401,11 @@ tests:
   - name: a depth made only of settled retained events is not a backlog, the role's pending gauge at 0 keeps the rule quiet
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="pr-change",type="pr.changed",job="pg-router"}
+        values: "1x2880"
       # The 2026-11-03 pr.changed shape: depth 50 held by events every listener already
       # settled (retained for their time to live), the role idle, nothing pending.
       - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
@@ -397,6 +433,9 @@ tests:
   - name: pr-change binds pr.changed only, so it covers that type whether busy or idle and the retired pr.reconcile is not covered
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="pr-change",type="pr.changed",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
         values: "5x240"
       # A type no role binds any more (the sweeps and their event type were removed): no
@@ -423,6 +462,9 @@ tests:
   - name: the retired desk-pr role no longer joins pr.changed, so an in-flight series under that name excuses nothing
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="pr-change",type="pr.changed",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
         values: "5x240"
       # The old role name reads busy the whole time; the bound role, pr-change, is idle.
@@ -442,6 +484,23 @@ tests:
   - name: every role of the daemon config maps to the type it binds (idle with a backlog)
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="desk-heartbeat",type="desk.heartbeat",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="pg2-escalation-triager",type="escalated.pg2",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="fix-ci-script",type="fix-ci.ready",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="issue-decider",type="issue.changed",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="pr-change",type="pr.changed",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="resolve-conflict-script",type="resolve-conflict.ready",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="review",type="review.ready",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="pg2-split-triager",type="split-review.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="review.ready"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="review"}
@@ -486,6 +545,9 @@ tests:
   - name: the escalation-watchdog timer role maps to escalation-watchdog.tick (idle pages, busy does not)
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="escalation-watchdog",type="escalation-watchdog.tick",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="escalation-watchdog.tick",job="pg-router"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="escalation-watchdog",job="pg-router"}
@@ -516,6 +578,9 @@ tests:
   - name: the escalation-watchdog timer role is not stalled while it is dispatching
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="escalation-watchdog",type="escalation-watchdog.tick",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="escalation-watchdog.tick",job="pg-router"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="escalation-watchdog",job="pg-router"}
@@ -529,6 +594,9 @@ tests:
   - name: the pg-rescue-triage role maps to pg-rescue.item (idle pages, busy does not)
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="pg-rescue-triage",type="pg-rescue.item",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="pg-rescue.item",job="pg-router"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="pg-rescue-triage",job="pg-router"}
@@ -558,6 +626,9 @@ tests:
   - name: the pg-rescue-triage role is not stalled while it is dispatching
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="pg-rescue-triage",type="pg-rescue.item",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="pg-rescue.item",job="pg-router"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="pg-rescue-triage",job="pg-router"}
@@ -571,6 +642,9 @@ tests:
   - name: the review-run role maps to review.run (idle pages, busy does not)
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="review-run",type="review.run",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="review.run",job="pg-router"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="review-run",job="pg-router"}
@@ -600,6 +674,9 @@ tests:
   - name: the review-run role is not stalled while it is dispatching
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="review-run",type="review.run",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="review.run",job="pg-router"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="review-run",job="pg-router"}
@@ -613,6 +690,9 @@ tests:
   - name: the review-maintain role maps to review.maintain (idle pages, busy does not)
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="review-maintain",type="review.maintain",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="review.maintain",job="pg-router"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="review-maintain",job="pg-router"}
@@ -642,6 +722,9 @@ tests:
   - name: the review-maintain role is not stalled while it is dispatching
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="review-maintain",type="review.maintain",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="review.maintain",job="pg-router"}
         values: "2x240"
       - series: pg_router_listener_in_flight{role="review-maintain",job="pg-router"}
@@ -671,6 +754,13 @@ tests:
   - name: the runner roles are exempt (queue-stalled-exempt-roles.json), a declined backlog behind them is not a stall, and a mapped role beside them still is
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="pr-change",type="pr.changed",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="repo-sync",type="repo.sync",job="pg-router"}
+        values: "1x2880"
+      - series: pg_router_binding_info{role="repo-verify",type="repo.tip",job="pg-router"}
+        values: "1x2880"
       # repo-verify and repo-sync answer exit 9 "not now" and are re-offered, so their
       # queues stay non-empty with nothing completing and the role not held in flight
       # (a declined offer is in flight for a second or two). No clause maps their types,
@@ -710,6 +800,9 @@ tests:
   - name: a paused role suppresses its own lane only, and the rule fires normally once it resumes
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "3x240"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
@@ -740,6 +833,9 @@ tests:
   - name: a sleep leaves a gap, and the presence guard needs 10 minutes of fresh scrapes after the wake
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       # 10m of idle backlog, a 3h gap (the host asleep: no scrapes), then the same idle backlog.
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "3x20 _x360 3x120"
@@ -769,6 +865,9 @@ tests:
   - name: a type that blips into the queue for a scrape and drains again is not a backlog
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       # One scrape of depth 12 every 10 minutes: the gauge has no series in between.
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "12 _x19 12 _x19 12 _x19 12 _x19 12 _x19 12 _x19 12 _x19 12 _x19"
@@ -782,6 +881,9 @@ tests:
   - name: a lane that was idle and then resumes stops being a stall, and the alert resolves after keepFiringFor
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "3x240"
       # Idle for the first 30m, then a dispatch in flight.
@@ -811,6 +913,9 @@ tests:
   - name: moot skips advance the skipped counter, not the throughput counter, so a backlog behind them still pages
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="pg2-escalation-triager",type="escalated.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="escalated.pg2",job="pg-router"}
         values: "6x240"
       - series: pg_router_listener_in_flight{role="pg2-escalation-triager",job="pg-router"}
@@ -844,6 +949,9 @@ tests:
   - name: negative control, the same skips counted as throughput would mask the stall
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="pg2-escalation-triager",type="escalated.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="escalated.pg2",job="pg-router"}
         values: "6x240"
       - series: pg_router_listener_in_flight{role="pg2-escalation-triager",job="pg-router"}
@@ -861,6 +969,9 @@ tests:
   - name: an UNRELATED paused role does not suppress a stalled lane
     interval: 30s
     input_series:
+      # The router config binds each type to its role (pg_router_binding_info); the rule joins on it.
+      - series: pg_router_binding_info{role="drain-pg2",type="drain.pg2",job="pg-router"}
+        values: "1x2880"
       - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
         values: "3x240"
       - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}

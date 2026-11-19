@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -119,6 +120,7 @@ func TestBootCore_levelObserverAndLevelGaugesAreWired(t *testing.T) {
 		metrics.MetricResourceLevel + "{resource=disk}":                         1,
 		metrics.MetricResourceScaleSize + "{resource=disk}":                     2,
 		metrics.MetricRolePaused + "{role=r1}":                                  1,
+		metrics.MetricBindingInfo + "{role=r1,type=t1}":                         1,
 		metrics.MetricRequirementBlocked + "{kind=level,resource=disk,role=r1}": 1,
 		metrics.MetricResourceLevelSource + "{resource=disk,source=sensor}":     1,
 	}
@@ -149,4 +151,18 @@ func attrString(kvs []attribute.KeyValue) string {
 	}
 	slices.Sort(parts)
 	return strings.Join(parts, ",")
+}
+
+// bindingInfo feeds pg_router_binding_info: one pair per bound type of every configured
+// role, disabled ones included, none for a role with no binds.
+func TestBindingInfo_EveryConfiguredBinding(t *testing.T) {
+	got := bindingInfo(roles.RoleSet{
+		{Name: "a", Enabled: true, Binds: []string{"a.ready", "a.changed"}},
+		{Name: "off", Enabled: false, Binds: []string{"off.ready"}},
+		{Name: "bare", Enabled: true},
+	})
+	want := []metrics.Binding{{Role: "a", Type: "a.ready"}, {Role: "a", Type: "a.changed"}, {Role: "off", Type: "off.ready"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("bindingInfo = %v, want %v", got, want)
+	}
 }

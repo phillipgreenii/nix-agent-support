@@ -1,6 +1,6 @@
 {
   "rule": "pg-router-queue-stalled",
-  "doc": "Named exemption list for the pg-router-queue-stalled role map (pg2-e0myo4). A (role, type) pair bound by a pg-router role MUST be either a clause of that rule's label_replace chain in alerts.yaml (covered) or listed here (exempt); anything else is an uncovered binding and a failed check. A role listed here MUST NOT have a clause in the chain: the rule would page the exit-9 backlog the role is built to keep. Adding an entry needs a reason, the rules that still watch the role (coveredBy, each a uid in alerts.yaml) and a test; internal/alertrules/queue_stalled_exempt_test.go pins all of it.",
+  "doc": "Named exemption list for the pg-router-queue-stalled role join (pg2-e0myo4). The rule joins a queue's type to its consuming role through pg_router_binding_info, which lists every binding of an enabled role. A role listed here MUST be excluded from that join by the rule's `pg_router_binding_info{role!~\"a|b\"}` selector (exactly this set, no more), because the rule would page the exit-9 backlog the role is built to keep; every other bound (role, type) pair is covered. Adding an entry needs a reason, the rules that still watch the role (coveredBy, each a uid in alerts.yaml) and a test; internal/alertrules/queue_stalled_exempt_test.go pins all of it.",
   "exemptRoles": [
     {
       "role": "repo-verify",

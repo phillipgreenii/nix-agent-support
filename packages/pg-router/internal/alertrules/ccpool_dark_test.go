@@ -9,7 +9,7 @@ import (
 // for 33 h on 2026-10-31/11-02 and only the generic failure-rate rule fired.
 const (
 	wantCapacityAbsentExpr = `absent_over_time(ccpool_pool_capacity[10m])`
-	wantNoLaunchExpr       = `max(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.](zr|pg2)|escalated[.](zr|pg2)"}[2h]) >= 200, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2") unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1)) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)`
+	wantNoLaunchExpr       = `max((min_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.][a-z0-9]+|escalated[.][a-z0-9]+"}[2h]) > 0 and count_over_time(pg_router_queue_depth{type=~"review[.]ready|feedback[.]ready|work[.]ready|drain[.][a-z0-9]+|escalated[.][a-z0-9]+"}[2h]) >= 200) * on(type) group_left(role) pg_router_binding_info unless on(role) (max by (role) (max_over_time(pg_router_role_paused[10m])) == 1)) unless on() (sum(count_over_time(ccpool_launch_outcome_total[2h])) > 0)`
 )
 
 func TestCcpoolDarkRules(t *testing.T) {
