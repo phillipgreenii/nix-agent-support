@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -241,6 +242,29 @@ func TestRunStatusRateLimitsOnlyAsksDaemonForLightAnswer(t *testing.T) {
 	captureStdout(t, func() { runStatus([]string{"--json"}) })
 	if !d.last.GetLiveSessionsOnly() || d.last.GetRateLimitsOnly() {
 		t.Errorf("--json request = %v, want live_sessions_only only", d.last)
+	}
+}
+
+// TestRunStatusCountsPrintsOnlyTheTally proves `status --counts` sends
+// session_counts_only and prints just the session_counts document.
+func TestRunStatusCountsPrintsOnlyTheTally(t *testing.T) {
+	sock := daemonTestSocket(t)
+	st := characterizationState()
+	st.SessionCounts = &pb.SessionCounts{Working: 2, Blocked: 1, Idle: 15, Live: 18, Stale: 498, Total: 516}
+	d := &recordingStatusDaemon{fakeStatusDaemon: fakeStatusDaemon{state: st}}
+	serveFakeDaemon(t, sock, d)
+
+	out := captureStdout(t, func() { runStatus([]string{"--counts"}) })
+	var doc map[string]map[string]float64
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("not JSON: %v\n%q", err, out)
+	}
+	want := map[string]float64{"working": 2, "blocked": 1, "idle": 15, "live": 18, "stale": 498, "total": 516}
+	if len(doc) != 1 || !reflect.DeepEqual(doc["session_counts"], want) {
+		t.Errorf("want only session_counts %v, got %q", want, out)
+	}
+	if !d.last.GetSessionCountsOnly() {
+		t.Error("--counts did not set session_counts_only")
 	}
 }
 

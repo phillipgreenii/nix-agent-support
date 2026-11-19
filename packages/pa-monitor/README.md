@@ -99,6 +99,35 @@ without a live pid (`live_sessions_only`) and skips the per-session detail calls
 receive cap is raised from 4 MiB to 256 MiB, so neither fails on a state with thousands of stale
 sessions.
 
+#### Light call: `status --counts`
+
+`pa-monitor status --counts` prints the session tally by status and nothing else, for pollers that
+only need "how many agents are active" (pg-router's agents watchdog):
+
+```json
+{
+  "session_counts": {
+    "working": 2,
+    "blocked": 1,
+    "idle": 15,
+    "live": 18,
+    "stale": 498,
+    "total": 516
+  }
+}
+```
+
+`working`, `blocked` and `idle` count live sessions (a running pid); `stale` counts sessions with no
+pid (dead sessions, stale fixtures), reported separately; `live + stale == total`. The tally covers
+every session, interactive and router-launched alike, because nothing on a session separates the
+two (join with `ccpool capacity --json` for the router-launched count). The command asks the daemon
+for `GetStateRequest.session_counts_only`: no directories or sessions, so the reply is a few dozen
+bytes however many stale sessions the daemon holds and it cannot hit the gRPC message cap. The same
+tally is `DaemonState.session_counts` on every GetState answer. A daemon too old to report it makes
+the command fail rather than print zeros. A single reading is noisy (a session can flip from working
+to blocked within a minute), so a watchdog SHOULD smooth over several polls. The bound is under 1
+second at p99, asserted by `TestGetState_SessionCountsOnly` in `internal/daemon`.
+
 `caffeinate` and `auto_resume` carry the two operator toggles (additive keys; no existing key
 changed):
 

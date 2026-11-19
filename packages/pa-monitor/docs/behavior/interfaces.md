@@ -44,6 +44,12 @@ flowchart LR
 - **Out (daemon → reader), streaming** — the same content, pushed as it changes, for a reader that
   wants to react rather than poll. The busy/idle gate (`INV-GATE-1`) is a derived read of this
   same content, not a separate interface.
+- **Out (daemon → reader), counts only** — the tally of sessions by status (working, blocked,
+  idle among live sessions; stale sessions, those with no running process, counted separately;
+  the total), with no per-session content. Its size and cost MUST NOT depend on how many stale
+  sessions the daemon holds, and it MUST NOT fail because the stored history is large. The tally
+  covers interactive and router-launched sessions together. This is how a reader that only needs
+  "how many agents are active" asks.
 - **Guarantee** — a reader that cannot reach the daemon at all is told so distinctly from a reader
   that reaches it and receives a snapshot with unknown fields (`INV-WINDOW-3`) — "the daemon is
   unreachable" and "the daemon has nothing known to report" are different facts.

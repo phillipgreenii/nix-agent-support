@@ -71,6 +71,11 @@ message GetStateRequest {
   // dead sessions) and any directory left empty, bounding the reply for
   // one-shot CLI callers. Ignored when rate_limits_only is set.
   bool live_sessions_only = 2;
+  // session_counts_only asks for the counts answer: every account-global field
+  // plus session_counts, with NO directories or sessions, so the reply size and
+  // cost do not depend on the number of stale sessions. Ignored when
+  // rate_limits_only is set (that answer carries session_counts too).
+  bool session_counts_only = 3;
 }
 
 message WatchStateRequest {
@@ -157,6 +162,25 @@ message DaemonState {
   string caffeinate_battery_gate = 25;
   bool caffeinate_on_battery = 26;
   optional uint32 caffeinate_battery_percent = 27;
+
+  // session_counts is the by-status tally of every session the daemon holds,
+  // computed before any GetStateRequest trimming. Always set by a daemon that
+  // knows it; absent means an older daemon.
+  SessionCounts session_counts = 28;
+}
+
+// SessionCounts tallies sessions by status. live is the sessions with a running
+// pid; stale is the sessions with no pid (dead sessions and stale fixtures).
+// working, blocked and idle count LIVE sessions only; stale_idle etc. are not
+// reported separately. total = live + stale. The counts cover all sessions,
+// interactive and router-launched alike: nothing on a session separates the two.
+message SessionCounts {
+  uint32 working = 1;
+  uint32 blocked = 2;
+  uint32 idle = 3;
+  uint32 live = 4;
+  uint32 stale = 5;
+  uint32 total = 6;
 }
 
 message Directory {

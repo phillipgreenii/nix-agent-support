@@ -15,6 +15,7 @@ import (
 func runStatus(args []string) {
 	args, jsonMode := stripJSONFlag(args)
 	args, rateLimitsOnly := stripFlag(args, "--rate-limits")
+	args, countsOnly := stripFlag(args, "--counts")
 	_ = args // status takes no positional args today; kept for a future flag to compose against.
 
 	ctx, cancel := contextWithTimeout()
@@ -26,6 +27,17 @@ func runStatus(args []string) {
 		os.Exit(exitDaemonUnavailable)
 	}
 	defer func() { _ = client.Close() }()
+
+	if countsOnly {
+		// Light call: the by-status tally only, no sessions, so the reply size
+		// and cost do not depend on how many stale sessions the daemon holds.
+		state, _ := getStateOrExit(ctx, client, &pb.GetStateRequest{SessionCountsOnly: true})
+		if err := writeSessionCountsJSON(os.Stdout, state); err != nil {
+			fmt.Fprintf(os.Stderr, "status: %v\n", err)
+			os.Exit(exitGeneric)
+		}
+		return
+	}
 
 	if rateLimitsOnly {
 		// Light call: account-global fields only, no per-session work, so the

@@ -127,12 +127,14 @@ func (s *server) GetState(ctx context.Context, req *pb.GetStateRequest) (*pb.Dae
 }
 
 // trimState applies the GetStateRequest size controls to a freshly built
-// (never shared) state: rate_limits_only drops every directory, and
+// (never shared) state: rate_limits_only and session_counts_only drop every directory, and
 // live_sessions_only drops sessions with no live pid plus any directory that
 // leaves empty. Directory rollup counters are left as the daemon computed them.
 func trimState(st *pb.DaemonState, req *pb.GetStateRequest) *pb.DaemonState {
+	// Tally before any trimming so the counts always describe every session.
+	st.SessionCounts = sessionCounts(st.Dirs)
 	switch {
-	case req.GetRateLimitsOnly():
+	case req.GetRateLimitsOnly(), req.GetSessionCountsOnly():
 		st.Dirs = nil
 	case req.GetLiveSessionsOnly():
 		kept := st.Dirs[:0]
@@ -152,6 +154,32 @@ func trimState(st *pb.DaemonState, req *pb.GetStateRequest) *pb.DaemonState {
 		st.Dirs = kept
 	}
 	return st
+}
+
+// sessionCounts tallies the sessions of dirs by status. A session is live when
+// it has a pid; working, blocked and idle count live sessions only, and any
+// status other than working or blocked (including a retired "dormant") is idle.
+func sessionCounts(dirs []*pb.Directory) *pb.SessionCounts {
+	c := &pb.SessionCounts{}
+	for _, d := range dirs {
+		for _, sv := range d.GetSessions() {
+			c.Total++
+			if sv.GetPid() == 0 {
+				c.Stale++
+				continue
+			}
+			c.Live++
+			switch sv.GetStatus() {
+			case "working":
+				c.Working++
+			case "blocked":
+				c.Blocked++
+			default:
+				c.Idle++
+			}
+		}
+	}
+	return c
 }
 
 func (s *server) WatchState(req *pb.WatchStateRequest, stream pb.PaMonitor_WatchStateServer) error {

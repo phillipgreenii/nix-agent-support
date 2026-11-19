@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -27,6 +28,9 @@ import (
 // heavily loaded host can cause (load averages near 100 stretched a 2s bound
 // past 40s).
 const loadBound = 5 * time.Minute
+
+// countsBound is the p99 latency bound of the counts-only answer (tunable).
+const countsBound = time.Second
 
 func TestGetState_SizeIndependentOfStaleSessions(t *testing.T) {
 	const stale, live = 3000, 3
@@ -71,8 +75,8 @@ func TestGetState_SizeIndependentOfStaleSessions(t *testing.T) {
 		SELECT printf('session-%05d', i),
 		       CASE WHEN i >= ? THEN 1000 + i END,
 		       printf('/work/project-%d/with/a/reasonably/long/path', i % 200),
-		       'idle', ?, ?, ?
-		FROM n`, stale+live-1, stale, ts, created, created); err != nil {
+		       CASE WHEN i = ? THEN 'working' WHEN i = ? THEN 'blocked' ELSE 'idle' END, ?, ?, ?
+		FROM n`, stale+live-1, stale, stale, stale+1, ts, created, created); err != nil {
 		t.Fatalf("seed sessions: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -155,6 +159,32 @@ func TestGetState_SizeIndependentOfStaleSessions(t *testing.T) {
 	}
 	if light.FiveHourPct == nil || light.GetFiveHourPct() != five {
 		t.Errorf("rate_limits_only five_hour_pct = %v, want %v", light.FiveHourPct, five)
+	}
+	// session_counts_only: the tally of every session by status, no directories,
+	// a tiny answer, and p99 latency under countsBound over many calls.
+	counts, _ := get(&pb.GetStateRequest{SessionCountsOnly: true})
+	if got := len(counts.GetDirs()); got != 0 {
+		t.Errorf("session_counts_only carries %d dirs, want 0", got)
+	}
+	if sz := proto.Size(counts); sz > 1<<10 {
+		t.Errorf("session_counts_only answer is %d bytes, want <= 1 KiB", sz)
+	}
+	want := &pb.SessionCounts{Working: 1, Blocked: 1, Idle: live - 2, Live: live, Stale: stale, Total: stale + live}
+	if !proto.Equal(counts.GetSessionCounts(), want) {
+		t.Errorf("session_counts = %v, want %v", counts.GetSessionCounts(), want)
+	}
+	if !proto.Equal(full.GetSessionCounts(), want) {
+		t.Errorf("default answer session_counts = %v, want %v", full.GetSessionCounts(), want)
+	}
+	const calls = 50
+	durs := make([]time.Duration, 0, calls)
+	for range calls {
+		_, d := get(&pb.GetStateRequest{SessionCountsOnly: true})
+		durs = append(durs, d)
+	}
+	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
+	if p99 := durs[calls*99/100]; p99 > countsBound {
+		t.Errorf("session_counts_only p99 = %v over %d calls, want <= %v", p99, calls, countsBound)
 	}
 	for name, d := range map[string]time.Duration{"live_sessions_only": liveDur, "rate_limits_only": lightDur} {
 		if d > loadBound {

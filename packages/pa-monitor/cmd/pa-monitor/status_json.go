@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -58,6 +59,36 @@ type rateLimitsDoc struct {
 
 func writeRateLimitsJSON(w io.Writer, state *pb.DaemonState) error {
 	return json.NewEncoder(w).Encode(rateLimitsDoc{RateLimits: toRateLimitsJSON(state)})
+}
+
+// sessionCountsJSON is the `status --counts` wire shape. working, blocked and
+// idle count live sessions (a running pid); stale counts sessions without a pid
+// and live+stale == total. The counts cover every session, interactive and
+// router-launched alike.
+type sessionCountsJSON struct {
+	Working uint32 `json:"working"`
+	Blocked uint32 `json:"blocked"`
+	Idle    uint32 `json:"idle"`
+	Live    uint32 `json:"live"`
+	Stale   uint32 `json:"stale"`
+	Total   uint32 `json:"total"`
+}
+
+// sessionCountsDoc is the `status --counts` document. session_counts is always
+// present; a daemon too old to report it yields an error, never zeros.
+type sessionCountsDoc struct {
+	SessionCounts sessionCountsJSON `json:"session_counts"`
+}
+
+func writeSessionCountsJSON(w io.Writer, state *pb.DaemonState) error {
+	c := state.GetSessionCounts()
+	if c == nil {
+		return errors.New("daemon does not report session_counts (older daemon); restart it")
+	}
+	return json.NewEncoder(w).Encode(sessionCountsDoc{SessionCounts: sessionCountsJSON{
+		Working: c.GetWorking(), Blocked: c.GetBlocked(), Idle: c.GetIdle(),
+		Live: c.GetLive(), Stale: c.GetStale(), Total: c.GetTotal(),
+	}})
 }
 
 // contextWithTimeout returns the standard 3s-timeout context every
