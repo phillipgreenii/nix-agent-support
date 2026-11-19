@@ -13,7 +13,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
 )
 
-// Dispatch admission control (INV-CCH-41): a full pool with no usage limit is reconciled once through the Reconciler
+// Dispatch admission control (INV-CCH-41): a full pool with no usage limit is reconciled once through the Admission port
 // seam and capacity is re-checked once; the decline keeps its reason.
 
 // seqCapCC serves a scripted sequence of Capacity answers (the last repeats) and
@@ -70,6 +70,11 @@ func (f *fakeReconciler) ReclaimLeakedWorktree(_ context.Context, bead string) e
 	return f.wtErr
 }
 
+// admission exposes the fake through the Admission port.
+func (f *fakeReconciler) admission() *Admission {
+	return &Admission{ReconcileClosedBeads: f.ReconcileClosedBeads, ReclaimLeakedWorktree: f.ReclaimLeakedWorktree}
+}
+
 func (f *fakeReconciler) reconciles() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -82,8 +87,8 @@ var (
 )
 
 // admissionRun builds a run over a scripted capacity sequence; rec may be nil
-// (no Reconciler).
-func admissionRun(t *testing.T, rec Reconciler, caps ...ccpool.Capacity) (*ccpoolRun, *seqCapCC, DispatchContext) {
+// (no Admission).
+func admissionRun(t *testing.T, rec *Admission, caps ...ccpool.Capacity) (*ccpoolRun, *seqCapCC, DispatchContext) {
 	t.Helper()
 	cfg := fastCfg()
 	cfg.WorktreeDir = t.TempDir()
@@ -91,13 +96,13 @@ func admissionRun(t *testing.T, rec Reconciler, caps ...ccpool.Capacity) (*ccpoo
 	e := newExec(cc.FakeCC, &dtest.ScriptBD{}, cfg)
 	e.deps.CC = cc
 	e.deps.GitOpener = (&dtest.NoopGitOpener{}).Open
-	e.deps.Reconciler = rec
+	e.deps.Admission = rec
 	return e, cc, DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
 }
 
 func TestAdmission_reconcileFreesASlotAndTheDispatchProceeds(t *testing.T) {
 	rec := &fakeReconciler{outcome: ReconcileOutcome{Closed: 2}}
-	e, cc, d := admissionRun(t, rec, fullPool, freePool)
+	e, cc, d := admissionRun(t, rec.admission(), fullPool, freePool)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrLaunchFailed) {
 		t.Fatalf("err = %v, want the dispatch to pass the gate and reach the launch (ErrLaunchFailed)", err)
@@ -112,7 +117,7 @@ func TestAdmission_reconcileFreesASlotAndTheDispatchProceeds(t *testing.T) {
 
 func TestAdmission_nothingReclaimableDeclinesOnceWithoutLooping(t *testing.T) {
 	rec := &fakeReconciler{}
-	e, cc, d := admissionRun(t, rec, fullPool)
+	e, cc, d := admissionRun(t, rec.admission(), fullPool)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolAtCapacity) {
 		t.Fatalf("err = %v, want ErrPoolAtCapacity", err)
@@ -132,7 +137,7 @@ func TestAdmission_usageLimitSkipsTheReconcile(t *testing.T) {
 	rec := &fakeReconciler{}
 	full := fullPool
 	full.UsageLimit = &ccpool.UsageLimit{Window: "five_hour", UsedPct: 100, ResetsAt: time.Date(2026, 10, 6, 17, 0, 0, 0, time.UTC)}
-	e, cc, d := admissionRun(t, rec, full)
+	e, cc, d := admissionRun(t, rec.admission(), full)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolAtCapacity) || !strings.Contains(err.Error(), "usage limit") {
 		t.Fatalf("err = %v, want the usage-limit decline", err)
@@ -143,9 +148,9 @@ func TestAdmission_usageLimitSkipsTheReconcile(t *testing.T) {
 }
 
 func TestAdmission_nilOrFailingReconcilerDeclinesCleanly(t *testing.T) {
-	for name, rec := range map[string]Reconciler{
+	for name, rec := range map[string]*Admission{
 		"nil":     nil,
-		"failing": &fakeReconciler{err: errors.New("reconcile boom")},
+		"failing": (&fakeReconciler{err: errors.New("reconcile boom")}).admission(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, cc, d := admissionRun(t, rec, fullPool, freePool)
@@ -165,7 +170,7 @@ func TestAdmission_nilOrFailingReconcilerDeclinesCleanly(t *testing.T) {
 
 func TestAdmission_rateLimitedReconcileDeclinesWithoutRecheck(t *testing.T) {
 	rec := &fakeReconciler{outcome: ReconcileOutcome{Skipped: true}}
-	e, cc, d := admissionRun(t, rec, fullPool, freePool)
+	e, cc, d := admissionRun(t, rec.admission(), fullPool, freePool)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolAtCapacity) || !strings.Contains(err.Error(), "found nothing recently") {
 		t.Fatalf("err = %v, want an at-capacity decline noting the recent reconcile", err)
@@ -177,7 +182,7 @@ func TestAdmission_rateLimitedReconcileDeclinesWithoutRecheck(t *testing.T) {
 
 func TestAdmission_capacityUnreadableAfterReconcileFailsClosed(t *testing.T) {
 	rec := &fakeReconciler{outcome: ReconcileOutcome{Closed: 1}}
-	e, cc, d := admissionRun(t, rec, fullPool, freePool)
+	e, cc, d := admissionRun(t, rec.admission(), fullPool, freePool)
 	cc.errAt = 2
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolCapacityUnknown) || errors.Is(err, ErrPoolAtCapacity) {
@@ -187,7 +192,7 @@ func TestAdmission_capacityUnreadableAfterReconcileFailsClosed(t *testing.T) {
 
 func TestAdmission_ownWorktreeCheckedBeforeIsolation(t *testing.T) {
 	rec := &fakeReconciler{wtErr: errors.New("worktree check boom")}
-	e, cc, d := admissionRun(t, rec, freePool)
+	e, cc, d := admissionRun(t, rec.admission(), freePool)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrLaunchFailed) {
 		t.Fatalf("err = %v, want the dispatch to continue past a failed own-worktree check", err)

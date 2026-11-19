@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dispatchlib"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
+	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/cmdruntest"
@@ -89,10 +90,23 @@ func dispatchWith(t *testing.T, name string, cfg map[string]any, cfgPath, event 
 	return dispatchCtx(context.Background(), t, name, cfg, cfgPath, event)
 }
 
+// testWiring is the production wiring with no origin guard: no test depends on
+// a pg-origin-guard installed on the machine running it.
+func testWiring() wiring {
+	w := newWiring()
+	w.newGuardCheck = func(config.Config) originguard.Check { return nil }
+	return w
+}
+
 func dispatchCtx(ctx context.Context, t *testing.T, name string, cfg map[string]any, cfgPath, event string) (int, string) {
 	t.Helper()
+	return dispatchCtxWith(testWiring(), ctx, t, name, cfg, cfgPath, event)
+}
+
+func dispatchCtxWith(w wiring, ctx context.Context, t *testing.T, name string, cfg map[string]any, cfgPath, event string) (int, string) {
+	t.Helper()
 	var out bytes.Buffer
-	code := serveDispatch(ctx, strings.NewReader(dtest.Request(event, name, cfg)), &out, cfgPath, buildDepsUnderTest)
+	code := w.serveDispatch(ctx, strings.NewReader(dtest.Request(event, name, cfg)), &out, cfgPath, buildDepsUnderTest)
 	return code, out.String()
 }
 

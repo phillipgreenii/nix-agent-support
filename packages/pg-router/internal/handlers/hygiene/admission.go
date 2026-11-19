@@ -22,7 +22,7 @@ import (
 //
 //   - runOrphanUnit: this role's orphans, as ONE unit before the plan and the
 //     capacity check, over the ONE pool listing the plan then reuses.
-//   - poolReconciler: the executor's Reconciler seam, built here because the
+//   - poolReconciler: the executor's Admission seam, built here because the
 //     passes live in this package.
 
 // closedReconcileStampPrefix names the per-pool negative-cache stamp in the lock
@@ -64,7 +64,7 @@ func (s Sweeper) RunOrphanUnit(ctx context.Context, role roles.Role, cfg config.
 	return deps
 }
 
-// poolReconciler implements executor.Reconciler over this package's passes.
+// poolReconciler implements the executor.Admission funcs over this package's passes.
 type poolReconciler struct {
 	role roles.Role
 	cfg  config.Config
@@ -85,12 +85,14 @@ func (p poolReconciler) probe() cwdProbe {
 	return p.sweeper.liveCWDs
 }
 
-// NewPoolReconciler builds the dispatch-path reconciler over the Sweeper's ports.
-func (s Sweeper) NewPoolReconciler(role roles.Role, cfg config.Config, deps executor.Deps) executor.Reconciler {
+// NewAdmission builds the executor's Admission port over this package's passes
+// and the Sweeper's ports, for role's pool; nil when the role has no ccpool block.
+func (s Sweeper) NewAdmission(role roles.Role, cfg config.Config, deps executor.Deps) *executor.Admission {
 	if role.CCPool == nil {
 		return nil
 	}
-	return poolReconciler{role: role, cfg: cfg, deps: deps, sweeper: s}
+	p := poolReconciler{role: role, cfg: cfg, deps: deps, sweeper: s}
+	return &executor.Admission{ReconcileClosedBeads: p.ReconcileClosedBeads, ReclaimLeakedWorktree: p.ReclaimLeakedWorktree}
 }
 
 // stampPath is the pool's negative-cache stamp: one file per pool, named by a
@@ -140,7 +142,7 @@ func (p poolReconciler) stampNothingFound() {
 	}
 }
 
-// ReconcileClosedBeads implements executor.Reconciler: the closed-bead pass over
+// ReconcileClosedBeads implements executor.Admission.ReconcileClosedBeads: the closed-bead pass over
 // the role's own pool, unless one found nothing within the interval.
 func (p poolReconciler) ReconcileClosedBeads(ctx context.Context) (executor.ReconcileOutcome, error) {
 	if p.recentlyFoundNothing() {
@@ -158,7 +160,7 @@ func (p poolReconciler) ReconcileClosedBeads(ctx context.Context) (executor.Reco
 	return executor.ReconcileOutcome{}, nil
 }
 
-// ReclaimLeakedWorktree implements executor.Reconciler: the worktree-keyed
+// ReclaimLeakedWorktree implements executor.Admission.ReclaimLeakedWorktree: the worktree-keyed
 // sweep's cheap pre-filter and guarded reclaim (reclaimLeakedWorktree re-checks
 // everything under the exclusive per-bead lock) applied to ONE bead's worktree.
 func (p poolReconciler) ReclaimLeakedWorktree(ctx context.Context, beadID string) error {

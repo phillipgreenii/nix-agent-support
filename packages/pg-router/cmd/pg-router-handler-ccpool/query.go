@@ -54,7 +54,7 @@ type queryRequest struct {
 // The --query-config-present branch is this module's own INTF-CCH-BEADS
 // query-surface half (docs/behavior/interfaces.md) — this module's
 // beads-backed source querying bd for events.
-func runQuery(args []string) int {
+func (w wiring) runQuery(args []string) int {
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	queryConfigPath := fs.String("query-config", os.Getenv(envQueryConfig), "path to this process's own beads-backed query config JSON (or "+envQueryConfig+")")
@@ -127,7 +127,7 @@ func runQuery(args []string) int {
 	// unconfigured invocation (no --query-config; TestLiveQuery's own case) must
 	// stay a pure, side-effect-free stub reply, never touching a real ccpool/bd.
 	// Best effort: logged, never turned into a query failure.
-	if closed := sweeper.ReconcileDefaultPool(ctx, cfg); closed > 0 {
+	if closed := w.sweeper.ReconcileDefaultPool(ctx, cfg); closed > 0 {
 		slog.Info("query: reconciled stale default-pool sessions with closed beads", "closed", closed)
 	}
 	events, err := queryBeadsReady(ctx, br, qf)

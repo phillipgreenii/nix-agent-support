@@ -13,8 +13,8 @@ import (
 // A dispatch does not run the housekeeping passes before its capacity check (the
 // janitor does). It pays only for what THIS call
 // needs: when the pool is full and no usage limit is in force it asks the
-// Reconciler to close the pool's closed-bead sessions once and re-checks capacity
-// once, and before it prepares its own bead's worktree it asks the Reconciler to
+// Admission port to close the pool's closed-bead sessions once and re-checks capacity
+// once, and before it prepares its own bead's worktree it asks the port to
 // examine that one worktree. The passes themselves live in package main (the
 // executor cannot import it), so they reach the executor through this seam; the
 // closure is built where cfg.RepoRoot, the worktree directory, the git opener and
@@ -29,23 +29,24 @@ type ReconcileOutcome struct {
 	Skipped bool
 }
 
-// Reconciler is the executor's seam to the handler's housekeeping passes. A nil
-// Reconciler in Deps, or an error from either method, never fails a dispatch.
-type Reconciler interface {
+// Admission is the executor's seam to the handler's housekeeping passes, a port
+// the hygiene Sweeper builds. A nil Admission in Deps, or an error from either
+// func, never fails a dispatch.
+type Admission struct {
 	// ReconcileClosedBeads closes the sessions of the dispatching role's pool whose
 	// bead has closed (INV-CCH-14, INV-CCH-20), rate-limited per pool by the
 	// negative cache (INV-CCH-41).
-	ReconcileClosedBeads(ctx context.Context) (ReconcileOutcome, error)
+	ReconcileClosedBeads func(ctx context.Context) (ReconcileOutcome, error)
 	// ReclaimLeakedWorktree applies the guarded worktree-keyed examination
 	// (INV-CCH-19) to ONE bead's worktree, so a worktree its own bead leaked is
 	// not reused as if it were fresh.
-	ReclaimLeakedWorktree(ctx context.Context, beadID string) error
+	ReclaimLeakedWorktree func(ctx context.Context, beadID string) error
 }
 
 // admissionActive reports whether this dispatch can do its housekeeping on
-// demand (a Reconciler is wired).
+// demand (an Admission is wired).
 func (r *ccpoolRun) admissionActive() bool {
-	return r.deps.Reconciler != nil
+	return r.deps.Admission != nil
 }
 
 // reconcileForCapacity runs the closed-bead reconcile once for a dispatch that
@@ -53,7 +54,7 @@ func (r *ccpoolRun) admissionActive() bool {
 // tried, for the decline's detail text ("" when nothing was). It never loops: the
 // caller calls it at most once per dispatch.
 func (r *ccpoolRun) reconcileForCapacity(ctx context.Context, d DispatchContext, before ccpool.Capacity) (after ccpool.Capacity, note string, capErr error) {
-	out, err := r.deps.Reconciler.ReconcileClosedBeads(ctx)
+	out, err := r.deps.Admission.ReconcileClosedBeads(ctx)
 	switch {
 	case err != nil:
 		slog.Warn("capacity-pressure reconcile failed; declining", "role", d.Role.Name, "bead", d.Item.ID, "err", err)

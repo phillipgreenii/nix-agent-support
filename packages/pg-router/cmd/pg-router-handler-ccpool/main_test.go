@@ -8,10 +8,8 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-router/conformance"
-	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/corecall"
 	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
-	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 )
 
@@ -56,7 +54,6 @@ func TestMain(m *testing.M) {
 	}
 	isolateAmbientEnv()
 	// No test depends on a pg-origin-guard installed on the machine running it.
-	newGuardCheck = func(config.Config) originguard.Check { return nil }
 	// No test depends on lsof: the closed-bead teardown sees no live process
 	// unless a test sets its own probe.
 	hygiene.DisableTeardownProbe()

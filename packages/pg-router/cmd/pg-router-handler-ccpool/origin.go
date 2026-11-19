@@ -165,9 +165,9 @@ func writeGuardStatus(w io.Writer, cfg config.Config, check originguard.Check, r
 // There is deliberately no "pause an origin" verb: the gate auto-clears on the
 // first ok probe, so a hand-set pause would fight it. Use the global
 // pg-router pause instead.
-func runOrigin(args []string) int { return runOriginTo(args, os.Stdout, os.Stderr) }
+func (w wiring) runOrigin(args []string) int { return w.runOriginTo(args, os.Stdout, os.Stderr) }
 
-func runOriginTo(args []string, stdout, stderr io.Writer) int {
+func (w wiring) runOriginTo(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("origin", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var roleFiles stringList
@@ -204,7 +204,7 @@ func runOriginTo(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "origin status:", err)
 			return conformance.ExitError
 		}
-		if err := writeGuardStatus(stdout, cfg, newGuardCheck(cfg), roleFiles); err != nil {
+		if err := writeGuardStatus(stdout, cfg, w.newGuardCheck(cfg), roleFiles); err != nil {
 			fmt.Fprintln(stderr, "origin status:", err)
 			return conformance.ExitError
 		}
@@ -266,8 +266,7 @@ There is no "pause an origin" verb: the gate auto-clears on the first ok probe,
 so a hand-set pause would fight it. Use the global pg-router pause for that.
 `
 
-// newGuardCheck builds the production pg-origin-guard Check for cfg. A package
-// variable so a test can substitute a fake without a binary on PATH.
-var newGuardCheck = func(cfg config.Config) originguard.Check {
+// productionGuardCheck builds the production pg-origin-guard Check for cfg.
+func productionGuardCheck(cfg config.Config) originguard.Check {
 	return originguard.ExecCheck(cfg.OriginProbe.GuardBin)
 }

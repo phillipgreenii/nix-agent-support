@@ -108,7 +108,7 @@ func (e *admissionEnv) dispatch(t *testing.T, event string) (int, map[string]any
 		return executor.Deps{CC: e.cc, BD: e.bd, Cfg: c, LockDir: e.lockDir, Now: func() time.Time { return e.now }}
 	}
 	var out bytes.Buffer
-	code := serveDispatch(context.Background(), strings.NewReader(dtest.Request(event, "worker", cfg)), &out, e.cfgPath, mk)
+	code := testWiring().serveDispatch(context.Background(), strings.NewReader(dtest.Request(event, "worker", cfg)), &out, e.cfgPath, mk)
 	var reply map[string]any
 	_ = json.Unmarshal(out.Bytes(), &reply)
 	return code, reply
@@ -322,7 +322,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 	cfg.WorktreeDir = wtDir
 	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
 	cc := &poolCC{OrphanCC: &dtest.OrphanCC{}}
-	r := (hygiene.Sweeper{}).NewPoolReconciler(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
+	r := (hygiene.Sweeper{}).NewAdmission(role, cfg, executor.Deps{CC: cc, Cfg: cfg, LockDir: t.TempDir()})
 	if err := r.ReclaimLeakedWorktree(context.Background(), "zr-w"); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestPoolReconciler_ownWorktreeCheckSkipsWhatIsNotACandidate(t *testing.T) {
 			t.Fatalf("%q: %v", bad, err)
 		}
 	}
-	if (hygiene.Sweeper{}).NewPoolReconciler(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
+	if (hygiene.Sweeper{}).NewAdmission(roles.Role{Name: "plain"}, cfg, executor.Deps{}) != nil {
 		t.Fatal("a role without a ccpool block has no reconciler")
 	}
 }

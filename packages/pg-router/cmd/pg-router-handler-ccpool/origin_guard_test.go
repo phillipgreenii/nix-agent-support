@@ -82,15 +82,14 @@ func TestOriginGate_noRepoRootIsNotChecked(t *testing.T) {
 func TestDispatch_guardUnavailableDeclinesWithoutBeadsCalls(t *testing.T) {
 	cfgPath, _, calls := originFixture(t, t.TempDir())
 	// no watched origin matches: only the guard can decline.
-	old := newGuardCheck
-	newGuardCheck = func(config.Config) originguard.Check {
+	w := testWiring()
+	w.newGuardCheck = func(config.Config) originguard.Check {
 		return func(context.Context, string) (originguard.Verdict, error) {
 			return originguard.Verdict{Reason: "no-human"}, nil
 		}
 	}
-	t.Cleanup(func() { newGuardCheck = old })
 	r := workerWithIsolation(t, `{}`)
-	code, out := dispatchWith(t, r.name, r.cfg, cfgPath, dtest.DefaultEvent)
+	code, out := dispatchCtxWith(w, context.Background(), t, r.name, r.cfg, cfgPath, dtest.DefaultEvent)
 	if code != conformance.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
 		t.Fatalf("exit=%d out=%q, want a busy origin-unavailable decline", code, out)
 	}

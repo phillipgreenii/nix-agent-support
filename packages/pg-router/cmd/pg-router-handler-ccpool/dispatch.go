@@ -39,7 +39,7 @@ import (
 // The dispatch's orphan unit and the executor's on-demand reconciler (see
 // admission.go) are set up here too, after the per-attempt external id and
 // before the precheck.
-func runDispatch(args []string) int {
+func (w wiring) runDispatch(args []string) int {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cfgPath := fs.String("config", os.Getenv(rolefile.EnvConfig), "path to this process's own launch config JSON (or "+rolefile.EnvConfig+")")
@@ -61,13 +61,13 @@ func runDispatch(args []string) int {
 	// No TERM/INT handler: like the old binary, a signal ends the process and the
 	// ccpool session it launched keeps running to be adopted by the next dispatch
 	// (INV-CCH-30).
-	return serveDispatch(context.Background(), os.Stdin, os.Stdout, *cfgPath, dispatchlib.BuildDeps)
+	return w.serveDispatch(context.Background(), os.Stdin, os.Stdout, *cfgPath, dispatchlib.BuildDeps)
 }
 
 // serveDispatch is runDispatch's testable core: ctx is the dispatch context
 // (cancel it to cancel the dispatch, which never declines) and mkDeps builds the
 // executor seams, so a test keeps bd and ccpool off the machine.
-func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPath string, mkDeps func(config.Config, roles.Role) executor.Deps) int {
+func (w wiring) serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPath string, mkDeps func(config.Config, roles.Role) executor.Deps) int {
 	raw, ro, exit, ok := rolefile.ReadRequest("dispatch", "handler.dispatch", stdin, stdout)
 	if !ok {
 		return exit
@@ -92,7 +92,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// dispatch_decline record (INV-CCH-35) to the handler's event log just before
 	// its reply.
 	declineLog := handlerstate.NewEventLog(cfg)
-	if reason, declined := originGate(ctx, newOriginProber(cfg), newGuardCheck(cfg), role, cfg, dctx.Item.ID); declined {
+	if reason, declined := originGate(ctx, newOriginProber(cfg), w.newGuardCheck(cfg), role, cfg, dctx.Item.ID); declined {
 		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, wire.NeutralDecline(reason, ""), dctx.EventID, dctx.DispatchID)
 		return conformance.ExitBusy
 	}
@@ -112,11 +112,11 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// The dispatch runs only its role's orphans, as one unit, so a reclaimed
 	// orphan frees its slot for this very dispatch; the executor reconciles
 	// closed-bead sessions on capacity pressure and checks its own bead's
-	// worktree, through the Reconciler seam. Best effort, never a dispatch
+	// worktree, through the Admission port. Best effort, never a dispatch
 	// failure.
-	deps = sweeper.RunOrphanUnit(ctx, role, cfg, deps)
-	if deps.Reconciler == nil {
-		deps.Reconciler = sweeper.NewPoolReconciler(role, cfg, deps)
+	deps = w.sweeper.RunOrphanUnit(ctx, role, cfg, deps)
+	if deps.Admission == nil {
+		deps.Admission = w.sweeper.NewAdmission(role, cfg, deps)
 	}
 
 	// Zero-model-cost precheck (INV-CCH-22): a dispatch whose bead no longer

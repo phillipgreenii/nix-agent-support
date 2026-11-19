@@ -40,23 +40,22 @@ import (
 
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/cliutil"
-	"github.com/phillipgreenii/pg-router/internal/handlers/hygiene"
 	"github.com/phillipgreenii/x/jsonllogger"
 )
 
 var version = "dev"
 
-// sweeper carries the hygiene passes (janitor, orphan unit, reconcile, worktree
-// sweeps) and the ports they need from this command.
-var sweeper = hygiene.Sweeper{Version: version, Help: helpText}
-
 func main() {
-	sweeper.InstallProductionGauges()
+	w := newWiring()
+	w.sweeper.InstallProductionGauges()
 	slog.SetDefault(jsonllogger.NewLogger(os.Stderr, jsonllogger.WithService("pg-router-handler-ccpool")))
-	os.Exit(run(os.Args[1:]))
+	os.Exit(w.run(os.Args[1:]))
 }
 
-func run(args []string) int {
+// run is the command with its production wiring.
+func run(args []string) int { return newWiring().run(args) }
+
+func (w wiring) run(args []string) int {
 	if len(args) == 0 {
 		cliutil.PrintUsageErr("pg-router-handler-ccpool: a subcommand is required", usageLine)
 		return conformance.ExitUsage
@@ -73,7 +72,7 @@ func run(args []string) int {
 	case "self-status":
 		return runSelfStatus(args[1:])
 	case "dispatch":
-		return runDispatch(args[1:])
+		return w.runDispatch(args[1:])
 	case "postStartup":
 		return runPostStartup(args[1:])
 	case "preShutdown":
@@ -81,17 +80,17 @@ func run(args []string) int {
 	case "validate":
 		return runValidate(args[1:])
 	case "origin":
-		return runOrigin(args[1:])
+		return w.runOrigin(args[1:])
 	case "pool-capacity":
 		return runPoolCapacity(args[1:])
 	case "split":
 		return runSplit(args[1:])
 	case "query":
-		return runQuery(args[1:])
+		return w.runQuery(args[1:])
 	case "janitor":
-		return sweeper.RunJanitor(args[1:])
+		return w.sweeper.RunJanitor(args[1:])
 	case "remove-worktree":
-		return sweeper.RunRemoveWorktree(args[1:])
+		return w.sweeper.RunRemoveWorktree(args[1:])
 	default:
 		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-ccpool: unknown subcommand %q", args[0]), usageLine)
 		return conformance.ExitUsage

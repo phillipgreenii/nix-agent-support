@@ -341,7 +341,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		// worktree this bead's own earlier attempt leaked is reclaimed, under the
 		// sweep's guards, rather than reused as if it were fresh (INV-CCH-19).
 		if r.admissionActive() {
-			if err := r.deps.Reconciler.ReclaimLeakedWorktree(ctx, d.Item.ID); err != nil {
+			if err := r.deps.Admission.ReclaimLeakedWorktree(ctx, d.Item.ID); err != nil {
 				slog.Warn("own-bead worktree check failed; continuing", "bead", d.Item.ID, "err", err)
 			}
 		}

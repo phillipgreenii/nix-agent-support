@@ -145,7 +145,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	cfgPath, stateDir, _ := originFixture(t, missing)
 
 	var out, errb bytes.Buffer
-	if code := runOriginTo([]string{"status", "--config", cfgPath}, &out, &errb); code != conformance.ExitOK {
+	if code := testWiring().runOriginTo([]string{"status", "--config", cfgPath}, &out, &errb); code != conformance.ExitOK {
 		t.Fatalf("status exit = %d stderr=%s", code, errb.String())
 	}
 	wantUnchecked := "KEY                   CLASS      GATED  IGNORED  SINCE  FAILURES  LAST_ERROR\n" +
@@ -155,7 +155,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := runOriginTo([]string{"ignore", "--config", cfgPath, "git.example.test/o/a"}, &out, &errb); code != conformance.ExitOK {
+	if code := testWiring().runOriginTo([]string{"ignore", "--config", cfgPath, "git.example.test/o/a"}, &out, &errb); code != conformance.ExitOK {
 		t.Fatalf("ignore exit = %d stderr=%s", code, errb.String())
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "origin-state", "git.example.test__o__a.disable")); err != nil {
@@ -168,7 +168,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := runOriginTo([]string{"status", "--config", cfgPath}, &out, &errb); code != conformance.ExitOK {
+	if code := testWiring().runOriginTo([]string{"status", "--config", cfgPath}, &out, &errb); code != conformance.ExitOK {
 		t.Fatalf("status exit = %d", code)
 	}
 	if !strings.Contains(out.String(), "unchecked  false  true") {
@@ -176,7 +176,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := runOriginTo([]string{"unignore", "--config", cfgPath, "git.example.test/o/a"}, &out, &errb); code != conformance.ExitOK {
+	if code := testWiring().runOriginTo([]string{"unignore", "--config", cfgPath, "git.example.test/o/a"}, &out, &errb); code != conformance.ExitOK {
 		t.Fatalf("unignore exit = %d", code)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "origin-state", "git.example.test__o__a.disable")); err == nil {
@@ -195,7 +195,7 @@ func TestOrigin_usageErrors(t *testing.T) {
 		"traversal key":    {"ignore", "--config", cfgPath, "../../etc/passwd"},
 	} {
 		var out, errb bytes.Buffer
-		if code := runOriginTo(args, &out, &errb); code != conformance.ExitUsage {
+		if code := testWiring().runOriginTo(args, &out, &errb); code != conformance.ExitUsage {
 			t.Errorf("%s: exit = %d, want ExitUsage (%d)", name, code, conformance.ExitUsage)
 		}
 	}
@@ -220,17 +220,16 @@ func TestOrigin_statusListsGuardRoots(t *testing.T) {
 		return f
 	}
 
-	old := newGuardCheck
-	newGuardCheck = func(config.Config) originguard.Check {
+	w := testWiring()
+	w.newGuardCheck = func(config.Config) originguard.Check {
 		return func(_ context.Context, repo string) (originguard.Verdict, error) {
 			return originguard.Verdict{Available: false, Reason: "mount-missing"}, nil
 		}
 	}
-	t.Cleanup(func() { newGuardCheck = old })
 
 	var out, errb bytes.Buffer
 	args := []string{"status", "--config", cfgPath, "--role", writeRole(wsRoot), "--role", writeRole(gone)}
-	if code := runOriginTo(args, &out, &errb); code != conformance.ExitOK {
+	if code := w.runOriginTo(args, &out, &errb); code != conformance.ExitOK {
 		t.Fatalf("status exit = %d stderr=%s", code, errb.String())
 	}
 	got := out.String()
