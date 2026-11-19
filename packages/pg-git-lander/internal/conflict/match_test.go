@@ -9,6 +9,7 @@ import (
 )
 
 func TestMatchRulesFirstMatchLayerOrderAndDefault(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{
 		Rules: []config.Rule{
 			{ID: "xdg-repo:1:*.lock", Glob: "*.lock"},
@@ -53,6 +54,7 @@ func TestMatchRulesFirstMatchLayerOrderAndDefault(t *testing.T) {
 }
 
 func TestHasMarkers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, body string
 		want       bool

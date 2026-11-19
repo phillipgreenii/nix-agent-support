@@ -175,6 +175,7 @@ func rule(id, glob, runPer string, resolve ...string) config.Rule {
 }
 
 func TestNoMatchingRuleRunsNothingAndLeavesGitsConflict(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	marker := filepath.Join(f.scripts, "ran")
 	s := f.script("r.sh", "touch "+marker)
@@ -200,6 +201,7 @@ func TestNoMatchingRuleRunsNothingAndLeavesGitsConflict(t *testing.T) {
 }
 
 func TestFileModeRunsOncePerPathInRootWithContractVariables(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	log := filepath.Join(f.scripts, "log")
 	s := f.script("r.sh", `{
@@ -237,6 +239,7 @@ echo merged > "$PG_GIT_LANDER_PATH"`)
 }
 
 func TestDirModeRunsOncePerDirectoryInThatDirectory(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	log := filepath.Join(f.scripts, "log")
 	s := f.script("r.sh", `echo "cwd=$(pwd -P) dir=$PG_GIT_LANDER_DIR path=${PG_GIT_LANDER_PATH-unset}" >> `+log+`
@@ -258,6 +261,7 @@ for f in *.txt; do echo merged > "$f"; done`)
 }
 
 func TestFirstMatchingRuleWinsAndConflictDefaultCatchesTheRest(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	first := f.script("first.sh", `echo first > "$PG_GIT_LANDER_PATH"`)
 	second := f.script("second.sh", `echo second > "$PG_GIT_LANDER_PATH"`)
@@ -277,6 +281,7 @@ func TestFirstMatchingRuleWinsAndConflictDefaultCatchesTheRest(t *testing.T) {
 }
 
 func TestResolverExitCodes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		body   string
@@ -314,6 +319,7 @@ func TestResolverExitCodes(t *testing.T) {
 }
 
 func TestMarkersLeftStopsAndMarkdownUnderlineIsNotAMarker(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	bad := f.script("bad.sh", `printf 'a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n' > "$PG_GIT_LANDER_PATH"`)
 	f.cfg.Rules = []config.Rule{rule("r", "*", "file", bad)}
@@ -337,6 +343,7 @@ func TestMarkersLeftStopsAndMarkdownUnderlineIsNotAMarker(t *testing.T) {
 }
 
 func TestVerifyFailureAndSuccess(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	log := filepath.Join(f.scripts, "verify.log")
 	res1 := f.script("r.sh", `echo merged > "$PG_GIT_LANDER_PATH"`)
@@ -377,6 +384,7 @@ func TestVerifyFailureAndSuccess(t *testing.T) {
 }
 
 func TestTimeoutKillsTheProcessGroup(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	pidf := filepath.Join(f.scripts, "pid")
 	s := f.script("r.sh", `sleep 30 &
@@ -456,6 +464,7 @@ func (f *fx) plantPreCommit(body string) {
 }
 
 func TestResolutionCommitKeepsMessageAuthorAndRunsGitHooks(t *testing.T) {
+	t.Parallel()
 	for _, runHooks := range []bool{true, false} {
 		f := newFx(t)
 		hookLog := filepath.Join(f.scripts, "hook.log")
@@ -487,6 +496,7 @@ func TestResolutionCommitKeepsMessageAuthorAndRunsGitHooks(t *testing.T) {
 }
 
 func TestRejectedResolutionCommitStopsCommitRejected(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	s := f.script("r.sh", `echo merged > "$PG_GIT_LANDER_PATH"`)
 	f.cfg.Rules = []config.Rule{rule("r", "*", "file", s)}
@@ -499,6 +509,7 @@ func TestRejectedResolutionCommitStopsCommitRejected(t *testing.T) {
 }
 
 func TestEmptyResolutionIsSkippedAndListedAsDropped(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	s := f.script("keep-onto.sh", `cp "$PG_GIT_LANDER_ONTO_FILE" "$PG_GIT_LANDER_PATH"`)
 	f.cfg.Rules = []config.Rule{rule("r", "*", "file", s)}
@@ -531,6 +542,7 @@ func (f *fx) twoRounds() {
 }
 
 func TestRoundsAreCountedAndKeptAcrossCalls(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	s := f.script("r.sh", `echo merged-$PG_GIT_LANDER_REPLAYED_COMMIT > "$PG_GIT_LANDER_PATH"`)
 	f.cfg.Rules = []config.Rule{rule("r", "*", "file", s)}
@@ -545,6 +557,7 @@ func TestRoundsAreCountedAndKeptAcrossCalls(t *testing.T) {
 }
 
 func TestMaxConflictRoundsStopsAfterTheBound(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	s := f.script("r.sh", `echo merged-$PG_GIT_LANDER_REPLAYED_COMMIT > "$PG_GIT_LANDER_PATH"`)
 	f.cfg.Rules = []config.Rule{rule("r", "*", "file", s)}
@@ -576,6 +589,7 @@ func TestMaxConflictRoundsStopsAfterTheBound(t *testing.T) {
 }
 
 func TestRealMergeDriverRunsInsideTheRebaseAndIsNamedInResolved(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	driverLog := filepath.Join(f.scripts, "driver.log")
 	drv := f.script("driver.sh", `echo "home=$HOME" >> `+driverLog+`
@@ -637,6 +651,7 @@ func contains(s []string, v string) bool {
 // accept the flag there. The resolution commit is the only call that does when
 // git hooks are off, which is what the tool's --no-verify sets.
 func TestRebaseContinueAndSkipArgvCarryNoNoVerify(t *testing.T) {
+	t.Parallel()
 	for _, skip := range []bool{false, true} {
 		f := newFx(t)
 		var calls []string

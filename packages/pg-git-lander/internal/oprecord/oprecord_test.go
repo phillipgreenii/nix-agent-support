@@ -93,6 +93,7 @@ func (f *fx) begin() *Op {
 }
 
 func TestNewOpIDForm(t *testing.T) {
+	t.Parallel()
 	id, err := NewOpID(time.Date(2026, 11, 7, 10, 15, 0, 0, time.UTC), strings.NewReader("\x3f\x9c\x2a"))
 	if err != nil || id != "20261107T101500Z-3f9c2a" {
 		t.Fatalf("%q %v", id, err)
@@ -104,6 +105,7 @@ func TestNewOpIDForm(t *testing.T) {
 }
 
 func TestBeginWritesEveryFieldOfTheExampleRecord(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.begin()
 	st := f.read(locks.BranchRef("feature/x"))
@@ -154,6 +156,7 @@ func TestBeginWritesEveryFieldOfTheExampleRecord(t *testing.T) {
 }
 
 func TestCanonicalMapsTheStageNamesOfAFormerVersion(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"after_rebase": StagePostRebaseFix, "before_move": StagePreMergeVerify, "after": StageCleanup,
 		"rebasing": StageRebasing, "moving": StageMoving, "cleanup": StageCleanup,
@@ -166,6 +169,7 @@ func TestCanonicalMapsTheStageNamesOfAFormerVersion(t *testing.T) {
 }
 
 func TestNoVerifyIsRecordedAndSticky(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := f.begin()
 	if f.read(locks.BranchRef("feature/x")).Rec.NoVerify {
@@ -185,6 +189,7 @@ func TestNoVerifyIsRecordedAndSticky(t *testing.T) {
 }
 
 func TestEachStageIsWrittenWithTipsResult(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := f.begin()
 	for i, stage := range Stages[1:] {
@@ -215,6 +220,7 @@ func TestEachStageIsWrittenWithTipsResult(t *testing.T) {
 }
 
 func TestMoveIntentIsWrittenBeforeTheMove(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := f.begin()
 	if err := op.SetMove(t.Context(), "9a10"); err != nil {
@@ -235,6 +241,7 @@ func TestMoveIntentIsWrittenBeforeTheMove(t *testing.T) {
 }
 
 func TestFieldWritersPersist(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := f.begin()
 	ctx := t.Context()
@@ -258,6 +265,7 @@ func TestFieldWritersPersist(t *testing.T) {
 }
 
 func TestStopTurnsRecordsStoppedAndDeletesTargetInOneTransaction(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := f.begin()
 	ctx := t.Context()
@@ -293,6 +301,7 @@ func TestStopTurnsRecordsStoppedAndDeletesTargetInOneTransaction(t *testing.T) {
 }
 
 func TestStopIsAtomicWhenARecordChangedHands(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := f.begin()
 	ctx := t.Context()
@@ -327,6 +336,7 @@ func (f *fx) stoppedAt(reason outcome.StopReason, stage string) {
 }
 
 func TestTakeBackThenResumeLocksThenFinish(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.stoppedAt(outcome.StopRace, StageMoving)
 	ctx := t.Context()
@@ -362,6 +372,7 @@ func TestTakeBackThenResumeLocksThenFinish(t *testing.T) {
 // An earlier stage takes only the branch-side locks; TARGET and a worktree
 // whose only role is destination are left to the run's lock point.
 func TestResumeBeforeStageMovingLeavesTargetAndDestinationAlone(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		stage string
 		takes bool
@@ -376,6 +387,7 @@ func TestResumeBeforeStageMovingLeavesTargetAndDestinationAlone(t *testing.T) {
 		{StageCleanup, true},
 	} {
 		t.Run(c.stage, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			f.stoppedAt(outcome.StopConflict, c.stage)
 			ctx := t.Context()
@@ -409,6 +421,7 @@ func TestResumeBeforeStageMovingLeavesTargetAndDestinationAlone(t *testing.T) {
 }
 
 func TestAcquireTargetIsIdempotentAndReleaseTargetGivesBackOnlyThoseLocks(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	p := params()
@@ -443,6 +456,7 @@ func TestAcquireTargetIsIdempotentAndReleaseTargetGivesBackOnlyThoseLocks(t *tes
 }
 
 func TestTwoConcurrentTakeBacksExactlyOneWins(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.stopped(outcome.StopConflict)
 	var wg sync.WaitGroup
@@ -473,6 +487,7 @@ func TestTwoConcurrentTakeBacksExactlyOneWins(t *testing.T) {
 }
 
 func TestTakeBackRefusals(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	var ref *locks.RefusedError
 	_, err := TakeBack(t.Context(), f.l, "feature/x", owner("x"))
@@ -490,6 +505,7 @@ func TestTakeBackRefusals(t *testing.T) {
 }
 
 func TestBusyLocksAfterTakeBackSwapEverythingBackToStopped(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.stoppedAt(outcome.StopRace, StageMoving)
 	ctx := t.Context()
@@ -528,6 +544,7 @@ func TestBusyLocksAfterTakeBackSwapEverythingBackToStopped(t *testing.T) {
 }
 
 func TestQuitDeletesAllRecordsIncludingStoppedWorktreeRecords(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.stopped(outcome.StopConflict)
 	ctx := t.Context()
@@ -546,6 +563,7 @@ func TestQuitDeletesAllRecordsIncludingStoppedWorktreeRecords(t *testing.T) {
 }
 
 func TestContextAndKeepFlagsSurviveAStopAndTakeBack(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.stopped(outcome.StopTransient)
 	res, err := TakeBack(t.Context(), f.l, "feature/x", owner("bbbb"))
@@ -562,6 +580,7 @@ func TestContextAndKeepFlagsSurviveAStopAndTakeBack(t *testing.T) {
 }
 
 func TestRebaseOperationTakesNoTargetLock(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	p := params()
 	p.Operation = "rebase"

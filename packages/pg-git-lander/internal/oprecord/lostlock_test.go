@@ -53,6 +53,7 @@ func beginLand(t *testing.T, f *fx) *Op {
 }
 
 func TestLostLockWhenEveryRecordIsStillOurs(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := beginLand(t, f)
 	var killed []int
@@ -84,6 +85,7 @@ func TestLostLockWhenEveryRecordIsStillOurs(t *testing.T) {
 }
 
 func TestLostLockSwapsOnlyWhatIsStillItsOwn(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := beginLand(t, f)
 	// another run took the BRANCH record and the TARGET record
@@ -113,6 +115,7 @@ func TestLostLockSwapsOnlyWhatIsStillItsOwn(t *testing.T) {
 }
 
 func TestLostLockFromASignalIsInterrupted(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := beginLand(t, f)
 	f.steal(locks.WorktreeRef("_main"))

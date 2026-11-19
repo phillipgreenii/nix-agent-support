@@ -166,6 +166,7 @@ func (f *fx) lockFile(ref string) string {
 }
 
 func TestRefsAndAdminName(t *testing.T) {
+	t.Parallel()
 	if got := BranchRef("feature/x"); got != "refs/pg-git-lander/locks/heads/feature/x" {
 		t.Error(got)
 	}
@@ -187,6 +188,7 @@ func TestRefsAndAdminName(t *testing.T) {
 }
 
 func TestAdminNameFromRealGit(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	wt := filepath.Join(f.repo.Root(), "wt1")
 	f.mustGit(t.Context(), f.repo.Dir, "worktree", "add", "-b", "b1", wt)
@@ -206,6 +208,7 @@ func (f *fx) mustGit(ctx context.Context, dir string, args ...string) {
 }
 
 func TestRecordFormsAndParse(t *testing.T) {
+	t.Parallel()
 	b := branchRec("feature/x", "main", "op1", "feature-x")
 	b.Lease = &Lease{RenewedAt: time.Unix(1, 0).UTC(), TTLSec: 30}
 	keys := func(r Record) map[string]json.RawMessage {
@@ -269,6 +272,7 @@ func TestRecordFormsAndParse(t *testing.T) {
 }
 
 func TestAcquireWritesBlobRecordWithCreateIfAbsent(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	set, err := f.l.Acquire(ctx, Spec{Ref: BranchRef("feature/x"), Role: RoleBranch, Rec: branchRec("feature/x", "main", "op1")})
@@ -304,6 +308,7 @@ func TestAcquireWritesBlobRecordWithCreateIfAbsent(t *testing.T) {
 }
 
 func TestWaiterNeverCreatesWhileARecordExists(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ref := BranchRef("feature/x")
 	f.plant(ref, branchRec("feature/x", "main", "other"))
@@ -327,6 +332,7 @@ func TestWaiterNeverCreatesWhileARecordExists(t *testing.T) {
 }
 
 func TestBusyNamesHolderAndMessagesEveryTenSeconds(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ref := BranchRef("feature/x")
 	other := branchRec("feature/x", "main", "20261107T101500Z-3f9c2a")
@@ -354,6 +360,7 @@ func TestBusyNamesHolderAndMessagesEveryTenSeconds(t *testing.T) {
 }
 
 func TestWaiterAcquiresWhenHolderReleases(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ref := BranchRef("feature/x")
 	oid := f.plant(ref, branchRec("feature/x", "main", "other"))
@@ -376,6 +383,7 @@ func TestWaiterAcquiresWhenHolderReleases(t *testing.T) {
 }
 
 func TestRenewSwapsFromCurrentRecord(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	set, err := f.l.Acquire(ctx, Spec{Ref: BranchRef("feature/x"), Role: RoleBranch, Rec: branchRec("feature/x", "main", "me")})
@@ -435,6 +443,7 @@ func TestRenewSwapsFromCurrentRecord(t *testing.T) {
 func ptr[T any](v T) *T { return &v }
 
 func TestRenewWithChangedValueMeansLockTaken(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	set, _ := f.l.Acquire(ctx, Spec{Ref: BranchRef("feature/x"), Role: RoleBranch, Rec: branchRec("feature/x", "main", "me")})
@@ -455,6 +464,7 @@ func TestRenewWithChangedValueMeansLockTaken(t *testing.T) {
 }
 
 func TestRenewWithUnchangedValueRetriesFiveTimesThenLockLost(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	f.jit = time.Millisecond
@@ -487,6 +497,7 @@ func TestRenewWithUnchangedValueRetriesFiveTimesThenLockLost(t *testing.T) {
 }
 
 func TestRenewStopsBeforeTwoThirdsOfTheLease(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	f.jit = 8 * time.Second // each backoff costs 8 s of the 20 s (two thirds of 30 s) budget
@@ -507,6 +518,7 @@ func TestRenewStopsBeforeTwoThirdsOfTheLease(t *testing.T) {
 }
 
 func TestMaybeRenewOnlyWhileStepWithinTimeout(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	set, _ := f.l.Acquire(ctx, Spec{Ref: BranchRef("feature/x"), Role: RoleBranch, Rec: branchRec("feature/x", "main", "me")})
@@ -536,6 +548,7 @@ func TestMaybeRenewOnlyWhileStepWithinTimeout(t *testing.T) {
 }
 
 func TestRunRenewalKeepsLeaseFreshAndReportsLoss(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	f.l.Interval = 10 * time.Millisecond
@@ -568,6 +581,7 @@ func TestRunRenewalKeepsLeaseFreshAndReportsLoss(t *testing.T) {
 }
 
 func TestAcquireTakesLocksInAscendingOrder(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	op := branchRec("feature/x", "main", "me", "wt-b", "_main", "wt-b")
@@ -642,6 +656,7 @@ func sortStrings(s []string) {
 }
 
 func TestRebaseLockSetHasBranchAndWorktreesOnly(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	op := branchRec("feature/x", "main", "me", "feature-x")
 	op.Operation = "rebase"
@@ -655,6 +670,7 @@ func TestRebaseLockSetHasBranchAndWorktreesOnly(t *testing.T) {
 }
 
 func TestSetIsAllOrNothingWithReleaseAndRetry(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	op := branchRec("feature/x", "main", "me", "wt-b")
@@ -698,6 +714,7 @@ func TestSetIsAllOrNothingWithReleaseAndRetry(t *testing.T) {
 }
 
 func TestStoppedRecordRefusals(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	stopped := branchRec("main", "", "stopper")
@@ -728,6 +745,7 @@ func TestStoppedRecordRefusals(t *testing.T) {
 }
 
 func TestUnreadableRecordIsHeldByALiveHolder(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(f *fx, ref string) string{
 		"not a blob": func(f *fx, ref string) string {
 			f.mustGit(f.t.Context(), f.repo.Dir, "update-ref", ref, "HEAD")
@@ -767,6 +785,7 @@ func TestUnreadableRecordIsHeldByALiveHolder(t *testing.T) {
 }
 
 func TestWriteFailureWithUnchangedRefIsRetriedThenReported(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.jit = time.Millisecond
 	ref := BranchRef("feature/x")
@@ -781,6 +800,7 @@ func TestWriteFailureWithUnchangedRefIsRetriedThenReported(t *testing.T) {
 }
 
 func TestStaleLockFiles(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ctx := t.Context()
 	ours := f.lockFile(BranchRef("feature/x"))
@@ -821,6 +841,7 @@ func TestStaleLockFiles(t *testing.T) {
 }
 
 func TestOnWaitReportsBusyAndAcquiredAfterWaiting(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	ref := BranchRef("feature/x")
 	f.plant(ref, branchRec("feature/x", "main", "holder-op"))
@@ -858,6 +879,7 @@ func TestOnWaitReportsBusyAndAcquiredAfterWaiting(t *testing.T) {
 }
 
 func TestOnWaitSilentWithoutWaiting(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	called := false
 	f.l.OnWait = func(context.Context, LockWait) { called = true }
@@ -874,6 +896,7 @@ func TestOnWaitSilentWithoutWaiting(t *testing.T) {
 // is described from the operation's BRANCH record (the stage and its age), and a
 // stopped holder's age runs from its stop.
 func TestHolderOfShortRecordReadsTheBranchRecord(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	br := branchRec("feature/y", "main", "op-y", "wt-y")
 	br.Stage = "before_move"

@@ -71,6 +71,7 @@ func (f *fx) mustRead(ref string) ReadState {
 }
 
 func TestDeadSameHostPidIsConvertedAtOnce(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(lv *seamstest.Liveness){
 		"gone":   func(lv *seamstest.Liveness) {},
 		"reused": func(lv *seamstest.Liveness) { lv.SetAlive(deadPID, "another-start") },
@@ -78,6 +79,7 @@ func TestDeadSameHostPidIsConvertedAtOnce(t *testing.T) {
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			lv, conv := f.withLiveness()
 			setup(lv)
@@ -101,6 +103,7 @@ func TestDeadSameHostPidIsConvertedAtOnce(t *testing.T) {
 }
 
 func TestLiveSameHostPidIsNotConverted(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	lv, conv := f.withLiveness()
 	lv.SetAlive(deadPID, startToken)
@@ -117,6 +120,7 @@ func TestLiveSameHostPidIsNotConverted(t *testing.T) {
 }
 
 func TestForeignHostOnlyExpiresByObservation(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	lv, conv := f.withLiveness() // pid is "gone" here, but that is another host's pid
 	_ = lv
@@ -148,6 +152,7 @@ func TestForeignHostOnlyExpiresByObservation(t *testing.T) {
 }
 
 func TestChangedRecordRestartsTheObservation(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.withLiveness()
 	rec := branchRec(landBranch, landTarget, deadOpID, "feature-x")
@@ -201,6 +206,7 @@ func (c *stepClock) Now() time.Time {
 func (c *stepClock) Since(t time.Time) time.Duration { return c.mono - c.at[t.UnixNano()] }
 
 func TestWallClockStepNeverExpiresALiveLease(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	sc := newStepClock()
 	f.l.Clock = sc
@@ -227,6 +233,7 @@ func TestWallClockStepNeverExpiresALiveLease(t *testing.T) {
 }
 
 func TestClassifyFreshnessClasses(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	lv, _ := f.withLiveness()
 	lv.SetAlive(deadPID, startToken)
@@ -259,6 +266,7 @@ func TestClassifyFreshnessClasses(t *testing.T) {
 }
 
 func TestDeadTargetRecordIsTakenOverByCompareAndSwap(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, conv := f.withLiveness()
 	_, target, _, _ := f.plantLand(thisHost)
@@ -290,6 +298,7 @@ func TestDeadTargetRecordIsTakenOverByCompareAndSwap(t *testing.T) {
 }
 
 func TestTargetTakeoverLosingTheRaceReReads(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.withLiveness()
 	f.plantLand(thisHost)
@@ -312,6 +321,7 @@ func TestTargetTakeoverLosingTheRaceReReads(t *testing.T) {
 }
 
 func TestDeadBranchRecordIsConvertedInOneTransaction(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, conv := f.withLiveness()
 	f.plantLand(thisHost)
@@ -353,6 +363,7 @@ func TestDeadBranchRecordIsConvertedInOneTransaction(t *testing.T) {
 }
 
 func TestConversionKeepsATargetRecordOfAnotherOwner(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.withLiveness()
 	f.plantLand(thisHost)
@@ -371,6 +382,7 @@ func TestConversionKeepsATargetRecordOfAnotherOwner(t *testing.T) {
 }
 
 func TestConversionCanStartFromAWorktreeRecord(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, conv := f.withLiveness()
 	f.plantLand(thisHost)
@@ -391,6 +403,7 @@ func TestConversionCanStartFromAWorktreeRecord(t *testing.T) {
 }
 
 func TestWorktreeRecordWithoutItsBranchRecordIsNeverTakenOverAlone(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	_, conv := f.withLiveness()
 	f.l.Config.Wait = 3 * time.Second
@@ -407,6 +420,7 @@ func TestWorktreeRecordWithoutItsBranchRecordIsNeverTakenOverAlone(t *testing.T)
 }
 
 func TestUnreadableRecordIsNeverJudgedDead(t *testing.T) {
+	t.Parallel()
 	f := newFx(t)
 	f.withLiveness() // pid unknown to the fake: would be dead if it parsed
 	ref := BranchRef(landBranch)

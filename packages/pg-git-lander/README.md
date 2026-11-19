@@ -215,6 +215,16 @@ records) is never cached; each call still reads real git, so every behavioural a
 scenario that needs real subprocess concurrency belongs in the integration tier (`integration/`), not in the unit
 packages.
 
+### Unit-test wall time
+
+The per-package unit time of `internal/locks`, `internal/conflict` and `internal/oprecord` is dominated by real git
+processes (about 780, 580 and 780 per package run). The state those processes read or write changes during an
+operation, so no call is cached or faked. Instead every test in these packages runs with `t.Parallel()`: each test
+builds its own repository under its own `t.TempDir()`, uses a fake clock and a recording `Runner`, and shares no
+package state, so the git processes of different tests overlap while each test still runs against real git with its
+assertions unchanged. `go test -race` stays clean. A new test in these packages MUST call `t.Parallel()` first and
+MUST NOT use `t.Setenv` or `t.Chdir`.
+
 ## Installed extras
 
 The package installs bash and zsh completions and the tldr page `pg-git-lander` (under `share/tldr/pages.common`).
