@@ -321,6 +321,7 @@ func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
 	t.Parallel()
 	head := func(f *fx) string { return f.git(f.work, "rev-parse", "HEAD") }
 	t.Run("modifies a tracked file", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t, 2)
 		before := head(f)
 		res := f.run(hooks.PointPreMergeVerify, hk(f.script("dirty", "echo more >> f.txt")))
@@ -335,6 +336,7 @@ func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
 		}
 	})
 	t.Run("stages a change", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t, 2)
 		res := f.run(hooks.PointPreMergeVerify, hk(f.script("stage", "echo more >> f.txt; git add f.txt")))
 		if res.Failure == nil || !res.Failure.Modified {
@@ -345,6 +347,7 @@ func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
 		}
 	})
 	t.Run("moves HEAD", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t, 2)
 		before := head(f)
 		res := f.run(hooks.PointPreMergeVerify, hk(f.script("commit", "git commit --allow-empty -q -m sneaky")))
@@ -356,6 +359,7 @@ func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
 		}
 	})
 	t.Run("fails and modifies", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t, 2)
 		res := f.run(hooks.PointPreMergeVerify, hk(f.script("both", "echo more >> f.txt; exit 7")))
 		if res.Failure == nil || !res.Failure.Modified || res.Failure.Kind != hooks.FailedExit || res.Failure.Code != 7 {
@@ -366,6 +370,7 @@ func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
 		}
 	})
 	t.Run("a transient failure that modified is hook-failed", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t, 2)
 		res := f.run(hooks.PointPreMergeVerify, hk(f.script("both75", "echo more >> f.txt; exit 75")))
 		if res.Failure == nil || !res.Failure.Modified {
@@ -376,6 +381,7 @@ func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
 		}
 	})
 	t.Run("untracked and ignored files pass", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t, 2)
 		body := `echo out.bin >> "$(git rev-parse --git-path info/exclude)"; echo x > out.bin; echo y > untracked.txt`
 		res := f.run(hooks.PointPreMergeVerify, hk(f.script("build", body)))
@@ -387,6 +393,7 @@ func TestVerifyEntryMustNotChangeTheTree(t *testing.T) {
 		}
 	})
 	t.Run("a later entry does not run after a modification", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t, 2)
 		marker := filepath.Join(f.scripts, "later-marker")
 		res := f.run(hooks.PointPreMergeVerify, hk(f.script("dirty", "echo more >> f.txt")), hk(f.script("later", "touch "+marker)))

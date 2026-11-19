@@ -69,6 +69,7 @@ func TestCheckXDGErrorsNameFileLineKeyAndLayer(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			f.writeXDG(c.body)
 			o := f.check("")
@@ -334,6 +335,7 @@ func TestOldHookKeysAreConfigErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run("repo file "+c.old, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			f.commit("cfg", map[string]string{".pg-git-lander.toml": "[hooks.land]\n" + c.old + " = [{ run = [\"x\"] }]\n"})
 			o := f.check("")
@@ -346,6 +348,7 @@ func TestOldHookKeysAreConfigErrors(t *testing.T) {
 			}
 		})
 		t.Run("xdg "+c.old, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			f.writeXDG("[defaults.hooks.rebase]\n" + c.old + " = [{ run = [\"x\"] }]\n")
 			o := f.check("")
@@ -360,6 +363,7 @@ func TestOldHookKeysAreConfigErrors(t *testing.T) {
 		})
 	}
 	t.Run("an old and a new key in one table name both", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{".pg-git-lander.toml": "[hooks.land]\npre-merge-verify = [{ run = [\"y\"] }]\nbefore_move = [{ run = [\"x\"] }]\n"})
 		o := f.check("")
@@ -370,6 +374,7 @@ func TestOldHookKeysAreConfigErrors(t *testing.T) {
 		}
 	})
 	t.Run("an old key is not also an unknown-key warning", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{".pg-git-lander.toml": "[hooks.land]\nafter = [{ run = [\"x\"] }]\n"})
 		for _, w := range f.check("").Warnings {

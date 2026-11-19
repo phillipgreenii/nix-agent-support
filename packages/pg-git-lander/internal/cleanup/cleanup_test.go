@@ -187,6 +187,7 @@ func TestKeepFlagTableLand(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			in := f.input()
 			in.KeepSourceWorktree, in.KeepSourceBranch = tc.keepWT, tc.keep
@@ -339,6 +340,7 @@ func TestSourceRemovalFailures(t *testing.T) {
 	for name, setup := range cases {
 		for _, keepBranch := range []bool{false, true} {
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 				f := newFx(t)
 				setup(f)
 				in := f.input()
@@ -517,6 +519,7 @@ func TestEveryActionIsIdempotent(t *testing.T) {
 		keepWT, keep bool
 	}{{"none", false, false}, {"keep-worktree", true, false}, {"keep-branch", false, true}, {"keep-both", true, true}} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			in := f.input()
 			in.KeepSourceWorktree, in.KeepSourceBranch = tc.keepWT, tc.keep

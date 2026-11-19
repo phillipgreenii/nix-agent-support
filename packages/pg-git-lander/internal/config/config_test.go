@@ -261,6 +261,7 @@ func TestTrust(t *testing.T) {
 	cmds := map[string]string{config.RepoFileName: "[hooks.land]\npre-merge-verify = [{ run = [\"x\"] }]\n"}
 
 	t.Run("untrusted repo naming commands refuses with the XDG line", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", cmds)
 		_, err := f.load(land)
@@ -275,6 +276,7 @@ func TestTrust(t *testing.T) {
 		}
 	})
 	t.Run("untrusted entry gets a set-the-flag hint", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.xdgFor("trust_repo_config = false\n", "")
 		f.commit("cfg", cmds)
@@ -285,6 +287,7 @@ func TestTrust(t *testing.T) {
 		}
 	})
 	t.Run("a conflict rule counts as naming commands", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{config.RepoFileName: "[[conflict]]\nglob = \"a\"\nresolve = [\"x\"]\n"})
 		if ce := asErr(t, mustFail(t, f, land)); ce.Reason != outcome.RefUntrustedConfig {
@@ -292,6 +295,7 @@ func TestTrust(t *testing.T) {
 		}
 	})
 	t.Run("a file naming no commands is applied", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{config.RepoFileName: "max_race_retries = 6\n[autofix]\nattempts = 4\n"})
 		c := f.mustLoad(land)
@@ -300,6 +304,7 @@ func TestTrust(t *testing.T) {
 		}
 	})
 	t.Run("trusted runs the commands", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.xdgFor("trust_repo_config = true\n", "")
 		f.commit("cfg", cmds)
@@ -309,6 +314,7 @@ func TestTrust(t *testing.T) {
 		}
 	})
 	t.Run("an empty hook list names no commands", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{config.RepoFileName: "[hooks.land]\npost-rebase-fix = []\n"})
 		f.mustLoad(land)
@@ -416,6 +422,7 @@ func TestRepoConfigErrorNamesFileLineKeyLayer(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			f.commit("cfg", map[string]string{config.RepoFileName: tc.file})
 			ce := asErr(t, mustFail(t, f, land))
@@ -429,6 +436,7 @@ func TestRepoConfigErrorNamesFileLineKeyLayer(t *testing.T) {
 		})
 	}
 	t.Run("syntax error", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{config.RepoFileName: "a = 1\nb = = 2\n"})
 		ce := asErr(t, mustFail(t, f, land))
@@ -487,6 +495,7 @@ func TestInvalidXDGIsConfigError(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			f := newFx(t)
 			f.writeXDG(tc.file)
 			ce := asErr(t, mustFail(t, f, land))
@@ -588,6 +597,7 @@ func TestRevalidateKey(t *testing.T) {
 		}
 	}
 	t.Run("an unknown value is a repo config error naming the key", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{config.RepoFileName: "revalidate = \"sometimes\"\n"})
 		ce := asErr(t, mustFail(t, f, land))
@@ -596,11 +606,13 @@ func TestRevalidateKey(t *testing.T) {
 		}
 	})
 	t.Run("a non-string value is refused", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{config.RepoFileName: "revalidate = 3\n"})
 		asErr(t, mustFail(t, f, land))
 	})
 	t.Run("the repo file beats the XDG defaults", func(t *testing.T) {
+		t.Parallel()
 		f := newFx(t)
 		f.xdgFor("[defaults]\nrevalidate = \"none\"\n", "")
 		if c := f.mustLoad(land); c.Revalidate != config.RevalidateNone {
