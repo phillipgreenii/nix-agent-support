@@ -344,7 +344,7 @@ rr_verify_override() {
 # working tree is never read (the check runs on an immutable git snapshot).
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_verify() {
-  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left cls reason failed
+  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left cls reason failed n=0 environmental
   root="$(rr_cfg '.workspace_root // empty')"
 
   # precheck: the sha exists as a commit
@@ -416,18 +416,33 @@ act_verify() {
     rr_surface_green "$repo" "$RR_REPO_PATH" "$full" \
       "Green verdict for $repo@$full (nix flake check, finished $finished, log $log). This tip descends from the red one." ||
       rr_log "surface: green handling failed for $repo@$full"
+  elif rr_locked_enospc_only "$log" && n="$(rr_enospc_attempts_bump "$repo" "$full")" && ((n <= $(rr_enospc_retries))); then
+    # environmental: the disk was full and no check attribute failed. No verdict is
+    # stored (the tip stays unverified, tips offers it again once the disk has
+    # recovered); the retry count bounds it, then the red is stored as for any other.
+    rr_log "check: $repo@$full failed only with 'No space left on device' (attempt $n of $(rr_enospc_retries)); no verdict, the tip is offered again (log $log)"
+    decline "the check of $repo@$full ran out of disk space (attempt $n of $(rr_enospc_retries)); retried when offered again"
   else
     # every failed attribute of the run (--keep-going), for the verdict, the bead text and the gauges
     failed="$(rr_failed_checks "$log")" || failed='[]'
     # shellcheck disable=SC2016  # jq program, not shell: the f is a jq variable
     extra="$(rr_jq -c --argjson f "$failed" '. + {failedChecks: $f}' <<<"$extra")" || return 1
+    environmental=""
+    if rr_locked_enospc_only "$log"; then
+      environmental=enospc
+      # shellcheck disable=SC2016  # jq program, not shell: the a is a jq variable
+      extra="$(rr_jq -c --argjson a "${n:-0}" '. + {environmental: "enospc", enospcAttempts: $a}' <<<"$extra")" || return 1
+    fi
     rr_verdict_write "$repo" "$full" check red locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
     # a red locked check is classified by the same check over the sibling overrides
     # (signal only: the override verdict never opens the push gate)
     # a build or test failure is invisible to the evaluation-only override check, so
     # it is read unclassified with that reason and the override check is not run
     reason=""
-    if rr_locked_build_failure "$log"; then
+    if [[ -n $environmental ]]; then
+      reason='the disk was full and no check attribute failed (retries exhausted)'
+      rr_log "override check: skipped for $repo@$full: $reason"
+    elif rr_locked_build_failure "$log"; then
       reason='build/test failure; the evaluation-only override check cannot classify it'
       rr_log "override check: skipped for $repo@$full: $reason"
     else

@@ -286,6 +286,67 @@ hold_lease() {
   [ "$(jq -r .result "$(verdict_file nix-alpha "$ALPHA_SHA")")" = red ]
 }
 
+# ---- a full disk is environmental: no final red until the retries run out ----
+
+ENOSPC_TEXT="error: writing to file: No space left on device\nerror: build of '/nix/store/x.drv' failed"
+
+@test "enospc: a check that failed only with a full disk stores no verdict and the tip is offered again, up to the bound" {
+  export PG_REPO_RUNNER_ENOSPC_RETRIES=2
+  local i
+  only_alpha_verified
+  for i in 1 2; do
+    SHIM_EXIT=1 SHIM_TEXT="$ENOSPC_TEXT" verify
+    [ "$status" -eq 9 ]
+    [ ! -e "$(verdict_file nix-alpha "$ALPHA_SHA")" ]
+    [ "$(cat "$STATE/retries/nix-alpha/$ALPHA_SHA.enospc")" = "$i" ]
+    # still without a verdict, so tips offers it again
+    tips
+    [ "$status" -eq 0 ]
+    [ "$(jq -r .id <<<"$output")" = "nix-alpha@$ALPHA_SHA" ]
+    assert_no_lease
+  done
+  [ "$(nix_runs)" -eq 2 ]
+}
+
+@test "enospc: a log that names a failed check attribute still stores a red, ENOSPC lines or not" {
+  export PG_REPO_RUNNER_ENOSPC_RETRIES=3
+  local f
+  SHIM_EXIT=1 SHIM_TEXT="$ENOSPC_TEXT\nerror: failed to build attribute 'checks.aarch64-darwin.alpha-lint', build of '/nix/store/x.drv' failed" verify
+  [ "$status" -eq 0 ]
+  f="$(verdict_file nix-alpha "$ALPHA_SHA")"
+  [ "$(jq -r .result "$f")" = red ]
+  [ "$(jq -c .failedChecks "$f")" = '["checks.aarch64-darwin.alpha-lint"]' ]
+  [ "$(jq -r 'has("environmental")' "$f")" = false ]
+  [ ! -e "$STATE/retries/nix-alpha/$ALPHA_SHA.enospc" ]
+}
+
+@test "enospc: after the retry bound the red is stored with the environmental marker and class" {
+  export PG_REPO_RUNNER_ENOSPC_RETRIES=1
+  local f
+  only_alpha_verified
+  SHIM_EXIT=1 SHIM_TEXT="$ENOSPC_TEXT" verify
+  [ "$status" -eq 9 ]
+  [ ! -e "$(verdict_file nix-alpha "$ALPHA_SHA")" ]
+  SHIM_EXIT=1 SHIM_TEXT="$ENOSPC_TEXT" verify
+  [ "$status" -eq 0 ]
+  f="$(verdict_file nix-alpha "$ALPHA_SHA")"
+  [ "$(jq -r .result "$f")" = red ]
+  [ "$(jq -r .environmental "$f")" = enospc ]
+  [ "$(jq -r .enospcAttempts "$f")" = 2 ]
+  lib_eval 'rr_override_class nix-alpha '"$ALPHA_SHA"
+  [ "$output" = environmental ]
+  # a stored verdict ends the tip: it is no longer offered
+  tips
+  [ -z "$output" ]
+}
+
+@test "enospc: zero retries stores the red at once" {
+  export PG_REPO_RUNNER_ENOSPC_RETRIES=0
+  SHIM_EXIT=1 SHIM_TEXT="$ENOSPC_TEXT" verify
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .environmental "$(verdict_file nix-alpha "$ALPHA_SHA")")" = enospc ]
+}
+
 # ---- the check throttle: at most one finished check per repo per interval ----
 
 @test "throttle: two tips inside an hour run one check; the second is declined (exit 9), no verdict, no nix" {

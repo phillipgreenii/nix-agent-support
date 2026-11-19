@@ -153,8 +153,22 @@ attribute` line in the log (`--keep-going` makes nix check every attribute inste
    the first failure), `[]` when the log names none. It is shown in `status` and `status --json`, in
    the text of the red transition bead, and as the gauge `pg_repo_runner_check_failed`. It is
    information only: overall green still means exit 0 and remains the only push-gate input. A
-   `--keep-going` red run lasts longer than a stop-at-first-failure one. There is no "inconclusive" class and a red is never
-   retried automatically. A red verdict exits 0 (it is data, not a failure of the runner).
+   `--keep-going` red run lasts longer than a stop-at-first-failure one. There is no "inconclusive" class;
+   apart from the environmental class below, a red is never retried automatically. A red verdict exits 0
+   (it is data, not a failure of the runner).
+
+   **Environmental class (a full disk).** A non-zero exit whose log contains `No space left on device`
+   and names no `failed to build attribute 'checks.<system>.<name>'` line says nothing about the code.
+   For such a failure no verdict is stored and the role exits 9 (declined), so `tips` offers the tip
+   again on a later pass, once the disk has recovered. Each environmental failure of the tip is counted
+   in `retries/<repo>/<sha>.enospc`; the retry bound is `PG_REPO_RUNNER_ENOSPC_RETRIES`, else
+   `thresholds.enospc_retries`, else 3 (0 stores the red at once). When the count exceeds the bound the
+   red is stored as for any other failure, with `environmental = "enospc"` and `enospcAttempts` in the
+   verdict, the override check is skipped, and the gauge `pg_repo_runner_check_latest_red_class` reads
+   `environmental`. A log that names a failed check attribute is an ordinary red even when ENOSPC lines
+   are also present, and a retry that runs with free disk surfaces any real failures hidden behind the
+   full disk. Freeing the disk is the operator's task.
+
 7. **The sibling-override check (a signal, never a gate).** A `red` locked verdict is followed, in the
    same run and under the same lease, by `pn workspace flake-check --no-build --rev <sha> <repo>`
    (`PN_WORKSPACE_ROOT=<canonical root>`, under `nice`, `pn` unwrapped): pn's own evaluation of that
@@ -510,7 +524,7 @@ Emitted at the end of `tips` and `tips --repo KEY`, per repo processed (every 5 
 | `pg_repo_runner_check_failed`                      | `repo`,`check`  | 1 for each attribute in `failedChecks` of the latest non-superseded verdict when it is red (nothing otherwise).                                                                                                                                                                        |
 | `pg_repo_runner_check_latest_red`                  | `repo`          | 1 when the latest non-superseded verdict is red, else 0.                                                                                                                                                                                                                               |
 | `pg_repo_runner_check_override_verdicts`           | `repo`,`result` | Count of stored sibling-override check verdicts, for `result` = `green`, `red`. `check_verdicts` counts the locked ones only.                                                                                                                                                          |
-| `pg_repo_runner_check_latest_red_class`            | `repo`,`class`  | 1 for the `class` (`skew`, `defect`, `unclassified`) of the latest red locked verdict, 0 for the others and for all when it is not red.                                                                                                                                                |
+| `pg_repo_runner_check_latest_red_class`            | `repo`,`class`  | 1 for the `class` (`skew`, `defect`, `unclassified`, `environmental`) of the latest red locked verdict, 0 for the others and for all when it is not red.                                                                                                                               |
 | `pg_repo_runner_sync_ahead`                        | `repo`          | Commits ahead of the remote, from the sync record (omitted without a record).                                                                                                                                                                                                          |
 | `pg_repo_runner_sync_behind`                       | `repo`          | Commits behind the remote, from the sync record (omitted without a record).                                                                                                                                                                                                            |
 | `pg_repo_runner_sync_diverged`                     | `repo`          | 1 when the sync record says `diverged`, else 0 (omitted without a record).                                                                                                                                                                                                             |
@@ -541,6 +555,7 @@ nice_level = 10
 retry_window = 3600 # seconds a tip item stays offered
 check_interval = 3600 # seconds between two finished checks of one repo (0 = no throttle)
 quiet_window = 900 # seconds the workspace tip tuple must stay unchanged (runner C)
+enospc_retries = 3 # times a check that failed only with a full disk is offered again before its red is stored
 
 [repos.nix-example]
 verify = false
@@ -569,24 +584,25 @@ package.
 
 ## Test seams (environment)
 
-| Variable                        | Effect                                                             |
-| ------------------------------- | ------------------------------------------------------------------ |
-| `PG_REPO_RUNNER_CONFIG`         | Path of the config file.                                           |
-| `PG_REPO_RUNNER_LOADAVG`        | Replaces the 1-minute load reading (the bats suites use this).     |
-| `PG_REPO_RUNNER_MAX_LOAD`       | Replaces the load threshold.                                       |
-| `PG_REPO_RUNNER_NCPU`           | Replaces the core count used as the default threshold.             |
-| `PG_REPO_RUNNER_NIX_BIN`        | Replaces the nix binary (the bats suites use it to classify).      |
-| `PG_REPO_RUNNER_GIT_BIN`        | Replaces the git binary (the sync suite records git calls).        |
-| `PG_REPO_RUNNER_PN_BIN`         | Replaces the pn binary (default: `pn` on PATH).                    |
-| `PG_REPO_RUNNER_EPOCH`          | Replaces the clock, in epoch seconds (the debounce tests).         |
-| `PG_REPO_RUNNER_QUIET_WINDOW`   | Replaces the quiet window, in seconds.                             |
-| `PG_REPO_RUNNER_BD_BIN`         | Replaces the bd binary (default: `bd` on PATH).                    |
-| `PG_REPO_RUNNER_CCPOOL_BIN`     | Replaces the ccpool that emits the gauges (the metrics suite).     |
-| `PG_REPO_RUNNER_CCPOOL_TIMEOUT` | Replaces the 10 s bound of one gauge call.                         |
-| `PG_OSX_NOTIFY_BIN`             | Replaces the `pg-osx-notify` CLI (the surfacing suites record it). |
-| `PG_REPO_RUNNER_RETRY_WINDOW`   | Replaces the tip item's retry window, in seconds.                  |
-| `PG_REPO_RUNNER_CHECK_INTERVAL` | Replaces the per-repo check spacing, in seconds (0 turns it off).  |
-| `XDG_STATE_HOME`                | Root of the state directory.                                       |
+| Variable                        | Effect                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| `PG_REPO_RUNNER_CONFIG`         | Path of the config file.                                               |
+| `PG_REPO_RUNNER_LOADAVG`        | Replaces the 1-minute load reading (the bats suites use this).         |
+| `PG_REPO_RUNNER_MAX_LOAD`       | Replaces the load threshold.                                           |
+| `PG_REPO_RUNNER_NCPU`           | Replaces the core count used as the default threshold.                 |
+| `PG_REPO_RUNNER_NIX_BIN`        | Replaces the nix binary (the bats suites use it to classify).          |
+| `PG_REPO_RUNNER_GIT_BIN`        | Replaces the git binary (the sync suite records git calls).            |
+| `PG_REPO_RUNNER_PN_BIN`         | Replaces the pn binary (default: `pn` on PATH).                        |
+| `PG_REPO_RUNNER_EPOCH`          | Replaces the clock, in epoch seconds (the debounce tests).             |
+| `PG_REPO_RUNNER_QUIET_WINDOW`   | Replaces the quiet window, in seconds.                                 |
+| `PG_REPO_RUNNER_BD_BIN`         | Replaces the bd binary (default: `bd` on PATH).                        |
+| `PG_REPO_RUNNER_CCPOOL_BIN`     | Replaces the ccpool that emits the gauges (the metrics suite).         |
+| `PG_REPO_RUNNER_CCPOOL_TIMEOUT` | Replaces the 10 s bound of one gauge call.                             |
+| `PG_OSX_NOTIFY_BIN`             | Replaces the `pg-osx-notify` CLI (the surfacing suites record it).     |
+| `PG_REPO_RUNNER_RETRY_WINDOW`   | Replaces the tip item's retry window, in seconds.                      |
+| `PG_REPO_RUNNER_CHECK_INTERVAL` | Replaces the per-repo check spacing, in seconds (0 turns it off).      |
+| `PG_REPO_RUNNER_ENOSPC_RETRIES` | Replaces the retry bound of a check that failed only with a full disk. |
+| `XDG_STATE_HOME`                | Root of the state directory.                                           |
 
 ## Load threshold: the first calibration sample
 

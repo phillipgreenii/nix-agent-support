@@ -1088,6 +1088,12 @@ rr_push_exec() {
 # (rr_verdict_green) never reads it.
 rr_override_class() {
   local f="$RR_STATE_DIR/verdicts/$1/$2.check-override.json" res
+  # a red stored after the disk-full retries ran out is environmental, whatever the siblings say
+  if [[ -f $RR_STATE_DIR/verdicts/$1/$2.check.json ]] &&
+    [[ $(rr_jq -r '.environmental // empty' "$RR_STATE_DIR/verdicts/$1/$2.check.json" 2>/dev/null) == enospc ]]; then
+    printf environmental
+    return 0
+  fi
   [[ -f $f ]] || {
     printf unclassified
     return 0
@@ -1138,6 +1144,39 @@ rr_override_text() {
 # anything about such a failure.
 rr_locked_build_failure() {
   [[ -f $1 ]] && grep -Eq 'error: failed to build attribute|Cannot build ' "$1"
+}
+
+# rr_locked_enospc_only LOG: succeeds when the locked check log shows a full disk
+# ("No space left on device") and names no failed check attribute
+# ("failed to build attribute 'checks.<system>.<name>'"). Such a red says nothing
+# about the code: it is environmental. A named failed check wins over the ENOSPC lines.
+rr_locked_enospc_only() {
+  [[ -f $1 ]] || return 1
+  grep -q 'No space left on device' "$1" || return 1
+  ! grep -Eq "failed to build attribute 'checks\.[^']+'" "$1"
+}
+
+# rr_enospc_retries: how many times a check that failed only because the disk was
+# full is offered again before its red is stored (PG_REPO_RUNNER_ENOSPC_RETRIES, else
+# the config's thresholds.enospc_retries, else 3). 0 stores the red at once.
+rr_enospc_retries() {
+  local v="${PG_REPO_RUNNER_ENOSPC_RETRIES:-}"
+  [[ -n $v ]] || v="$(rr_cfg '.thresholds.enospc_retries // empty')"
+  [[ $v =~ ^[0-9]+$ ]] || v=3
+  printf '%s' "$v"
+}
+
+# rr_enospc_attempts_bump REPO SHA: counts one more environmental failure of the tip
+# (state: retries/<repo>/<sha>.enospc, one number) and prints the new count.
+rr_enospc_attempts_bump() {
+  local d="$RR_STATE_DIR/retries/$1" f n=0
+  f="$d/$2.enospc"
+  mkdir -p "$d" || return 1
+  [[ ! -f $f ]] || n="$(cat "$f")"
+  [[ $n =~ ^[0-9]+$ ]] || n=0
+  n=$((n + 1))
+  printf '%s\n' "$n" >"$f.tmp.$$" && mv -f "$f.tmp.$$" "$f" || return 1
+  printf '%s' "$n"
 }
 
 # rr_failed_checks LOG: prints a JSON array of every distinct attribute named by a
@@ -1659,8 +1698,8 @@ rr_m_state_points() {
        | pt("check_override_verdicts"; ($o | map(select(.result == $res)) | length); "repo=\($r),result=\($res)")),
       (($l != null and $l.result == "red") as $isred
        | ($o | map(select(.sha == ($l.sha // ""))) | last) as $ov
-       | (if $ov == null then "unclassified" elif ($ov.class // "") != "" then $ov.class elif $ov.result == "green" then "skew" else "defect" end) as $cls
-       | ["skew", "defect", "unclassified"][] as $c2
+       | (if ($l.environmental // "") != "" then "environmental" elif $ov == null then "unclassified" elif ($ov.class // "") != "" then $ov.class elif $ov.result == "green" then "skew" else "defect" end) as $cls
+       | ["skew", "defect", "unclassified", "environmental"][] as $c2
        | pt("check_latest_red_class"; (if $isred and $c2 == $cls then 1 else 0 end); "repo=\($r),class=\($c2)"))
   ' <<<"$v" 2>/dev/null)
   f="$RR_STATE_DIR/sync/$repo.json"

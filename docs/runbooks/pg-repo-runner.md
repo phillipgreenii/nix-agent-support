@@ -91,7 +91,15 @@ candidate and a gate failed.
 | `logPath`                           | Absolute path of the nix output under `<state>/logs/`.                                                                                             |
 | `durationS`, `loadStart`, `loadEnd` | Verify checks only: whole seconds, and the 1-minute load average when the check started and ended.                                                 |
 
-A red verdict exits 0 (it is data, not a malfunction) and is never retried automatically. A nix
+A red verdict exits 0 (it is data, not a malfunction) and is not retried, with one exception: the
+environmental class. When the check log contains `No space left on device` and names no failed check
+attribute (no `failed to build attribute 'checks.<system>.<name>'` line), the disk was full and the code
+is not at fault. No verdict is stored (the role exits 9), the tip is offered again on a later pass, and
+`retries/<repo>/<sha>.enospc` counts the attempts. After `PG_REPO_RUNNER_ENOSPC_RETRIES` (else
+`thresholds.enospc_retries`, else 3) failed attempts a red is stored with `environmental = "enospc"`; the
+gauge `pg_repo_runner_check_latest_red_class` then reads `environmental`. If you see that class, free the
+disk (an operator task) and the next pass re-checks nothing more: the stored red ends the tip, so push a
+new commit or remove the verdict file to re-check. A nix
 process killed by a signal (exit 129 to 192) stores NO verdict: the role exits 1 and pg-router
 retries it.
 
