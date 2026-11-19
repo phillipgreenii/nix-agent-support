@@ -4,6 +4,8 @@
 **Date**: 2026-11-02, accepted 2026-11-03
 **Deciders**: phillipg
 
+Note (2026-11-19): the deployment-specific role names in this spec were neutralized (`drain-alt`, `alt-escalation-triager`) under the CLAUDE.md Public Repository rule; operator ruling (Phillip, 2026-11-17): "only nix-ziprecruiter can refer to zr specific things".
+
 Accepted by the operator on 2026-11-03, with the recommended answer on each open point: the design as written (measure first), outcomes unchanged (D1), and the clean-and-pushed guard for role pools (D7).
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT and MAY in this document are to be read as in RFC 2119.
@@ -79,14 +81,14 @@ The keep cache's 5 minute trust is shorter than the 10 minute interval, so it he
 
 The latest run at the time of writing (57.6 s, outcome completed, 8 roles, nothing reclaimed by the three passes shown). Time per pass per role, from the `sweep_pass` rows:
 
-| Role                  | `closed_bead_reconcile` | `orphan_reconcile` | `worktree_sweep` |
-| --------------------- | ----------------------- | ------------------ | ---------------- |
-| review                | 0.5 s                   | 0.3 s              | 12.2 s           |
-| worker                | 0.7 s                   | 0.1 s              | 11.8 s           |
-| drain-zr              | 0.3 s                   | 0.2 s              | 17.1 s           |
-| drain-pg2             | 4.7 s                   | 0.5 s              | 0.0 s            |
-| zr-escalation-triager | not shown               | 0.3 s              | 0.0 s            |
-| pg2-split-triager     | not shown               | not shown          | 0.0 s            |
+| Role                   | `closed_bead_reconcile` | `orphan_reconcile` | `worktree_sweep` |
+| ---------------------- | ----------------------- | ------------------ | ---------------- |
+| review                 | 0.5 s                   | 0.3 s              | 12.2 s           |
+| worker                 | 0.7 s                   | 0.1 s              | 11.8 s           |
+| drain-alt              | 0.3 s                   | 0.2 s              | 17.1 s           |
+| drain-pg2              | 4.7 s                   | 0.5 s              | 0.0 s            |
+| alt-escalation-triager | not shown               | 0.3 s              | 0.0 s            |
+| pg2-split-triager      | not shown               | not shown          | 0.0 s            |
 
 Roles without worktree isolation finish `worktree_sweep` instantly. The three roles with isolation take 12 to 17 s each and reclaim nothing. Why is **not known**: the pass does a directory listing, a pool listing, one `lsof` (0.6 s when measured on an idle machine), and up to 20 git examinations. Nothing records how many candidates there were or which step took the time. Earlier runs after deployment took 90 to 210 s and were cut by the role timers, which fits a backlog being worked off.
 

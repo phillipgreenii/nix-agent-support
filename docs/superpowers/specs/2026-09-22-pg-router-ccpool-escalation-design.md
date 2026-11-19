@@ -3,6 +3,8 @@
 Status: approved for implementation
 Date: 2026-09-22
 
+Note (2026-11-19): the deployment-specific role names in this spec were neutralized (`drain-alt`, `alt-escalation-triager`) under the CLAUDE.md Public Repository rule; operator ruling (Phillip, 2026-11-17): "only nix-ziprecruiter can refer to zr specific things".
+
 ## Purpose
 
 pg-router and ccpool have no automated self-monitoring today. The live incident that motivated
@@ -63,7 +65,7 @@ flowchart TD
 ```
 
 The same `escalated-work` query and `escalation-triager` role shape are also wired for the `zr`
-tracker (`zr-escalation-triager`), reusing one shared prompt/logic — see "Two trackers, one
+tracker (`alt-escalation-triager`), reusing one shared prompt/logic — see "Two trackers, one
 role" below. Today only the `pg2`-side probes feed it; the `zr` wiring is deliberately dormant
 until something produces a `zr`-tracker `escalated` bead (accepted scope — see Known
 limitations).
@@ -380,7 +382,7 @@ tracker's workspace they point at:
 ```nix
 # modules/zm/default.nix, pgRouterConfigAttrs.role
 { name = "pg2-escalation-triager"; enabled = true; binds = [ "escalated.pg2" ]; }
-{ name = "zr-escalation-triager"; enabled = true; binds = [ "escalated.zr" ]; }
+{ name = "alt-escalation-triager"; enabled = true; binds = [ "escalated.zr" ]; }
 ```
 
 ```nix
@@ -397,15 +399,16 @@ pg2-escalation-triager = {
     promptBody = lib.removeSuffix "\n" (builtins.readFile ./pg-router/escalation-triager-pg2-prompt.txt);
   };
 };
-zr-escalation-triager = {
+# second-tracker role in the deployment
+alt-escalation-triager = {
   type = "ccpool";
   ccpool = {
-    actor = "pgii-pool__zr-escalation-triager";
+    actor = "pgii-pool__alt-escalation-triager";
     completion = "close-or-triage";
     onFailure = "add-human";
     onDispatchFail = "leave";
     authorshipGuard = false;
-    promptBody = lib.removeSuffix "\n" (builtins.readFile ./pg-router/escalation-triager-zr-prompt.txt);
+    promptBody = lib.removeSuffix "\n" (builtins.readFile ./pg-router/escalation-triager-alt-prompt.txt);
   };
 };
 ```
@@ -483,7 +486,7 @@ to reconsider isolating it.
 
 - Probes depend on pg-router itself being up to run (the "watchman" tradeoff) — accepted in
   exchange for unified operational visibility.
-- The `zr-escalation-triager` wiring is live but currently dormant: nothing today produces a
+- The `alt-escalation-triager` wiring is live but currently dormant: nothing today produces a
   `zr`-tracker `escalated` bead. It was still wired now, per an explicit ask, so a future
   zr-side source needs no new plumbing — only a bead to feed it.
 - Concurrency isolation for the triager is deferred to `pg2-mr0sl`/`pg2-ts8h0` landing.
