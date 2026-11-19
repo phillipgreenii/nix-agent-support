@@ -101,8 +101,8 @@ func (p janitorPasses) clock() time.Time {
 	return time.Now()
 }
 
-// prodJanitorPasses wires the passes of sweeps.go with the same arguments
-// runSweeps passes them.
+// prodJanitorPasses wires the janitor's passes to the package's reconcile and
+// sweep functions.
 func prodJanitorPasses() janitorPasses {
 	gb := newGaugeBatch()
 	return janitorPasses{

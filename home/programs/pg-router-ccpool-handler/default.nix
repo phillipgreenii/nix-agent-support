@@ -1245,7 +1245,6 @@ let
           model
           sessionPrefix
           selfLogin
-          inlineSweeps
           ;
         # allowedTools (this bead, pg2-yybrp): extraAllowedTools is additive --
         # appended (comma-joined) onto allowedTools's own value rather than
@@ -2315,20 +2314,6 @@ in
           (`internal/config.DefaultMinFreeBytes`, 25 GiB) applies.
         '';
       };
-      inlineSweeps = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = ''
-          InlineSweeps in the launch config (bead pg2-fx5x0l.4, INV-CCH-41,
-          ADR 0117): the transitional switch. true (the default) keeps
-          today's behavior, the housekeeping passes running inline before
-          every dispatch and at boot. false (bead pg2-fx5x0l.5) makes a
-          dispatch handle only its role's orphans inline and reconcile
-          closed-bead sessions on capacity pressure, leaving the rest to the
-          janitor (`janitor.enable`); set it once the janitor is verified
-          live. Flip it back to roll back.
-        '';
-      };
       declineReconcileMinIntervalSeconds = lib.mkOption {
         type = lib.types.ints.unsigned;
         default = 30;
@@ -2341,8 +2326,7 @@ in
           INV-CCH-41): a dispatch that finds its pool full runs the
           closed-bead reconcile once, and when it finds nothing the pool is
           remembered for this long, so a decline inside the interval does not
-          reconcile again. 0 disables the cache. Read only while
-          `inlineSweeps` is false. Default 30 matches
+          reconcile again. 0 disables the cache. Default 30 matches
           `internal/config.Default()`.
         '';
       };

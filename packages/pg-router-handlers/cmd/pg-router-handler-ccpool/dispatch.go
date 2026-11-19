@@ -36,10 +36,9 @@ import (
 // name is shared so one wrapper and one config file serve every adapter. The role
 // is never read from a file or an env var: it comes from stdin.
 //
-// The opportunistic reconcile and sweep passes the dispatch runs before the
-// executor (closed-bead sessions, orphans, leaked worktrees, stale locks) run
-// here too (runSweeps), after the per-attempt external id and before the
-// precheck.
+// The dispatch's orphan unit and the executor's on-demand reconciler (see
+// admission.go) are set up here too, after the per-attempt external id and
+// before the precheck.
 func runDispatch(args []string) int {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -109,21 +108,15 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	// library's, so a session this binary starts and one the old binary starts
 	// are adopted alike (ADR 0085).
 	deps.ExternalID = dispatchlib.StampExternalID(role, cfg.SessionPrefix, dctx.Item.ID, deps.Now)
-	// The housekeeping passes the old binary's dispatch runs before the executor
-	// (closed-bead sessions, default pool, orphans, leaked worktrees, stale locks),
-	// in the same place and order, so a reclaimed orphan frees its slot for this
-	// very dispatch. Best effort, never a dispatch failure; postStartup runs the
-	// same passes. With inlineSweeps off (INV-CCH-41, ADR 0117) the janitor owns
-	// them: the dispatch runs only its role's orphans, as one unit, and the
-	// executor reconciles closed-bead sessions on capacity pressure and checks its
-	// own bead's worktree, through the Reconciler seam.
-	if cfg.InlineSweeps {
-		runSweeps(ctx, "dispatch", role, cfg, deps)
-	} else {
-		deps = runOrphanUnit(ctx, role, cfg, deps)
-		if deps.Reconciler == nil {
-			deps.Reconciler = newPoolReconciler(role, cfg, deps)
-		}
+	// Housekeeping (INV-CCH-41, ADR 0117): the janitor owns the hygiene passes.
+	// The dispatch runs only its role's orphans, as one unit, so a reclaimed
+	// orphan frees its slot for this very dispatch; the executor reconciles
+	// closed-bead sessions on capacity pressure and checks its own bead's
+	// worktree, through the Reconciler seam. Best effort, never a dispatch
+	// failure.
+	deps = runOrphanUnit(ctx, role, cfg, deps)
+	if deps.Reconciler == nil {
+		deps.Reconciler = newPoolReconciler(role, cfg, deps)
 	}
 
 	// Zero-model-cost precheck (INV-CCH-22): a dispatch whose bead no longer

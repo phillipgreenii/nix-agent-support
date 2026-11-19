@@ -17,8 +17,8 @@ import (
 )
 
 // Dispatch admission control (bead pg2-fx5x0l.5, INV-CCH-41, ADR 0117): the
-// pieces a dispatch runs INSTEAD of runSweeps when the launch config's
-// inlineSweeps is false. The janitor owns the rest of the hygiene.
+// pieces a dispatch runs before its capacity check. The janitor owns the rest
+// of the hygiene.
 //
 //   - runOrphanUnit: this role's orphans, as ONE unit before the plan and the
 //     capacity check, over the ONE pool listing the plan then reuses.

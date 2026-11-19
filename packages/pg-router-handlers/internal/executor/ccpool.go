@@ -285,7 +285,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
 		return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
 	}
-	// Capacity pressure (INV-CCH-41): with inlineSweeps off, a full pool with no
+	// Capacity pressure (INV-CCH-41): a full pool with no
 	// usage limit in force is reconciled once (closed-bead sessions) and capacity
 	// is read once more. The decline below keeps its reason; only the detail says a
 	// reconcile was tried.
@@ -339,8 +339,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	if usesWorktreeIsolation(cc.Isolation) && !useGWM {
 		// Before the shared lock (the examination takes the lock exclusively): a
 		// worktree this bead's own earlier attempt leaked is reclaimed, under the
-		// sweep's guards, rather than reused as if it were fresh (INV-CCH-19). With
-		// inlineSweeps on the whole-directory sweep already ran before this call.
+		// sweep's guards, rather than reused as if it were fresh (INV-CCH-19).
 		if r.admissionActive() {
 			if err := r.deps.Reconciler.ReclaimLeakedWorktree(ctx, d.Item.ID); err != nil {
 				slog.Warn("own-bead worktree check failed; continuing", "bead", d.Item.ID, "err", err)

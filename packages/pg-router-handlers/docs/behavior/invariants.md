@@ -531,7 +531,7 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
 
   The scan MUST stay cheap when worktrees are kept, because the handler is one short-lived process
   per request and would otherwise re-run `git status` and a commit count on every kept worktree
-  on every scan (each janitor run and, while `inlineSweeps` is on, each dispatch):
+  on every scan (each janitor run and each dispatch scan):
   - a worktree kept because its working tree is dirty or its branch holds unpushed commits MUST NOT
     be examined again until a recheck interval (default five minutes, configurable, zero disables)
     has passed, unless its `HEAD`, index or branch tip has changed since, in which case it MUST be
@@ -1528,8 +1528,7 @@ changes a core gate or `INV-LIFE-2`.
 
 - **`INV-CCH-41`** <!-- uuid: 0c1a76a6-a616-4426-95f5-e903126ac521 --> — housekeeping MUST NOT sit on a dispatch's path: a dispatch pays
   only for what THAT call needs, and the rest of the hygiene runs on a schedule, once per pool, in a
-  **janitor**. A deployment MAY run without a janitor only while the transitional `inlineSweeps`
-  switch below is on.
+  **janitor**.
   - **What the janitor does.** One janitor run performs, per pool, the closed-bead reconcile
     (`INV-CCH-14`, `INV-CCH-20`), the default-pool stale-session pass and the lock-file collection
     (`INV-CCH-24`); and, per ccpool role, the orphan reconcile (`INV-CCH-18`) and, for a role with
@@ -1616,9 +1615,6 @@ changes a core gate or `INV-LIFE-2`.
     replies `ok`. The single-flight rule makes that run harmless beside the scheduled one. What
     protects a role's first dispatch after a boot is the capacity-pressure reconcile, the inline
     orphan unit and that janitor run.
-  - **Transitional switch.** While the handler's launch configuration key `inlineSweeps` is on
-    (the default until the janitor is verified live), a dispatch keeps running the passes it ran
-    before this invariant. The switch is removed, with its on branch, once the change is stable.
   - **Scope.** The janitor and its schedule are required on macOS only; no Linux supervisor is
     required of the handler or the daemon.
   - **Why.** The inline passes ran before every dispatch and at every boot: four roles hit the

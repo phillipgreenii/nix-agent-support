@@ -97,9 +97,9 @@ required to run on Linux or under systemd.
    makes a duplicate harmless, and a daemon restart does not rerun a launchd job), and replies `ok`.
    The wire contract of `handler.postStartup` is unchanged.
 
-5. **A transitional switch.** The handler launch-config key `inlineSweeps` (default `true`) keeps
-   today's dispatch behavior until the janitor is verified live; the dispatch change reads it. The
-   switch and its `true` branch are deleted in a final step.
+5. **A transitional switch (since removed).** A handler launch-config key kept today's dispatch
+   behavior until the janitor was verified live. The switch and its inline branch have been deleted;
+   a dispatch no longer runs the housekeeping passes inline.
 
 6. **Scope.** The janitor and the handler are darwin-only for now: there is no Linux or systemd
    consumer, no systemd timer, and no Linux cross-build requirement (operator ruling above).
@@ -157,8 +157,8 @@ Negative Cache with a time to live (the decline-time reconcile stamp).
   handler gains no OpenTelemetry code.
 - An orphan of a role whose own dispatch never runs is now reclaimed by the janitor rather than left
   until `ccpool`'s idle timeout.
-- Rollback: set `inlineSweeps` back to `true`, or disable the janitor option; the gate removal is the
-  only non-flag change and is a plain revert.
+- Rollback: the transitional switch is gone, so a rollback is a revert of the change that removed
+  it, or disabling the janitor option.
 
 ## Related
 

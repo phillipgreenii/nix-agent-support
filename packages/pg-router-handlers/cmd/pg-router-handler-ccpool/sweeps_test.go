@@ -1,79 +1,46 @@
 package main
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
-	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
-	"github.com/phillipgreenii/pg-router-handlers/internal/config"
 	"github.com/phillipgreenii/pg-router-handlers/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-handlers/internal/executor"
-	"github.com/phillipgreenii/pg-router-handlers/internal/roles"
 )
 
-// pg2-fx5x0l.1: every runSweeps pass is timed and recorded as one sweep_pass
-// events.jsonl row (role, pass, elapsed_ms, found) plus a "sweeps done" log line,
-// without changing what the passes do.
-func TestRunSweeps_recordsOneSweepPassRowPerPass(t *testing.T) {
-	t.Setenv("CCPOOL_POOL", "") // default-pool pass would build a real runner
-	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
-		{ExternalID: "pg-router-worker-zr-done", State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyBead: "zr-done"}},
-	}}}
-	br := fakeBR{out: map[string]string{"show zr-done --json": `{"status":"closed"}`}}
+// recordSweepPass appends one sweep_pass events.jsonl row (who, role, pass,
+// elapsed_ms, found) and logs one "sweeps done" line.
+func TestRecordSweepPass_appendsOneRow(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "events.jsonl")
 	lw, err := eventlog.New(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = lw.Close() }()
-	deps := executor.Deps{CC: cc, BD: br, LockDir: t.TempDir(), Log: lw}
-	role := roles.Role{Name: "worker", CCPool: &roles.CCPoolConfig{}}
-	cfg := config.Config{SessionPrefix: "pg-router-"}
-
-	msgs := captureSlog(t, func() { runSweeps(context.Background(), "dispatch", role, cfg, deps) })
-
-	if len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-worker-zr-done" {
-		t.Errorf("behavior must be unchanged: closed=%v", cc.Closed)
-	}
-	if n := countMsgs(msgs, "sweeps done"); n != 4 {
-		t.Errorf("want 4 'sweeps done' log lines, got %d (%v)", n, msgs)
+	msgs := captureSlog(t, func() {
+		recordSweepPass("dispatch", "worker", "orphan_reconcile", 2, 5*time.Millisecond, executor.Deps{Log: lw})
+	})
+	if n := countMsgs(msgs, "sweeps done"); n != 1 {
+		t.Errorf("want 1 'sweeps done' log line, got %d (%v)", n, msgs)
 	}
 	_ = lw.Close()
-	stateDir := filepath.Dir(logPath)
-	recs := eventRecords(t, stateDir, "sweep_pass")
-	want := []string{"closed_bead_reconcile", "orphan_reconcile", "worktree_sweep", "lock_gc"}
-	if len(recs) != len(want) {
-		t.Fatalf("want %d sweep_pass rows, got %d: %v", len(want), len(recs), recs)
+	recs := eventRecords(t, filepath.Dir(logPath), "sweep_pass")
+	if len(recs) != 1 {
+		t.Fatalf("want 1 sweep_pass row, got %d: %v", len(recs), recs)
 	}
-	for i, r := range recs {
-		if r["pass"] != want[i] || r["role"] != "worker" || r["who"] != "dispatch" {
-			t.Errorf("row %d = %v, want pass=%s role=worker who=dispatch", i, r, want[i])
-		}
-		if _, ok := r["elapsed_ms"].(float64); !ok {
-			t.Errorf("row %d elapsed_ms missing or not a number: %v", i, r)
-		}
-		if _, ok := r["found"].(float64); !ok {
-			t.Errorf("row %d found missing or not a number: %v", i, r)
-		}
+	r := recs[0]
+	if r["who"] != "dispatch" || r["role"] != "worker" || r["pass"] != "orphan_reconcile" {
+		t.Errorf("row = %v", r)
 	}
-	if recs[0]["found"].(float64) != 1 {
-		t.Errorf("closed_bead_reconcile found = %v, want 1", recs[0]["found"])
+	if r["elapsed_ms"] != float64(5) || r["found"] != float64(2) {
+		t.Errorf("row elapsed_ms/found = %v/%v, want 5/2", r["elapsed_ms"], r["found"])
 	}
 }
 
-// A role without a ccpool block runs no pass, so it records nothing; a nil event
-// log is tolerated.
-func TestRunSweeps_noCCPoolRecordsNothingAndNilLogIsFine(t *testing.T) {
-	msgs := captureSlog(t, func() {
-		runSweeps(context.Background(), "dispatch", roles.Role{Name: "cmd"}, config.Config{}, executor.Deps{})
-	})
-	if countMsgs(msgs, "sweeps done") != 0 {
-		t.Errorf("no ccpool block must record nothing: %v", msgs)
-	}
-	t.Setenv("CCPOOL_POOL", "")
-	runSweeps(context.Background(), "postStartup", roles.Role{Name: "w", CCPool: &roles.CCPoolConfig{}}, config.Config{},
-		executor.Deps{CC: &fakeCC{}, BD: fakeBR{}, LockDir: t.TempDir()}) // Log nil: must not panic
+// A nil event log is tolerated.
+func TestRecordSweepPass_nilLogIsFine(t *testing.T) {
+	recordSweepPass("janitor", "w", "lock_gc", 0, 0, executor.Deps{})
 }
 
 func countMsgs(msgs []string, m string) int {

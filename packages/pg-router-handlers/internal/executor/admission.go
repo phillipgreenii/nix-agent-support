@@ -8,10 +8,10 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/ccpool"
 )
 
-// Admission control (bead pg2-fx5x0l.5, INV-CCH-41, ADR 0117).
+// Admission control (INV-CCH-41, ADR 0117).
 //
-// With the handler's inlineSweeps switch off, a dispatch no longer runs the
-// housekeeping passes before its capacity check. It pays only for what THIS call
+// A dispatch does not run the housekeeping passes before its capacity check (the
+// janitor does). It pays only for what THIS call
 // needs: when the pool is full and no usage limit is in force it asks the
 // Reconciler to close the pool's closed-bead sessions once and re-checks capacity
 // once, and before it prepares its own bead's worktree it asks the Reconciler to
@@ -42,10 +42,10 @@ type Reconciler interface {
 	ReclaimLeakedWorktree(ctx context.Context, beadID string) error
 }
 
-// admissionActive reports whether this dispatch does its housekeeping on
-// demand (inlineSweeps off, a Reconciler wired) instead of inline.
+// admissionActive reports whether this dispatch can do its housekeeping on
+// demand (a Reconciler is wired).
 func (r *ccpoolRun) admissionActive() bool {
-	return !r.deps.Cfg.InlineSweeps && r.deps.Reconciler != nil
+	return r.deps.Reconciler != nil
 }
 
 // reconcileForCapacity runs the closed-bead reconcile once for a dispatch that

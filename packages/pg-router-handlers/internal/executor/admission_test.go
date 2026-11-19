@@ -13,8 +13,7 @@ import (
 	"github.com/phillipgreenii/pg-router-handlers/internal/item"
 )
 
-// Dispatch admission control (bead pg2-fx5x0l.5, INV-CCH-41): with inlineSweeps
-// off, a full pool with no usage limit is reconciled once through the Reconciler
+// Dispatch admission control (INV-CCH-41): a full pool with no usage limit is reconciled once through the Reconciler
 // seam and capacity is re-checked once; the decline keeps its reason.
 
 // seqCapCC serves a scripted sequence of Capacity answers (the last repeats) and
@@ -82,12 +81,11 @@ var (
 	freePool = ccpool.Capacity{MaxSessions: 4, Counted: 3, Free: 1}
 )
 
-// admissionRun builds a run over a scripted capacity sequence. inline is the
-// inlineSweeps value; rec may be nil (no Reconciler).
-func admissionRun(t *testing.T, inline bool, rec Reconciler, caps ...ccpool.Capacity) (*ccpoolRun, *seqCapCC, DispatchContext) {
+// admissionRun builds a run over a scripted capacity sequence; rec may be nil
+// (no Reconciler).
+func admissionRun(t *testing.T, rec Reconciler, caps ...ccpool.Capacity) (*ccpoolRun, *seqCapCC, DispatchContext) {
 	t.Helper()
 	cfg := fastCfg()
-	cfg.InlineSweeps = inline
 	cfg.WorktreeDir = t.TempDir()
 	cc := &seqCapCC{FakeCC: &dtest.FakeCC{EnsureErr: errors.New("stop here: launch fails")}, caps: caps}
 	e := newExec(cc.FakeCC, &dtest.ScriptBD{}, cfg)
@@ -99,7 +97,7 @@ func admissionRun(t *testing.T, inline bool, rec Reconciler, caps ...ccpool.Capa
 
 func TestAdmission_reconcileFreesASlotAndTheDispatchProceeds(t *testing.T) {
 	rec := &fakeReconciler{outcome: ReconcileOutcome{Closed: 2}}
-	e, cc, d := admissionRun(t, false, rec, fullPool, freePool)
+	e, cc, d := admissionRun(t, rec, fullPool, freePool)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrLaunchFailed) {
 		t.Fatalf("err = %v, want the dispatch to pass the gate and reach the launch (ErrLaunchFailed)", err)
@@ -114,7 +112,7 @@ func TestAdmission_reconcileFreesASlotAndTheDispatchProceeds(t *testing.T) {
 
 func TestAdmission_nothingReclaimableDeclinesOnceWithoutLooping(t *testing.T) {
 	rec := &fakeReconciler{}
-	e, cc, d := admissionRun(t, false, rec, fullPool)
+	e, cc, d := admissionRun(t, rec, fullPool)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolAtCapacity) {
 		t.Fatalf("err = %v, want ErrPoolAtCapacity", err)
@@ -134,7 +132,7 @@ func TestAdmission_usageLimitSkipsTheReconcile(t *testing.T) {
 	rec := &fakeReconciler{}
 	full := fullPool
 	full.UsageLimit = &ccpool.UsageLimit{Window: "five_hour", UsedPct: 100, ResetsAt: time.Date(2026, 10, 6, 17, 0, 0, 0, time.UTC)}
-	e, cc, d := admissionRun(t, false, rec, full)
+	e, cc, d := admissionRun(t, rec, full)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolAtCapacity) || !strings.Contains(err.Error(), "usage limit") {
 		t.Fatalf("err = %v, want the usage-limit decline", err)
@@ -144,25 +142,13 @@ func TestAdmission_usageLimitSkipsTheReconcile(t *testing.T) {
 	}
 }
 
-func TestAdmission_inlineSweepsOnNeverReconcilesOnPressure(t *testing.T) {
-	rec := &fakeReconciler{outcome: ReconcileOutcome{Closed: 1}}
-	e, cc, d := admissionRun(t, true, rec, fullPool, freePool)
-	_, err := e.run(context.Background(), d)
-	if !errors.Is(err, ErrPoolAtCapacity) || strings.Contains(err.Error(), "reconcile") {
-		t.Fatalf("err = %v, want today's plain at-capacity decline", err)
-	}
-	if rec.reconciles() != 0 || len(rec.wtBeads) != 0 || cc.capacityCalls() != 1 {
-		t.Fatalf("reconciles=%d worktree checks=%v capacity calls=%d, want none and 1", rec.reconciles(), rec.wtBeads, cc.capacityCalls())
-	}
-}
-
 func TestAdmission_nilOrFailingReconcilerDeclinesCleanly(t *testing.T) {
 	for name, rec := range map[string]Reconciler{
 		"nil":     nil,
 		"failing": &fakeReconciler{err: errors.New("reconcile boom")},
 	} {
 		t.Run(name, func(t *testing.T) {
-			e, cc, d := admissionRun(t, false, rec, fullPool, freePool)
+			e, cc, d := admissionRun(t, rec, fullPool, freePool)
 			_, err := e.run(context.Background(), d)
 			if !errors.Is(err, ErrPoolAtCapacity) {
 				t.Fatalf("err = %v, want ErrPoolAtCapacity", err)
@@ -179,7 +165,7 @@ func TestAdmission_nilOrFailingReconcilerDeclinesCleanly(t *testing.T) {
 
 func TestAdmission_rateLimitedReconcileDeclinesWithoutRecheck(t *testing.T) {
 	rec := &fakeReconciler{outcome: ReconcileOutcome{Skipped: true}}
-	e, cc, d := admissionRun(t, false, rec, fullPool, freePool)
+	e, cc, d := admissionRun(t, rec, fullPool, freePool)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolAtCapacity) || !strings.Contains(err.Error(), "found nothing recently") {
 		t.Fatalf("err = %v, want an at-capacity decline noting the recent reconcile", err)
@@ -191,7 +177,7 @@ func TestAdmission_rateLimitedReconcileDeclinesWithoutRecheck(t *testing.T) {
 
 func TestAdmission_capacityUnreadableAfterReconcileFailsClosed(t *testing.T) {
 	rec := &fakeReconciler{outcome: ReconcileOutcome{Closed: 1}}
-	e, cc, d := admissionRun(t, false, rec, fullPool, freePool)
+	e, cc, d := admissionRun(t, rec, fullPool, freePool)
 	cc.errAt = 2
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrPoolCapacityUnknown) || errors.Is(err, ErrPoolAtCapacity) {
@@ -199,23 +185,14 @@ func TestAdmission_capacityUnreadableAfterReconcileFailsClosed(t *testing.T) {
 	}
 }
 
-func TestAdmission_ownWorktreeCheckedBeforeIsolationOnlyWhenAdmissionIsOn(t *testing.T) {
+func TestAdmission_ownWorktreeCheckedBeforeIsolation(t *testing.T) {
 	rec := &fakeReconciler{wtErr: errors.New("worktree check boom")}
-	e, cc, d := admissionRun(t, false, rec, freePool)
+	e, cc, d := admissionRun(t, rec, freePool)
 	_, err := e.run(context.Background(), d)
 	if !errors.Is(err, ErrLaunchFailed) {
 		t.Fatalf("err = %v, want the dispatch to continue past a failed own-worktree check", err)
 	}
 	if len(rec.wtBeads) != 1 || rec.wtBeads[0] != "zr-w" || len(cc.Ensured) != 1 {
 		t.Fatalf("worktree checks=%v ensured=%v, want one check of zr-w before the launch", rec.wtBeads, cc.Ensured)
-	}
-
-	rec = &fakeReconciler{}
-	e, _, d = admissionRun(t, true, rec, freePool)
-	if _, err := e.run(context.Background(), d); !errors.Is(err, ErrLaunchFailed) {
-		t.Fatal(err)
-	}
-	if len(rec.wtBeads) != 0 {
-		t.Fatalf("inlineSweeps on: the whole-directory sweep already ran, so no own-bead check; got %v", rec.wtBeads)
 	}
 }

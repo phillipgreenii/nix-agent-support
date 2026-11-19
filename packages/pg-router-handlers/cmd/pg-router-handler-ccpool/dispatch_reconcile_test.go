@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -71,59 +69,4 @@ func sweepDispatch(t *testing.T, cfg map[string]any, extraLaunch string) []strin
 		dispatchWith(t, "worker", cfg, cfgPath, defaultEvent)
 	})
 	return msgs
-}
-
-// TestDispatch_reconciliationRunsForCcpoolRole proves the closed-bead and orphan
-// reconciles are wired into the dispatch path: dispatching a ccpool role
-// reaches reconcileClosedBeadSessions, which attempts a real `ccpool list`,
-// observable here because PATH is broken (so that attempt fails soft with the
-// reconcile's own "reconcile: list failed" log line rather than ever touching a
-// real pool). The role-scoped orphan reconcile (pg2-g2u9m, INV-CCH-18) runs
-// right after it.
-func TestDispatch_reconciliationRunsForCcpoolRole(t *testing.T) {
-	_, cfg := workerRole("", "")
-	msgs := sweepDispatch(t, cfg, "")
-	if !containsSubstring(msgs, "reconcile: list failed") {
-		t.Fatalf("a ccpool dispatch must reach reconcileClosedBeadSessions (observed via its list-failure log); got messages=%v", msgs)
-	}
-	if !containsSubstring(msgs, "orphan reconcile: list failed") {
-		t.Fatalf("a ccpool dispatch must also reach reconcileOrphanSessions (observed via its list-failure log); got messages=%v", msgs)
-	}
-}
-
-// TestDispatch_worktreeSweepRunsForCcpoolRole proves the worktree-keyed sweep
-// (pg2-ganjb, INV-CCH-19) is wired into the dispatch path: with a non-empty
-// worktree directory, dispatching a worktree-isolation ccpool role reaches
-// sweepLeakedWorktrees, which asks ccpool for the session rows first.
-func TestDispatch_worktreeSweepRunsForCcpoolRole(t *testing.T) {
-	wtDir := filepath.Join(t.TempDir(), "worktrees")
-	if err := os.MkdirAll(filepath.Join(wtDir, "zr-leaked"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	msgs := sweepDispatch(t, worktreeRoleCfg(""), `,"WorktreeDir":"`+wtDir+`"`)
-	if !containsSubstring(msgs, "worktree sweep: session list failed") {
-		t.Fatalf("a worktree-isolation ccpool dispatch must reach sweepLeakedWorktrees; got messages=%v", msgs)
-	}
-}
-
-// pg2-wqi3e: a role with its own pool must ALSO sweep ccpool's default pool
-// (guarded), observed through the default-pool pass's own list-failure line.
-func TestDispatch_defaultPoolReconcileRunsForRoleWithOwnPool(t *testing.T) {
-	t.Setenv("CCPOOL_POOL", "")
-	msgs := sweepDispatch(t, worktreeRoleCfg(`"poolDir":"`+t.TempDir()+`",`), "")
-	if !containsSubstring(msgs, "reconcile: list failed (default pool)") {
-		t.Fatalf("a role with its own pool must also reconcile the default pool; got messages=%v", msgs)
-	}
-}
-
-// ... and a role already on the default pool must not run it a second time.
-func TestDispatch_defaultPoolReconcileSkippedWhenRoleUsesDefaultPool(t *testing.T) {
-	t.Setenv("CCPOOL_POOL", "")
-	msgs := sweepDispatch(t, worktreeRoleCfg(""), "")
-	if containsSubstring(msgs, "reconcile: list failed (default pool)") {
-		t.Fatalf("the default pool is already swept by the role's own pass; got messages=%v", msgs)
-	}
-	if !containsSubstring(msgs, "reconcile: list failed") {
-		t.Fatalf("the role's own pass must still run; got messages=%v", msgs)
-	}
 }

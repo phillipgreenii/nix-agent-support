@@ -132,7 +132,7 @@ type Deps struct {
 	ParkGit parknote.Git
 	// Reconciler runs the on-demand housekeeping of INV-CCH-41 (the
 	// capacity-pressure closed-bead reconcile and the own-bead worktree check)
-	// when Cfg.InlineSweeps is false. nil => none; a dispatch then declines or
+	// on every dispatch. nil => none; a dispatch then declines or
 	// proceeds exactly as it would without one.
 	Reconciler Reconciler
 	// PoolListing/PoolListed carry the one pool listing the dispatch's orphan unit

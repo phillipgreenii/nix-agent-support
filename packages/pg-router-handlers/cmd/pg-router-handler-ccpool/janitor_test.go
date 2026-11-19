@@ -362,23 +362,6 @@ func TestJanitor_invalidRoleFileIsAUsageError(t *testing.T) {
 	}
 }
 
-// The transitional switch (INV-CCH-41): default on, a launch config can turn it off.
-func TestConfig_inlineSweepsDefaultsOnAndLoads(t *testing.T) {
-	if !config.Default().InlineSweeps {
-		t.Error("InlineSweeps default is false, want true (today's behavior)")
-	}
-	p := filepath.Join(t.TempDir(), "c.json")
-	_ = os.WriteFile(p, []byte(`{"inlineSweeps":false}`), 0o644)
-	c, err := rolefile.LoadConfig(p)
-	if err != nil || c.InlineSweeps {
-		t.Errorf("LoadConfig inlineSweeps=false: %v, InlineSweeps=%v", err, c.InlineSweeps)
-	}
-	_ = os.WriteFile(p, []byte(`{}`), 0o644)
-	if c, err := rolefile.LoadConfig(p); err != nil || !c.InlineSweeps {
-		t.Errorf("LoadConfig {}: %v, InlineSweeps=%v, want true", err, c.InlineSweeps)
-	}
-}
-
 // pg2-tjxs0y: a role whose own share expires ends the run as deadline even when
 // the whole run is far inside its deadline (live rows at about 90 s of 240 s).
 // The row says WHICH role was cut (roles_cut), so that case is told apart from a

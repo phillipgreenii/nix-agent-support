@@ -19,8 +19,8 @@ import (
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
-// Dispatch admission control (bead pg2-fx5x0l.5, INV-CCH-41, ADR 0117): with
-// inlineSweeps off, a dispatch runs only its role's orphans inline (one unit,
+// Dispatch admission control (INV-CCH-41, ADR 0117): a dispatch runs only its
+// role's orphans inline (one unit,
 // one shared pool listing), reconciles closed-bead sessions on capacity pressure
 // behind a per-pool negative cache, and runs none of the janitor's passes.
 
@@ -92,7 +92,7 @@ func newAdmissionEnv(t *testing.T, launchExtra string, sessions ...ccpool.Sessio
 		"zr-x": `{"id":"zr-x","status":"closed"}`,
 		"zr-y": `{"id":"zr-y","status":"in_progress"}`,
 	}}
-	cfgPath, _ := launchConfig(t, `,"inlineSweeps":false,"RepoRoot":"`+t.TempDir()+`"`+launchExtra)
+	cfgPath, _ := launchConfig(t, `,"RepoRoot":"`+t.TempDir()+`"`+launchExtra)
 	return &admissionEnv{cc: cc, bd: bd, lockDir: t.TempDir(), cfgPath: cfgPath, now: orphanNowT}
 }
 
@@ -293,20 +293,20 @@ func TestAdmission_rowWithoutLeaseIsNeverAnOrphan(t *testing.T) {
 	}
 }
 
-// With inlineSweeps off a dispatch runs none of the janitor's passes: not the
+// A dispatch runs none of the janitor's passes: not the
 // closed-bead reconcile before capacity, the default-pool pass, the worktree
 // sweep or the lock GC.
-func TestAdmission_inlineSweepsOffRunsOnlyTheOrphanUnitBeforeCapacity(t *testing.T) {
+func TestAdmission_dispatchRunsOnlyTheOrphanUnitBeforeCapacity(t *testing.T) {
 	t.Setenv("CCPOOL_POOL", "")
 	wtDir := filepath.Join(t.TempDir(), "worktrees")
 	if err := os.MkdirAll(filepath.Join(wtDir, "zr-leaked"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	msgs := sweepDispatch(t, worktreeRoleCfg(`"poolDir":"`+t.TempDir()+`",`), `,"inlineSweeps":false,"WorktreeDir":"`+wtDir+`"`)
+	msgs := sweepDispatch(t, worktreeRoleCfg(`"poolDir":"`+t.TempDir()+`",`), `,"WorktreeDir":"`+wtDir+`"`)
 	for _, m := range msgs {
 		switch m {
 		case "reconcile: list failed", "reconcile: list failed (default pool)", "worktree sweep: session list failed":
-			t.Fatalf("inlineSweeps=false must not run %q; got messages=%v", m, msgs)
+			t.Fatalf("dispatch must not run %q; got messages=%v", m, msgs)
 		}
 	}
 	if !containsSubstring(msgs, "orphan reconcile: list failed") {
