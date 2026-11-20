@@ -2771,6 +2771,30 @@
                     touch $out
                   '';
 
+              # The pg-gwm exception marker is spelled identically in the always-on rules
+              # text and in the tool approver's pggwmworktree rule
+              # (tests/check-pg-gwm-marker-parity.bats, real script, real files).
+              check-pg-gwm-marker-parity =
+                pkgs.runCommand "check-pg-gwm-marker-parity"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.gnused
+                      pkgs.gnugrep
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    mkdir -p scripts tests home/programs/agent-rules packages/claude-extended-tool-approver/internal/rules/pggwmworktree
+                    cp ${./scripts/check-pg-gwm-marker-parity.sh} scripts/check-pg-gwm-marker-parity.sh
+                    cp ${./tests/check-pg-gwm-marker-parity.bats} tests/check-pg-gwm-marker-parity.bats
+                    cp ${./home/programs/agent-rules/pgii-agent-rules.md} home/programs/agent-rules/pgii-agent-rules.md
+                    cp ${./packages/claude-extended-tool-approver/internal/rules/pggwmworktree/rule.go} packages/claude-extended-tool-approver/internal/rules/pggwmworktree/rule.go
+                    chmod +x scripts/check-pg-gwm-marker-parity.sh
+                    bats tests/check-pg-gwm-marker-parity.bats
+                    touch $out
+                  '';
+
               # Drift check between the pb command markdown (canonical for agents) and
               # claude-marketplace/pb/queues.json (the exporter's machine-readable mirror),
               # with automated mutants. NOT generated from either side (ADR 0017 rejects

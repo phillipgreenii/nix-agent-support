@@ -291,6 +291,18 @@ drafting under `~/.cache`. It never loaded `pn-workspace-rules:pn-workspace-rule
 work, not "about to change code with a non-git cwd". R-4 named only "a git worktree", so the rule
 now names the workforest set as the isolation mechanism at such a root and for cross-repo changes.
 
+R-4 pg-gwm default: the epic ruling recorded in the tracker reads "Operator ruling (Phillip,
+2026-11-19): using pg-gwm for ZR monorepo worktrees MUST be the norm, and any exception MUST be
+called out explicitly." (the tracker text, not a transcript quote). Before this, R-4 only said to
+lease through pg-gwm when its config check showed a root inside the writable paths, and nothing
+denied `EnterWorktree`, `git worktree add` or `bin/worktree create`. R-4 now makes pg-gwm the
+default where `pg-gwm config check` passes and names the three raw routes as prohibited without a
+`PG_GWM_EXCEPTION` reason, matching the tool approver rule `pggwmworktree` (per-call command prefix
+for shell commands, session environment variable for `EnterWorktree` and Agent isolation). R-5 makes
+an explicit user instruction a valid exception (`user: <quote>`). A bats check
+(`tests/check-pg-gwm-marker-parity.bats`) asserts the marker name is identical in the rule text and
+the hook source.
+
 ## Version control
 
 - The ZR monorepo `Refs:` rule and the agent-authored PR comment marker apply only in ZR repos. The
