@@ -12,9 +12,12 @@ workforest set.
 ## When to use it
 
 - Use it only in a repository whose `pg-gwm config check` shows a configured worktree-root that is
-  inside your session's writable paths.
+  inside your session's writable paths. Writable paths are the session's working directory plus
+  `permissions.additionalDirectories` from the user settings.
 - Otherwise (no configuration, root outside your writable paths, or a multi-repo change) follow the
-  existing worktree rules. Do not work around the check.
+  existing worktree rules. Do not work around the check. When you decline, say which condition failed
+  (no configuration for this repository, or the worktree-root is outside your writable paths and
+  which path) instead of silently falling back to another worktree mechanism.
 
 ## Lease
 
@@ -24,7 +27,7 @@ Choose a unique task name and use your session id as the owner:
 p=$(pg-gwm lease --name <unique task name> --owner <session id> -b <branch> --ttl 4h --print=path) || stop and report
 ```
 
-If the command fails, stop and report the refusal; do not create a worktree by hand.
+If the command fails, stop and report the refusal and which condition failed (quote its message); do not create a worktree by hand.
 
 A `cd` does not carry between tool calls, so in every later command use absolute paths under `"$p"`
 or `git -C "$p"`. Keep the path in your notes, because shell variables do not persist either.
