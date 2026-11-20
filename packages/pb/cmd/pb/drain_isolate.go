@@ -21,9 +21,9 @@ var beadIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 func newDrainIsolateCmd() *cobra.Command {
 	var (
-		bead, repo string
-		asJSON     bool
-		gitTimeout time.Duration
+		bead, repo, actor, session, isolation string
+		asJSON                                bool
+		gitTimeout                            time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "isolate",
@@ -42,6 +42,16 @@ unrecognized state reports missing.
 Exit codes: 0 isolated (created or reused); 1 generic failure; 2 usage error; 11 conflicting
 isolation state (the worktree path holds another branch, or drain/<bead> is
 checked out elsewhere) — never forced; route the bead to STUCK.
+
+Isolation mode (--isolation auto|pg-gwm|legacy, default auto): when pg-gwm's
+config names the repo, "pg-gwm config check" passes and the worktree-root is
+writable, the worktree is LEASED from pg-gwm (lease and branch drain/<bead>,
+owner --actor, metadata bead/session/role=drain, ttl 4h; a redispatch renews the
+lease) and pb never runs wtdone or "git worktree remove" for it. Otherwise the
+legacy .worktrees/<bead> path is used. The output carries isolation=pg-gwm|legacy
+and, for pg-gwm, lease=<name> lease_id=<id>. pg-gwm refusals: max-reached is
+retried once with --wait 10m, then exit 12 (transient: defer the bead);
+name-held and branch-in-use are exit 11; any other refusal is exit 1.
 
 Hang bound: every git call runs with core.fsmonitor forced off for that call only
 (per-call GIT_CONFIG_COUNT environment; no git config is ever changed — fsmonitor
@@ -68,10 +78,24 @@ halting the land at FF-0a.`,
 			if gitTimeout <= 0 {
 				return usageErrorf("--git-timeout must be positive, got %s", gitTimeout)
 			}
+			switch isolation {
+			case drain.IsolationAuto, drain.IsolationGwm, drain.IsolationLegacy:
+			default:
+				return usageErrorf("--isolation %q: want auto, pg-gwm or legacy", isolation)
+			}
+			if actor == "" {
+				actor = os.Getenv("BEADS_ACTOR")
+			}
 			out, err := drain.Isolate(context.Background(), run.CLIRunner{},
-				drain.Params{RepoPath: repo, BeadID: bead, GitTimeout: gitTimeout})
+				drain.Params{
+					RepoPath: repo, BeadID: bead, GitTimeout: gitTimeout,
+					Isolation: isolation, Actor: actor, Session: session,
+				})
 			if err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), "pb:", err)
+				if errors.Is(err, drain.ErrGwmMaxReached) {
+					os.Exit(exitGwmMaxReached)
+				}
 				if errors.Is(err, drain.ErrConflict) {
 					os.Exit(exitConflict)
 				}
@@ -85,13 +109,20 @@ halting the land at FF-0a.`,
 			if asJSON {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "worktree=%s branch=%s reused=%s precommit=%s\n",
-				out.Worktree, out.Branch, out.Reused, out.Precommit)
+			fmt.Fprintf(cmd.OutOrStdout(), "worktree=%s branch=%s reused=%s precommit=%s isolation=%s",
+				out.Worktree, out.Branch, out.Reused, out.Precommit, out.Isolation)
+			if out.LeaseName != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), " lease=%s lease_id=%s", out.LeaseName, out.LeaseID)
+			}
+			fmt.Fprintln(cmd.OutOrStdout())
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&bead, "bead", "", "bead id (required)")
 	cmd.Flags().StringVar(&repo, "repo", "", "absolute path to the canonical clone (required)")
+	cmd.Flags().StringVar(&actor, "actor", "", "pg-gwm lease owner (default $BEADS_ACTOR; required in pg-gwm mode)")
+	cmd.Flags().StringVar(&session, "session", "", "pg-gwm session metadata (default --actor)")
+	cmd.Flags().StringVar(&isolation, "isolation", drain.IsolationAuto, "auto | pg-gwm | legacy")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON output")
 	cmd.Flags().DurationVar(&gitTimeout, "git-timeout", drain.DefaultGitTimeout,
 		"upper bound for EACH git call; on expiry its process group is killed and only what this call created is cleaned up")

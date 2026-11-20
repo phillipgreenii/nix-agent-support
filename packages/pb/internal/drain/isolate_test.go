@@ -53,10 +53,21 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	// Keep the machine's real pg-gwm config and state out of every test: with an
+	// empty config no repo is pg-gwm-managed, so auto mode is the legacy path.
+	// gwm_test.go points these at its own per-test files.
+	cfgDir, err := os.MkdirTemp("", "pb-drain-xdg-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	_ = os.Setenv("XDG_CONFIG_HOME", cfgDir)
+	_ = os.Setenv("XDG_STATE_HOME", cfgDir)
 	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	code := m.Run()
 	repoTemplate.Close()
 	_ = os.RemoveAll(dir)
+	_ = os.RemoveAll(cfgDir)
 	os.Exit(code)
 }
 

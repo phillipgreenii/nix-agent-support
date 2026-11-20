@@ -55,6 +55,12 @@ type ReclaimResult struct {
 	Reason string `json:"reason,omitempty"`
 	// Note is the text written to the bead; set only for OutcomeRemoved.
 	Note string `json:"note,omitempty"`
+	// Isolation is "pg-gwm" when pg-gwm manages the worktree, else "legacy".
+	Isolation string `json:"isolation"`
+	// Lease is what pb did to the pg-gwm lease: released (clean, zero commits:
+	// worktree reclaimed by pg-gwm), expired (a kept outcome: the reaper frees
+	// the slot and preserves unsaved work on a pg-gwm/dirty-reaped-* branch).
+	Lease string `json:"lease,omitempty"`
 }
 
 // Reclaim removes the bead's isolation worktree when it holds nothing worth
@@ -90,7 +96,7 @@ func Reclaim(ctx context.Context, inner run.Runner, p ReclaimParams) (ReclaimRes
 	if branch == "" {
 		branch = "drain/" + p.BeadID
 	}
-	res := ReclaimResult{Branch: branch}
+	res := ReclaimResult{Branch: branch, Isolation: IsolationLegacy}
 
 	checkouts, err := worktreeBranches(ctx, r, repo)
 	if err != nil {
@@ -110,6 +116,11 @@ func Reclaim(ctx context.Context, inner run.Runner, p ReclaimParams) (ReclaimRes
 		return res, fmt.Errorf("%s is the canonical clone itself, not an isolation worktree; refusing to remove it", repo)
 	}
 
+	leaseName, gwm := gwmManaged(ctx, r, repo, res.Worktree, timeout)
+	if gwm {
+		res.Isolation = IsolationGwm
+	}
+
 	status, err := r.Run(ctx, "git", []string{"-C", res.Worktree, "status", "--porcelain"}, run.Options{})
 	if err != nil {
 		return res, fmt.Errorf("cannot read the worktree state, leaving it in place: %w", err)
@@ -117,7 +128,7 @@ func Reclaim(ctx context.Context, inner run.Runner, p ReclaimParams) (ReclaimRes
 	if dirty := strings.TrimSpace(status.Stdout); dirty != "" {
 		res.Outcome = OutcomeKeptDirty
 		res.Reason = fmt.Sprintf("%d changed path(s) in the worktree", len(strings.Split(dirty, "\n")))
-		return res, nil
+		return expireIfGwm(ctx, r, repo, leaseName, gwm, timeout, res)
 	}
 
 	primary := primaryBranch(ctx, r, repo)
@@ -132,6 +143,22 @@ func Reclaim(ctx context.Context, inner run.Runner, p ReclaimParams) (ReclaimRes
 	if ahead != 0 {
 		res.Outcome = OutcomeKeptCommits
 		res.Reason = fmt.Sprintf("%s has %d commit(s) not in %s", branch, ahead, primary)
+		return expireIfGwm(ctx, r, repo, leaseName, gwm, timeout, res)
+	}
+
+	if gwm {
+		// pg-gwm owns the worktree: release it (never wtdone, never `git
+		// worktree remove`). The zero-commit branch stays: the released slot still
+		// has it checked out, so `git branch -d` would refuse (see gwm.go).
+		if _, err := gwmCall(ctx, r, repo, timeout, "release", "--name", leaseName); err != nil {
+			return res, fmt.Errorf("pg-gwm did not release %s (left in place): %w", res.Worktree, err)
+		}
+		res.Lease = "released"
+		res.Outcome = OutcomeRemoved
+		res.Note = reclaimNote(res.Worktree, branch, primary, true)
+		if _, err := r.Run(ctx, "bd", []string{"comment", p.BeadID, res.Note, "--actor", p.Actor}, run.Options{}); err != nil {
+			return res, fmt.Errorf("%w: %v", ErrNoteFailed, err)
+		}
 		return res, nil
 	}
 
@@ -159,4 +186,19 @@ func reclaimNote(wt, branch, primary string, branchKept bool) string {
 		b = fmt.Sprintf("branch %s was kept; `pb drain isolate` reuses it when the bead is resumed", branch)
 	}
 	return fmt.Sprintf("drain clean-up pass: this bead ended without landing, and its isolation worktree %s had no changes (clean tree, zero commits ahead of %s), so the worktree was removed; %s.", wt, primary, b)
+}
+
+// expireIfGwm ends a pg-gwm lease whose worktree is kept (unsaved work or
+// commits): `pg-gwm expire`, never release (release refuses unsaved work) and
+// never a manual removal. The reaper then frees the slot and, for a dirty tree,
+// preserves the work on a pg-gwm/dirty-reaped-* branch after its next reap.
+func expireIfGwm(ctx context.Context, r run.Runner, repo, leaseName string, gwm bool, timeout time.Duration, res ReclaimResult) (ReclaimResult, error) {
+	if !gwm {
+		return res, nil
+	}
+	if _, err := gwmCall(ctx, r, repo, timeout, "expire", "--name", leaseName); err != nil {
+		return res, fmt.Errorf("pg-gwm expire %s: %w", leaseName, err)
+	}
+	res.Lease = "expired"
+	return res, nil
 }

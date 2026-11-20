@@ -45,6 +45,7 @@ const (
 	exitGatingPart  = exitcode.Degraded    // pb gate attach-verified-child: child left deferred, gating incomplete
 
 	// App-specific codes (exitcode.AppMin to exitcode.AppMax).
+	exitGwmMaxReached      = 12 // pb drain isolate: pg-gwm has no free worktree slot (transient)
 	exitNoteFailed         = 20 // pb drain reclaim: worktree removed, bead note not written
 	exitChildMayBeWorkable = 21 // pb gate attach-verified-child: child not proven un-workable
 	exitNonConforming      = 22 // pb unstick marker --check: a marker does not conform

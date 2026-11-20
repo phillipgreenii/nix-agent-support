@@ -30,6 +30,13 @@ type Params struct {
 	// call's whole process group is killed and Isolate returns ErrGitTimeout
 	// (after removing only what this call created, when it was `worktree add`).
 	GitTimeout time.Duration
+	// Isolation selects the mode: "" or IsolationAuto picks pg-gwm when its
+	// config names the repo and the worktree-root is writable, else the legacy
+	// .worktrees/<bead>; IsolationLegacy and IsolationGwm force one.
+	Isolation string
+	// Actor owns the pg-gwm lease (--owner); Session is its session metadata
+	// (default Actor). Both unused by the legacy path.
+	Actor, Session string
 }
 
 type Result struct {
@@ -46,6 +53,11 @@ type Result struct {
 	// still isolated; the warning exists so the orchestrator is not first
 	// told at LAND time by a phantom "dirty canonical" halt (pg2-4c4nv).
 	Warning string `json:"warning,omitempty"`
+	// Isolation is the mode used: "pg-gwm" or "legacy".
+	Isolation string `json:"isolation"`
+	// LeaseName and LeaseID identify the pg-gwm lease (pg-gwm mode only).
+	LeaseName string `json:"lease_name,omitempty"`
+	LeaseID   string `json:"lease_id,omitempty"`
 }
 
 func Isolate(ctx context.Context, inner run.Runner, p Params) (Result, error) {
@@ -83,8 +95,18 @@ func Isolate(ctx context.Context, inner run.Runner, p Params) (Result, error) {
 	branch := "drain/" + p.BeadID
 	ref := "refs/heads/" + branch
 	wt := filepath.Join(repo, ".worktrees", p.BeadID)
-	res := Result{Worktree: wt, Branch: branch}
+	res := Result{Worktree: wt, Branch: branch, Isolation: IsolationLegacy}
 	res.Warning = diagnoseCanonical(ctx, r, repo, strings.TrimSpace(top.Stdout))
+
+	if gwm, _ := useGwm(ctx, r, repo, p.Isolation, timeout); gwm {
+		res, err = isolateGwm(ctx, r, repo, p, res)
+		if err != nil {
+			return Result{}, err
+		}
+		state, hooks := hooksStatus(ctx, r, res.Worktree)
+		res.Precommit = precommitFact(state, hooks)
+		return res, nil
+	}
 
 	checkouts, err := worktreeBranches(ctx, r, repo)
 	if err != nil {

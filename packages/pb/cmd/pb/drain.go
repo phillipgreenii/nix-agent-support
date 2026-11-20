@@ -6,5 +6,6 @@ func newDrainCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "drain", Short: "Helpers for the /drain-beads work loop"}
 	cmd.AddCommand(newDrainIsolateCmd())
 	cmd.AddCommand(newDrainReclaimCmd())
+	cmd.AddCommand(newDrainReleaseCmd())
 	return cmd
 }

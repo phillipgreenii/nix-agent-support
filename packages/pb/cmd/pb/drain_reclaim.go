@@ -35,6 +35,14 @@ branch with a plain "git branch -d"), and a clean-up note is added to the bead
 with "bd comment --actor <actor>". A dirty worktree, a branch with commits, or
 no worktree at all is left exactly as found and the bead gets NO note.
 
+pg-gwm worktrees (pg-gwm info --path says managed) are never removed by pb: a
+clean zero-commit worktree is given back with "pg-gwm release" (then the
+zero-commit branch is deleted with git branch -d); a dirty worktree or a branch
+with commits is left in place and its lease is ended with "pg-gwm expire" (never
+release), so the reaper frees the slot and preserves unsaved work on a
+pg-gwm/dirty-reaped-* branch after its next reap. wtdone and git worktree remove
+are not run on this path.
+
 Exit codes: 0 handled (removed, or left alone: see the outcome field); 1 failure,
 worktree left in place and NO note written (for example wtdone refused because a
 process is anchored in the worktree); 2 usage error; 20 the worktree WAS removed but the bead
@@ -62,7 +70,10 @@ place and carry on.`,
 				if asJSON {
 					_ = json.NewEncoder(cmd.OutOrStdout()).Encode(out)
 				} else {
-					fmt.Fprintf(cmd.OutOrStdout(), "outcome=%s worktree=%s branch=%s", out.Outcome, out.Worktree, out.Branch)
+					fmt.Fprintf(cmd.OutOrStdout(), "outcome=%s worktree=%s branch=%s isolation=%s", out.Outcome, out.Worktree, out.Branch, out.Isolation)
+					if out.Lease != "" {
+						fmt.Fprintf(cmd.OutOrStdout(), " lease=%s", out.Lease)
+					}
 					if out.Reason != "" {
 						fmt.Fprintf(cmd.OutOrStdout(), " reason=%q", out.Reason)
 					}
