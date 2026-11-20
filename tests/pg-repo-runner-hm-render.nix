@@ -81,6 +81,7 @@ let
     workspaceRoot = "/example/ws";
     thresholds = {
       maxLoad = 8;
+      checkTimeout = 1800;
       niceLevel = 15;
       retryWindow = 900;
       quietWindow = 300;

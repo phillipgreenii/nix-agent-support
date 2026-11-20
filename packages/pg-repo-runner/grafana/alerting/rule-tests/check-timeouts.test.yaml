@@ -1,0 +1,46 @@
+# promtool unit tests for the pg-repo-runner-check-timeouts alert. Run by the flake check
+# test-pg-repo-runner-alert-rules (check-alert-rules.sh wraps refId A as a Prometheus alert
+# with the rule's for and labels).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: two timeouts within the day fire, for that repo only
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_check_timeouts{repo="alpha"}'
+        values: "3x10 4x10 5x40"
+      - series: 'pg_repo_runner_check_timeouts{repo="beta"}'
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: pg-repo-runner-check-timeouts
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-repo-runner-check-timeouts
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: alpha
+
+  - name: a single timeout does not fire
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_check_timeouts{repo="alpha"}'
+        values: "3x10 4x50"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-repo-runner-check-timeouts
+        exp_alerts: []
+
+  - name: a flat count never fires
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_check_timeouts{repo="alpha"}'
+        values: "7x60"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-repo-runner-check-timeouts
+        exp_alerts: []

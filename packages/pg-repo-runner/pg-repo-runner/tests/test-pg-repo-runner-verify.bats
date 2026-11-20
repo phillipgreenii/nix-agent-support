@@ -930,6 +930,58 @@ only_alpha_verified() {
   [ "$(git -C "$TEST_DIR/remotes/alpha.git" rev-parse main)" = "$before" ]
 }
 
+# ---- the wall-clock cap on one check ----------------------------------------
+
+@test "a check over the cap is a red verdict marked timedOut, its process tree is gone and the lease is released" {
+  local f start end mark="30.$RANDOM$RANDOM"
+  start=$SECONDS
+  PG_REPO_RUNNER_CHECK_TIMEOUT=1 SHIM_SLEEP="$mark" verify
+  end=$SECONDS
+  [ "$status" -eq 0 ]
+  ((end - start < 20))
+  f="$(verdict_file nix-alpha "$ALPHA_SHA")"
+  [ "$(jq -r .result "$f")" = red ]
+  [ "$(jq -r .timedOut "$f")" = true ]
+  [ "$(jq -r .exit "$f")" = 124 ]
+  grep -q 'check timed out after 1s' "$STATE/run.log"
+  grep -q 'check timed out after 1s' "$(jq -r .logPath "$f")"
+  # the sleeping child of the shim died with its group (unique marker argument, no pkill)
+  run ! pgrep -f "sleep $mark"
+  assert_no_lease
+  # no sibling-override check for a timeout
+  [ "$(pn_runs)" -eq 0 ]
+  [ ! -e "$(override_file nix-alpha "$ALPHA_SHA")" ]
+  # the metric counts it
+  lib_eval "RR_M_PREFIX=pg_repo_runner; rr_m_add() { echo \"\$1 \$2 \$3\"; }; rr_surface_enabled() { return 1; }; rr_m_state_points nix-alpha"
+  [[ $output == *'pg_repo_runner_check_timeouts 1 repo=nix-alpha'* ]]
+}
+
+@test "the cap unset leaves a quick check unaffected, and a cap of 0 disables it" {
+  local f
+  verify
+  [ "$status" -eq 0 ]
+  f="$(verdict_file nix-alpha "$ALPHA_SHA")"
+  [ "$(jq -r .result "$f")" = green ]
+  [ "$(jq -r '.timedOut // false' "$f")" = false ]
+  rm -rf "$STATE/verdicts"
+  PG_REPO_RUNNER_CHECK_TIMEOUT=0 SHIM_SLEEP=2 verify
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .result "$f")" = green ]
+  lib_eval "RR_M_PREFIX=pg_repo_runner; rr_m_add() { echo \"\$1 \$2 \$3\"; }; rr_surface_enabled() { return 1; }; rr_m_state_points nix-alpha"
+  [[ $output == *'pg_repo_runner_check_timeouts 0 repo=nix-alpha'* ]]
+}
+
+@test "the cap is read from thresholds.check_timeout and the environment wins" {
+  unset PG_REPO_RUNNER_CHECK_TIMEOUT
+  lib_eval "rr_load_config; rr_check_cap"
+  [ "$output" = 3600 ]
+  sd '\[thresholds\]' $'[thresholds]\ncheck_timeout = 90' "$TEST_DIR/config.toml"
+  lib_eval "rr_load_config; rr_check_cap"
+  [ "$output" = 90 ]
+  PG_REPO_RUNNER_CHECK_TIMEOUT=7 lib_eval "rr_load_config; rr_check_cap"
+  [ "$output" = 7 ]
+}
+
 # ---- real nix, on a fixture flake -------------------------------------------
 
 # require_real_nix: skip unless a usable nix is on PATH (not inside a nix build
@@ -1101,4 +1153,44 @@ strict_path_env() {
   PG_ROUTER_ITEM_ID="nix-link@$ALPHA_SHA" run --separate-stderr env "${STRICT_ENV[@]}" "${STRICT_RUNNER[@]}" sync
   grep -q 'path check failed' <<<"$stderr"
   [ "$status" -eq 2 ]
+}
+
+@test "real nix: a check over the cap is killed with its process group and stored as a timed-out red" {
+  require_real_nix
+  local mark="600.$RANDOM$RANDOM" f i
+  make_repo "$WS/nix-flk" flk
+  write_workspace nix-alpha nix-beta nix-link nix-flk
+  cat >"$WS/nix-flk/flake.nix" <<EOF
+{
+  description = "pg-repo-runner hung-check fixture";
+  outputs = { self }: {
+    checks.$NIX_SYSTEM.fixture = derivation {
+      name = "fixture-hung-check";
+      system = "$NIX_SYSTEM";
+      builder = "/bin/sh";
+      args = [ "-c" "sleep $mark; echo ok > \$out" ];
+    };
+  };
+}
+EOF
+  git -C "$WS/nix-flk" add flake.nix
+  git -C "$WS/nix-flk" commit -q -m "flake"
+  FLK_SHA="$(git -C "$WS/nix-flk" rev-parse HEAD)"
+  PG_REPO_RUNNER_CHECK_TIMEOUT=2 verify "nix-flk@$FLK_SHA"
+  [ "$status" -eq 0 ] || {
+    echo "$output"
+    cat "$STATE/run.log"
+    return 1
+  }
+  f="$(verdict_file nix-flk "$FLK_SHA")"
+  [ "$(jq -r .result "$f")" = red ]
+  [ "$(jq -r .timedOut "$f")" = true ]
+  [ "$(jq -r .exit "$f")" = 124 ]
+  # the builder the check started is gone (give the daemon a moment to reap it)
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -f "sleep $mark" >/dev/null || break
+    sleep 1
+  done
+  run ! pgrep -f "sleep $mark"
+  assert_no_lease
 }

@@ -102,6 +102,7 @@ let
       nice_level = cfg.thresholds.niceLevel;
       retry_window = cfg.thresholds.retryWindow;
       quiet_window = cfg.thresholds.quietWindow;
+      check_timeout = cfg.thresholds.checkTimeout;
     }
     // lib.optionalAttrs (cfg.thresholds.maxLoad != null) { max_load = cfg.thresholds.maxLoad; };
     repos = lib.mapAttrs (_: r: {
@@ -176,6 +177,17 @@ in
           below this value. null (the default) means the machine's core count.
           Renders as `thresholds.max_load`. A tunable, to be calibrated from the
           load sampled while a check runs (see the package README).
+        '';
+      };
+      checkTimeout = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 3600;
+        description = ''
+          Wall-clock cap, in seconds, on one `nix flake check` of the verify
+          role. A check that exceeds it is killed (the whole process group) and
+          stored as a red verdict marked `timedOut`, so a hung check cannot hold
+          the single-flight lease for hours. 0 turns the cap off. Renders as
+          `thresholds.check_timeout`.
         '';
       };
       niceLevel = lib.mkOption {

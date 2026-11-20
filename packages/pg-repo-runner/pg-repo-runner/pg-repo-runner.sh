@@ -232,6 +232,9 @@ Files and environment:
   PG_OSX_NOTIFY_BIN              replaces the pg-osx-notify CLI (test seam)
   PG_REPO_RUNNER_RETRY_WINDOW   seconds an emitted tip item stays offered
                                 (else thresholds.retry_window, else 3600)
+  PG_REPO_RUNNER_CHECK_TIMEOUT  wall-clock cap in seconds on one nix flake check
+                                (else thresholds.check_timeout, else 3600; 0 = off);
+                                a check over it is a red verdict marked timedOut
   PG_REPO_RUNNER_CHECK_INTERVAL seconds between two finished checks of one repo;
                                 verify declines (exit 9) inside it (else
                                 thresholds.check_interval, else 3600; 0 = off)
@@ -312,7 +315,10 @@ rr_verify_override() {
     rr_log "override check: prerequisite missing: pn ($RR_PN_BIN) not found on PATH or in a profile bin dir; no verdict (see $olog)"
     return 1
   fi
-  PN_WORKSPACE_ROOT="$root" "${RR_NICE_BIN:-nice}" -n "$(rr_nice_level)" \
+  local -a cap=()
+  rr_cap_pre "$(($(rr_check_cap) / 4))"
+  cap=("${RR_CAP_PRE[@]}")
+  PN_WORKSPACE_ROOT="$root" "${cap[@]}" "${RR_NICE_BIN:-nice}" -n "$(rr_nice_level)" \
     env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY \
     "${RR_PN_BIN:-pn}" workspace flake-check --no-build --rev "$sha" "$repo" >"$olog" 2>&1 || rc=$?
   finished="$(rr_now)"
@@ -344,7 +350,7 @@ rr_verify_override() {
 # working tree is never read (the check runs on an immutable git snapshot).
 # shellcheck disable=SC2329  # invoked indirectly as "act_$role"
 act_verify() {
-  local repo="$RR_ITEM_REPO" root branch full tip url log rc t0 t1 started finished load0 load1 extra now left cls reason failed n=0 environmental
+  local repo="$RR_ITEM_REPO" root branch full tip url log rc cap timedout=0 t0 t1 started finished load0 load1 extra now left cls reason failed n=0 environmental
   root="$(rr_cfg '.workspace_root // empty')"
 
   # precheck: the sha exists as a commit
@@ -394,13 +400,22 @@ act_verify() {
   load0="$(rr_loadavg1)" || load0=""
   rr_log "check start: nix flake check --keep-going --no-write-lock-file $url (load $load0)"
   rc=0
-  rr_nix_run flake check --keep-going --no-write-lock-file "$url" >"$log" 2>&1 || rc=$?
+  cap="$(rr_check_cap)"
+  RR_NIX_CAP="$cap" rr_nix_run flake check --keep-going --no-write-lock-file "$url" >"$log" 2>&1 || rc=$?
   t1="$(rr_epoch)"
+  # 124 is the cap's TERM; 137 is its --kill-after KILL, but a nix killed by a stray
+  # SIGKILL also exits 137, so 137 counts as a timeout only once the cap has elapsed
+  if ((cap > 0 && (rc == 124 || (rc == 137 && t1 - t0 >= cap)))); then
+    timedout=1
+    rc=124
+    printf 'check timed out after %ss\n' "$cap" >>"$log"
+  fi
   finished="$(rr_now)"
   load1="$(rr_loadavg1)" || load1=""
+  ((!timedout)) || rr_log "check timed out after ${cap}s: $repo@$full (the process group was killed)"
   rr_log "check end: exit=$rc after $((t1 - t0))s (load $load1), output in $log"
 
-  if rr_signal_exit "$rc"; then
+  if ((!timedout)) && rr_signal_exit "$rc"; then
     rr_err "nix was killed by signal $((rc - 128)) (exit $rc): a malfunction, no verdict is stored"
     return 1
   fi
@@ -410,7 +425,14 @@ act_verify() {
   # shellcheck disable=SC2016  # jq program, not shell: $-names are jq variables
   extra="$(rr_jq -nc --argjson d "$((t1 - t0))" --arg l0 "$load0" --arg l1 "$load1" \
     '{durationS: $d, loadStart: ($l0 | tonumber? // null), loadEnd: ($l1 | tonumber? // null)}')" || return 1
-  if ((rc == 0)); then
+  if ((timedout)); then
+    # a hung or slow check is red, not error (error would be re-offered every retry
+    # window and re-run for the full cap each time); no sibling-override check
+    extra="$(rr_jq -c '. + {timedOut: true}' <<<"$extra")" || return 1
+    rr_verdict_write "$repo" "$full" check red locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
+    rr_surface_raise "$repo" red "$full" "check timed out after ${cap}s: the check exceeded the cap, hung or slow, not a failing check; exit $rc, log $log" ||
+      rr_log "surface: raising the red transition failed for $repo@$full"
+  elif ((rc == 0)); then
     rr_verdict_write "$repo" "$full" check green locked "$started" "$finished" "$rc" "$log" "$extra" || return 1
     # surfacing never changes the exit status of the run: a failure stays owed
     rr_surface_green "$repo" "$RR_REPO_PATH" "$full" \

@@ -308,3 +308,42 @@ groups:
                 - evaluator:
                     type: gt
                     params: [172800]
+      - uid: pg-repo-runner-check-timeouts
+        title: pg-repo-runner checks keep hitting the wall-clock cap
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "Two or more nix flake checks of a repo hit the pg-repo-runner wall-clock cap within a day"
+          description: "pg_repo_runner_check_timeouts rose by 2 or more in the last day for this repo: its verify checks were killed at thresholds.check_timeout (default 3600 s) and stored as red verdicts marked timedOut. That is a hung or slow check, not a failing one: read the check log under the runner's state directory for the last output, look for a stuck builder or a wedged nix daemon, and raise thresholds.check_timeout only if the check is legitimately slower."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max by (repo) (max_over_time(pg_repo_runner_check_timeouts[1d])) - max by (repo) (min_over_time(pg_repo_runner_check_timeouts[1d]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]

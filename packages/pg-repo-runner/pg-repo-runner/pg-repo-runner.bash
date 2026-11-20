@@ -429,11 +429,30 @@ rr_nix_run() {
     return 1
   fi
   level="$(rr_nice_level)"
+  # RR_NIX_CAP (seconds, set by the caller; unset or 0 = no cap) puts the whole chain
+  # under a timeout that kills the process group, so nix and its children die together.
+  local -a cap=()
+  rr_cap_pre "${RR_NIX_CAP:-0}"
+  cap=("${RR_CAP_PRE[@]}")
   if [[ -n $wrapped ]]; then
-    "$nice" -n "$level" "$wrapped" "$nix" "$@"
+    "${cap[@]}" "$nice" -n "$level" "$wrapped" "$nix" "$@"
   else
     rr_err "pg-nix-log-wrapped is not configured; running nix without it"
-    "$nice" -n "$level" "$nix" "$@"
+    "${cap[@]}" "$nice" -n "$level" "$nix" "$@"
+  fi
+}
+
+# rr_cap_pre SECONDS: sets the array RR_CAP_PRE to a wall-clock-cap prefix: the
+# injected RR_TIMEOUT_BIN (else `timeout` on PATH) with a 60 s SIGKILL follow-up;
+# empty for 0 or when no timeout binary exists. Exit 124 (TERM) or 137 (KILL) means
+# the cap was hit.
+rr_cap_pre() {
+  RR_CAP_PRE=()
+  [[ ${1:-0} =~ ^[0-9]+$ && $1 -gt 0 ]] || return 0
+  if [[ -n ${RR_TIMEOUT_BIN:-} ]]; then
+    RR_CAP_PRE=("$RR_TIMEOUT_BIN" --kill-after=60 "$1")
+  elif command -v timeout >/dev/null 2>&1; then
+    RR_CAP_PRE=(timeout --kill-after=60 "$1")
   fi
 }
 
@@ -468,6 +487,16 @@ rr_retry_window() {
 rr_check_interval() {
   local v="${PG_REPO_RUNNER_CHECK_INTERVAL:-}"
   [[ -n $v ]] || v="$(rr_cfg '.thresholds.check_interval // empty')"
+  [[ $v =~ ^[0-9]+$ ]] || v=3600
+  printf '%s' "$v"
+}
+
+# rr_check_cap: the wall-clock cap, in seconds, on one `nix flake check`
+# (PG_REPO_RUNNER_CHECK_TIMEOUT, else the config's thresholds.check_timeout, else
+# 3600). 0 turns the cap off.
+rr_check_cap() {
+  local v="${PG_REPO_RUNNER_CHECK_TIMEOUT:-}"
+  [[ -n $v ]] || v="$(rr_cfg '.thresholds.check_timeout // empty')"
   [[ $v =~ ^[0-9]+$ ]] || v=3600
   printf '%s' "$v"
 }
@@ -1693,6 +1722,7 @@ rr_m_state_points() {
       (select($l != null and $l.result == "red")
        | ($l.failedChecks // [])[] as $fc
        | pt("check_failed"; 1; "repo=\($r),check=\($fc)")),
+      pt("check_timeouts"; ($c | map(select(.timedOut == true)) | length); "repo=\($r)"),
       pt("check_latest_red"; (if $l != null and $l.result == "red" then 1 else 0 end); "repo=\($r)"),
       (["green", "red"][] as $res
        | pt("check_override_verdicts"; ($o | map(select(.result == $res)) | length); "repo=\($r),result=\($res)")),
