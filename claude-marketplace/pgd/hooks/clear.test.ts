@@ -3,6 +3,8 @@
 // other end reason changes nothing.
 import { expect, test } from 'claude-code/testing'
 import { CLEAR_RETRY_DELAYS_MS, registerClearHooks } from './clear'
+import { readCompactionOnce } from './compaction'
+import { loadSessionFacts, resetSessionFacts } from './info-modal'
 import { captureLimits, flushLimitsCapture, initLimitsCapture } from './limits-capture'
 import { setOptions } from './options'
 import { defineSource, initSources, readCached, setValue } from './source'
@@ -181,4 +183,60 @@ test('the status.jsonl capture starts over: the new session file holds only its 
   expect(last.path).toBe('/cfg/projects/-work-r/new-id.status.jsonl')
   expect(last.text.trim().split('\n')).toHaveLength(1)
   expect(last.text).toContain('"session_id":"new-id"')
+})
+
+test('a clear lets the next turn read the compaction marker again, so a never-seen id still heals', async () => {
+  const { hook, $, fetches } = setup()
+  readCompactionOnce() // the first turn.complete of the old session spent the one-time read
+  await settle()
+  expect(fetches.compactionMarker).toBe(1)
+  await hook($, END, async () => ({}))
+  readCompactionOnce()
+  await settle()
+  expect(fetches.compactionMarker).toBe(2)
+})
+
+test('a clear makes the Info modal read the session id again', async () => {
+  const { hook, $ } = setup()
+  let reads = 0
+  const host = {
+    session: {
+      id: async () => {
+        reads++
+        return 'x'
+      },
+    },
+  }
+  resetSessionFacts()
+  await loadSessionFacts(host as never)
+  await loadSessionFacts(host as never)
+  expect(reads).toBe(1) // memoised
+  await hook($, END, async () => ({}))
+  await loadSessionFacts(host as never)
+  expect(reads).toBe(2)
+})
+
+test('an end event without the ending id takes it from $.session.id() before the clear', async () => {
+  const { hook, $, fire, world, fetches } = setup()
+  await hook($, { reason: 'clear' }, async () => ({}))
+  await fire() // id is still the old one: nothing read
+  expect(fetches).toEqual({})
+  world.id = 'new-id'
+  await fire()
+  expect(fetches).toEqual({ sessionName: 1, sessionMode: 1, compactionMarker: 1 })
+})
+
+test('when the engine end step rejects, the clear already ran, the error propagates and the timers still start', async () => {
+  const { hook, $, timers } = setup()
+  let caught: unknown
+  try {
+    await hook($, END, async () => {
+      throw new Error('end step failed')
+    })
+  } catch (err) {
+    caught = err
+  }
+  expect((caught as Error).message).toBe('end step failed')
+  expect(readCached('usage')).toBe(undefined)
+  expect(timers).toHaveLength(1)
 })

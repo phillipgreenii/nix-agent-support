@@ -266,7 +266,10 @@ export function refresh(id: string, opts?: { force?: boolean }): void {
   const e = entries.get(id)
   if (!e || !e.def.fetch) return
   if (e.inFlight) {
-    if (opts?.force && (e.def.intervalMs <= 0 || active(e))) e.rerun = true
+    if (opts?.force) {
+      if (e.def.intervalMs <= 0 || active(e)) e.rerun = true
+      else e.forced = true // not shown now: remember the request, as the not-in-flight path does
+    }
     return
   }
   if (e.def.intervalMs > 0) {

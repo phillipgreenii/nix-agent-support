@@ -126,7 +126,11 @@ export function flushLimitsCapture(): Promise<void> {
 // /clear and an in-process resume move the process to another session id and another
 // status.jsonl: forget the old file's text and the last signature, so the next reading seeds from
 // the new file and its first record is written even when the limits did not move.
+// The reset runs on the write chain, so a record queued before it finishes first and cannot
+// re-seed the buffer afterwards.
 export function resetLimitsCapture(): void {
-  buffer = undefined
-  lastSig = undefined
+  chain = chain.then(() => {
+    buffer = undefined
+    lastSig = undefined
+  })
 }

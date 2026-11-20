@@ -91,6 +91,11 @@ export function readCompactionOnce(): void {
   refresh(COMPACTION_ID)
 }
 
+// A new session id (/clear, /resume) has its own marker: let the next turn.complete read it again.
+export function resetCompactionRead(): void {
+  readOnce = false
+}
+
 // After a compaction ran: read the marker now (forced past the throttle).
 export function refreshCompaction(): void {
   refresh(COMPACTION_ID, { force: true })

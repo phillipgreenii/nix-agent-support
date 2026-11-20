@@ -250,3 +250,28 @@ test('a fetch started after clearValue stores its result', async () => {
   await clock.advance(0)
   expect(readCached('s')).toBe('v2')
 })
+
+test('a forced refresh that arrives while a fetch runs on a source nobody is showing is remembered', async () => {
+  const { clock } = setup()
+  let release: (v: string) => void = () => undefined
+  let calls = 0
+  defineSource<string>({
+    id: 's',
+    intervalMs: 60_000,
+    feeds: ['modal'],
+    fetch: () => {
+      calls++
+      return new Promise<string>(r => (release = r))
+    },
+  })
+  setVisible('modal', true)
+  await clock.advance(0)
+  expect(calls).toBe(1) // in flight
+  setVisible('modal', false)
+  refresh('s', { force: true }) // inactive and in flight: must not be lost
+  release('first')
+  await clock.advance(0)
+  setVisible('modal', true)
+  await clock.advance(0)
+  expect(calls).toBe(2)
+})
