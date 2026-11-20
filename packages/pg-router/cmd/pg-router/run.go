@@ -16,6 +16,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
+	"github.com/phillipgreenii/pg-router/internal/daemon"
 	"github.com/phillipgreenii/pg-router/internal/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
@@ -685,108 +686,77 @@ func runDaemon(ctx context.Context, g *lifecycle.Group, pr preparedRun, drainTim
 		return exitGeneric
 	}
 	// No new offers once shutdown is requested, including the re-offer a settling
-	// Kick offer makes for its listener's next head (bead pg2-ag31a).
+	// Kick offer makes for its listener's next head.
 	stopChaining := context.AfterFunc(ctx, q.StopChaining)
 	defer stopChaining()
 	validateRolesAtStartup(ctx, pr.o, pr.cfg)
-	// Non-blocking, fire-and-forget per role, no dispatch gate (beads pg2-pzb5d8
-	// and pg2-fx5x0l.6, see startPostStartupAsync); run-until-idle keeps the
-	// blocking postStartupAll.
+	// Non-blocking, fire-and-forget per role, no dispatch gate (see
+	// startPostStartupAsync); run-until-idle keeps the blocking postStartupAll.
 	startPostStartupAsync(ctx, pr.o, pr.cfg)
-	// Ordering considered and accepted (same reasoning as runRunUntilIdle's
-	// identical defer pair; review of this bead's design doc, "decouple
-	// pg-router-core's tick loop from per-dispatch-pass completion"): defers
-	// run LIFO, and metrics.Flush's defer below is registered AFTER this
-	// one, so it runs BEFORE drainThenCloseStore's in-flight wait completes
-	// — the very last accept settling during shutdown can be invisible to
-	// the final metrics snapshot. Judged low-severity (an inherent
-	// "final snapshot" limitation, not a regression this decoupling
-	// introduces) and left unreordered deliberately: reordering would make
-	// metrics.Flush block on this same drain, a real behavior change, not a
-	// comment-only fix.
 	// survives names the roles whose dispatches this shutdown leaves running
 	// (ADR 0085); the drain and the store close do not wait on them.
 	survivors := survivingRoles(pr.cfg)
 	survives := func(listenerID string) bool { return survivors[listenerID] }
-	defer func() {
-		g.SetPhase("store_close")
-		drainThenCloseStore(ctx, q, storeClose, clk.Within(budget.Tail), survives)
-	}()
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
-
-	defer func() {
-		g.SetPhase("pre_shutdown")
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clk.Within(budget.PreShutdown))
-		defer cancel()
-		preShutdownAll(ctx, pr.o, pr.cfg)
-	}()
-	defer func() {
-		g.SetPhase("accept_close")
-		_ = svc.Close()
-		if err := <-accepted; err != nil {
-			slog.Warn("core accept loop exited with an error", "err", err)
-		}
-	}()
-	// Force a final metrics snapshot/export before exit (mirrors
-	// runRunUntilIdle's own identical defer): without this, a
-	// --metrics-addr-configured Prometheus exporter's periodic collection
-	// tick might never land before shutdown, and the package-default
-	// ManualReader has nothing to flush regardless (a safe no-op either way
-	// — see metrics.Flush's own doc comment).
-	//
-	// Ordering considered and accepted (see drainThenCloseStore's defer
-	// above, registered first): this defer runs BEFORE that one (LIFO), so
-	// this snapshot can miss the very last accept settling during
-	// drainThenCloseStore's own in-flight wait. Accepted as a pre-existing
-	// final-snapshot limitation, not a new regression — see that defer's own
-	// comment for the full reasoning.
-	defer func() {
-		g.SetPhase("metrics_flush")
-		if err := metrics.Flush(context.WithoutCancel(ctx), mp); err != nil {
-			slog.Warn("run: metrics flush failed", "err", err)
-		}
-	}()
-	// Registered after the flush defer so it runs before it: the shutdown
-	// duration and overrun signals land in the final snapshot.
+	// Registered here so it is observed by the final metrics snapshot: the
+	// shutdown duration and overrun signals land in it.
 	signals := registerCommonSignals(mp)
-	defer func() { observeShutdown(context.WithoutCancel(ctx), signals, clk) }()
-
-	// The first dispatch pass of this process runs BEFORE its first producer tick
-	// (DEC-EVENT-5, bead pg2-x3zkb). A fresh process has no last-fire time for any
-	// source, so its first tick polls every one of them, one after another, and
-	// runOneTick dispatches only after the whole producer pass; on 2026-10-12 the
-	// daemon that restarted over a surviving ccpool dispatch (ADR 0085) held no offer
-	// for it for 4 min 28.6 s, and pg_router_listener_in_flight read 0 for its role
-	// the whole time. What the durable queue restored is already queued, so nothing
-	// needs producing before it is re-offered. No dispatch waits
-	// for a postStartup hook any more (the gate startPostStartupAsync once
-	// installed is gone, bead pg2-fx5x0l.6), and this pass is still silent
-	// once shutdown was requested (the same rule as runOneTick's own pass).
-	// The initial level pull pass runs before it, with a bounded wait (ADM-6).
-	startLevelPulls(ctx, pr.cfg, pr.o.LevelPuller())
-	if ctx.Err() == nil {
-		slog.Info("run: startup dispatch pass, before the first producer tick", "offersLaunched", q.Kick())
-	}
 
 	tick := pr.cfg.PollInterval
 	if tick <= 0 {
 		tick = 10 * time.Second
 	}
-	ticker := time.NewTicker(tick)
-	defer ticker.Stop()
-	prevGates := ""
-	for {
-		prevGates = runOneTick(ctx, pr.cfg, pr.o, svc, q, prevGates, os.Stderr)
-		select {
-		case <-ctx.Done():
-			slog.Info("run: shutdown requested")
-			g.SetPhase("drain")
-			// Drain BEFORE returning: the deferred preShutdownAll (the ccpool
-			// session sweep) must not run while a dispatch is still in flight.
+	// The explicit shutdown order reproduces the effective order of the former
+	// LIFO defers: duration signals, final metrics snapshot, accept loop close,
+	// handlers' preShutdown hooks, then the store close. The final snapshot
+	// runs before the store-close drain, so the very last accept settling
+	// during that drain can be invisible to it (an accepted, pre-existing
+	// final-snapshot limitation; reordering would make the flush block on the
+	// drain, a behavior change).
+	app := daemon.NewApp(daemon.AppConfig{
+		Interval: tick,
+		// The first dispatch pass of this process runs BEFORE its first producer
+		// tick (DEC-EVENT-5): a fresh process has no last-fire time, so its first
+		// tick polls every source one after another, and what the durable queue
+		// restored is already queued. The initial level pull pass runs before it,
+		// with a bounded wait (ADM-6). Silent once shutdown was requested.
+		Startup: func(ctx context.Context) {
+			startLevelPulls(ctx, pr.cfg, pr.o.LevelPuller())
+			if ctx.Err() == nil {
+				slog.Info("run: startup dispatch pass, before the first producer tick", "offersLaunched", q.Kick())
+			}
+		},
+		Tick: func(ctx context.Context, prevGates string) string {
+			return runOneTick(ctx, pr.cfg, pr.o, svc, q, prevGates, os.Stderr)
+		},
+		Drain: func(ctx context.Context) {
 			drainThenCancelDispatch(ctx, q, cancelDispatch, clk.Within(drainTimeout), survives)
-			return exitOK
-		case <-ticker.C:
-		}
-	}
+		},
+		SetPhase: g.SetPhase,
+		Shutdown: []daemon.Step{
+			{Run: func() { observeShutdown(context.WithoutCancel(ctx), signals, clk) }},
+			{Phase: "metrics_flush", Run: func() {
+				if err := metrics.Flush(context.WithoutCancel(ctx), mp); err != nil {
+					slog.Warn("run: metrics flush failed", "err", err)
+				}
+			}},
+			{Phase: "accept_close", Run: func() {
+				_ = svc.Close()
+				if err := <-accepted; err != nil {
+					slog.Warn("core accept loop exited with an error", "err", err)
+				}
+			}},
+			{Phase: "pre_shutdown", Run: func() {
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clk.Within(budget.PreShutdown))
+				defer cancel()
+				preShutdownAll(ctx, pr.o, pr.cfg)
+			}},
+			{Phase: "store_close", Run: func() {
+				drainThenCloseStore(ctx, q, storeClose, clk.Within(budget.Tail), survives)
+			}},
+		},
+	})
+	app.Run(ctx)
+	return exitOK
 }
