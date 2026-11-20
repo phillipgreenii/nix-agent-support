@@ -7,6 +7,14 @@
 # repository's last-reap age, so either going over 1800 seconds (three 600-second reaper
 # intervals) fires. A repository whose reap keeps being skipped keeps its entry and ages until this
 # fires.
+#
+# The expression reads each age through last_over_time over 5 minutes (five 1-minute scrape
+# intervals), so one or a few timed-out scrapes, which leave stale markers and an empty instant
+# query, do not fire the rule while the last recorded age is under 1800 seconds. The rule still
+# fires when an age is over 1800 seconds, and through noDataState Alerting when no sample exists in
+# the whole window (the reaper never ran, or the exporter has been unreadable for over 5 minutes;
+# the exporter-down rule names the second case). The exporter also bounds its git work to 60 percent
+# of the scrape timeout, so a scrape under host load still carries these ages.
 apiVersion: 1
 groups:
   - orgId: 1
@@ -37,7 +45,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max by (repo) ({__name__=~"pg_gwm_reaper_last_success_age_seconds|pg_gwm_last_reap_age_seconds"})'
+              expr: 'max by (repo) (last_over_time({__name__=~"pg_gwm_reaper_last_success_age_seconds|pg_gwm_last_reap_age_seconds"}[5m]))'
           - refId: B
             datasourceUid: __expr__
             model:

@@ -28,8 +28,12 @@ type Collector struct {
 	CountersPath string
 	ReaperPath   string
 	Git          gitrun.Git
-	Now          func() time.Time
-	FreeBytes    func(string) (uint64, error)
+	// GitBudget bounds all git work of one Collect; zero means only the
+	// per-call gitTimeout. When it ends, git-derived values of the remaining
+	// repositories are omitted and the file-derived ones are still served.
+	GitBudget time.Duration
+	Now       func() time.Time
+	FreeBytes func(string) (uint64, error)
 }
 
 func realPath(p string) string {
@@ -60,6 +64,11 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	free := c.FreeBytes
 	if free == nil {
 		free = provision.FreeBytes
+	}
+	if c.GitBudget > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.GitBudget)
+		defer cancel()
 	}
 	snap := Snapshot{Version: c.Version, ConfigValid: true}
 	cfg, err := config.Load(c.ConfigPath)

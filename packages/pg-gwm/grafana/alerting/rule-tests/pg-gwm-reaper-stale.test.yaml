@@ -52,6 +52,37 @@ tests:
         alertname: pg-gwm-reaper-stale
         exp_alerts: []
 
+  - name: missed scrapes with ages under 1800 seconds stay quiet
+    interval: 1m
+    input_series:
+      # Ages grow 10 per minute; minutes 20 to 22 are timed-out scrapes (stale markers).
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "0+10x19 stale stale stale 0+10x80"
+      - series: pg_gwm_last_reap_age_seconds{repo="r-aaaaaa"}
+        values: "0+10x19 stale stale stale 0+10x80"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+      - eval_time: 22m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+
+  - name: an age over 1800 seconds still fires through missed scrapes
+    interval: 1m
+    input_series:
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "0+60x32 stale stale stale 2100+60x20"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
   - name: no series at all (the reaper never ran) shows nothing to promtool
     interval: 1m
     input_series:

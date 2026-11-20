@@ -132,5 +132,10 @@ Extensions:
   `list`, `preserved list`, the event log, the metrics and alerts of `INV-GWM-33` (served by the
   exporter, `pg-gwm serve`, on a loopback `/metrics` port) and the reaper record `reaper.json` (the
   last run's start, end and worst outcome, and each repository's entry; the age of its last success
-  feeds the stale-reaper alert). What MUST
+  feeds the stale-reaper alert). The exporter MUST answer inside the scraper's timeout under host
+  load: it serves the file-derived values first and bounds its git-derived values (preserved
+  branches) to 60 percent of the scrape timeout (the `X-Prometheus-Scrape-Timeout-Seconds` header,
+  10 seconds when absent), omitting what does not finish. The stale-reaper alert MUST NOT fire on a
+  missed scrape alone: it reads each age over the last 5 minutes, so it fires only when an age is
+  over 1800 seconds or no sample exists in that whole window. What MUST
   hold: `INV-GWM-33`, `INV-GWM-34`. The counterparty is `ACTOR-OPERATOR`.
