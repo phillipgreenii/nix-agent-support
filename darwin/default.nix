@@ -25,6 +25,7 @@
     ./modules/ccpool
     ./modules/pg-router-ccpool-handler
     ./modules/pg-ccaudit
+    ./modules/claude-tool-tracker
     ./modules/ollama
     ./modules/codeburn
     ./modules/pg-disk-reclaimer

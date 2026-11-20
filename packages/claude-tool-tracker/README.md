@@ -107,6 +107,20 @@ directory above.
   when lines were skipped (they are reported, not fatal); `1` for an unreadable directory, file or
   database; `2` for a usage error. Run it repeatedly; two runs at once wait for each other.
 
+### Scheduling and health check
+
+Nothing in the binary runs ingest by itself: the hooks only append event files, and
+`claude-extended-tool-approver report --source tracker` reads the database. On darwin the
+home-manager option `phillipgreenii.programs.claude-tool-tracker.ingest.enable` (default: follows
+`enable`) makes the darwin module `darwin/modules/claude-tool-tracker` register the launchd user agent
+`com.phillipg.claude-tool-tracker-ingest`, which runs `claude-tool-tracker ingest` every
+`ingest.intervalSeconds` (default 300) and appends one `total` line per run to
+`$XDG_STATE_HOME/claude-tool-tracker/ingest.out.log` (errors go to `ingest.err.log`).
+
+Health check: `launchctl list com.phillipg.claude-tool-tracker-ingest` shows the job, the last line of
+`ingest.out.log` is recent, and `tracker.db`'s modification time is within a few intervals of the
+newest `events/*.tracker.jsonl`. A database older than the event files means ingest is not running.
+
 ## Timing
 
 ```

@@ -21,6 +21,31 @@ in
       '';
     };
     package = lib.mkPackageOption pkgs "claude-tool-tracker" { };
+
+    ingest = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = cfg.enable;
+        defaultText = lib.literalExpression "config.phillipgreenii.programs.claude-tool-tracker.enable";
+        example = true;
+        description = ''
+          Run `claude-tool-tracker ingest` on a timer (a launchd user agent registered by the
+          darwin module) so tracker.db keeps up with the event files the hooks append. Without
+          it nothing ingests: the hooks only write spool files, and `report --source tracker`
+          reads the database, so the report silently stops at the last manual ingest.
+        '';
+      };
+
+      intervalSeconds = lib.mkOption {
+        type = lib.types.int;
+        default = 300;
+        description = ''
+          How often (seconds) to run the ingest. Ingest is incremental (it resumes each file
+          from a remembered byte offset) and two runs at once wait for each other, so an
+          overlapping tick is harmless.
+        '';
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {

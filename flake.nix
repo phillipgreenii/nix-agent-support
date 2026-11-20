@@ -3482,6 +3482,61 @@
                 assert off.phillipgreenii.system.launchdServices.daemons == { };
                 pkgs.runCommand "test-pg-router-heartbeat-darwin-module-ok" { } "touch $out";
 
+              # darwin/modules/claude-tool-tracker: tracker.db is written only by
+              # `claude-tool-tracker ingest`, so the module registers a periodic launchd
+              # user agent for it whenever some home-manager user enables
+              # programs.claude-tool-tracker.ingest. Without the agent the database goes
+              # stale while the hooks keep appending event files.
+              test-claude-tool-tracker-ingest-darwin-module =
+                let
+                  evalDarwin =
+                    users:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/claude-tool-tracker/default.nix
+                        {
+                          options = {
+                            home-manager.users = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            system.primaryUser = lib.mkOption {
+                              type = lib.types.nullOr lib.types.str;
+                              default = "tester";
+                            };
+                            phillipgreenii.system.launchdServices.userAgents = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                          };
+                          config.home-manager.users = users;
+                        }
+                      ];
+                    }).config;
+                  hm = enable: interval: {
+                    phillipgreenii.programs.claude-tool-tracker.ingest = {
+                      inherit enable;
+                      intervalSeconds = interval;
+                    };
+                  };
+                  on = evalDarwin { alice = hm true 120; };
+                  off = evalDarwin { alice = hm false 120; };
+                  none = evalDarwin { };
+                  a = on.phillipgreenii.system.launchdServices.userAgents.claude-tool-tracker-ingest;
+                in
+                assert a.label == "com.phillipg.claude-tool-tracker-ingest";
+                assert a.runAtLoad;
+                assert !a.keepAlive;
+                assert !a.healthCheck;
+                assert a.serviceConfig.StartInterval == 120;
+                assert
+                  a.serviceConfig.StandardOutPath == "/Users/tester/.local/state/claude-tool-tracker/ingest.out.log";
+                assert lib.hasInfix "claude-tool-tracker ingest" (builtins.unsafeDiscardStringContext a.script);
+                assert off.phillipgreenii.system.launchdServices.userAgents == { };
+                assert none.phillipgreenii.system.launchdServices.userAgents == { };
+                pkgs.runCommand "test-claude-tool-tracker-ingest-darwin-module-ok" { } "touch $out";
+
               # pg-task-focus HM module (bead pg2-t7me1.2): the daemon's LaunchAgent is
               # registered from home/programs/pg-task-focus via
               # phillipgreenii.programs.launchdServices.userAgents (personal ADR 0055,
