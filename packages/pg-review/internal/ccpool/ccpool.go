@@ -137,7 +137,20 @@ type Client interface {
 type CLI struct {
 	Binary  string // default "ccpool"
 	PoolDir string
+	// RecheckDelay is the wait before `result` is read again after it exited
+	// 0 with no text (default DefaultRecheckDelay; negative disables).
+	RecheckDelay time.Duration
 }
+
+// DefaultRecheckDelay and recheckTries bound the re-read of an empty result.
+// `ccpool result` has been seen to exit 0 with no text just before the
+// final message of the turn is readable (live replays and the doctor's session
+// check both failed on it, then passed on a re-run), so an empty read is
+// confirmed a few times before it is reported as an empty reply.
+const (
+	DefaultRecheckDelay = 2 * time.Second
+	recheckTries        = 3
+)
 
 // Environ returns the environment of a ccpool child process.
 func (c CLI) Environ() []string {
@@ -227,6 +240,18 @@ func (c CLI) Reply(ctx context.Context, externalID, prompt string) (string, erro
 // Result implements Client.
 func (c CLI) Result(ctx context.Context, turnID string) (string, ResultStatus, error) {
 	out, err := c.run(ctx, "result", turnID)
+	delay := c.RecheckDelay
+	if delay == 0 {
+		delay = DefaultRecheckDelay
+	}
+	for i := 0; err == nil && strings.TrimSpace(out) == "" && delay > 0 && i < recheckTries; i++ {
+		select {
+		case <-ctx.Done():
+			return "", ResultUnknown, ctx.Err()
+		case <-time.After(delay):
+		}
+		out, err = c.run(ctx, "result", turnID)
+	}
 	if err == nil {
 		return strings.TrimRight(out, "\n"), ResultDone, nil
 	}

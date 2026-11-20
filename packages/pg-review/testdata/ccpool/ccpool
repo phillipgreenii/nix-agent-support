@@ -20,6 +20,13 @@ reply)
   ;;
 result)
   [ "${result_exit:-0}" = 0 ] || exit "$result_exit"
+  # result_empty_first=N: the first N reads print nothing and exit 0, as a
+  # turn read before its final message is written does.
+  if [ "${result_empty_first:-0}" -gt 0 ]; then
+    n=$(cat "${FAKE_CCPOOL_LOG}.results" 2>/dev/null || echo 0)
+    echo $((n + 1)) >"${FAKE_CCPOOL_LOG}.results"
+    [ "$n" -ge "$result_empty_first" ] || exit 0
+  fi
   echo "${result_text:-final message}"
   ;;
 state) echo "${state_json:-$default_state}" ;;

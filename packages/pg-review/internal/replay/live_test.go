@@ -20,19 +20,33 @@ import (
 const liveNote = "\nIn this session you have no tools and cannot run `pg-review agent q`; " +
 	"the evidence rows below are all the evidence there is. Reply once, with the single fenced JSON block as your final message.\n"
 
-// maxAttempts mirrors the runner, which sends one repair after a rejected
-// reply: a pass gets a fresh session once when its reply was rejected.
+// maxAttempts bounds the fresh sessions of one pass: a reply that is rejected
+// even after the one repair Run sends starts over once.
 const maxAttempts = 2
 
 // liveAnalyst sends the assembled prompt, with the evidence rows appended as
-// data, to a real ccpool session and returns its final message.
+// data, to a real ccpool session and returns its final message. It keeps the
+// session of the latest Analyse open so Repair can reply in it; the next
+// Analyse and finish close it.
 type liveAnalyst struct {
 	client ccpool.Client
 	cwd    string
 	n      int
+	id     string
+}
+
+// finish closes the open session. It is detached from ctx on purpose: the
+// session must still be closed when ctx was cancelled (a timeout or an
+// interrupted replay).
+func (a *liveAnalyst) finish(ctx context.Context) {
+	if a.id != "" {
+		_ = a.client.Close(context.WithoutCancel(ctx), a.id, "replay")
+		a.id = ""
+	}
 }
 
 func (a *liveAnalyst) Analyse(ctx context.Context, promptText string, ev []validate.EvidenceRow) (string, error) {
+	a.finish(ctx)
 	a.n++
 	id := fmt.Sprintf("replay-%d-%d", os.Getpid(), a.n)
 	if err := a.client.Start(ctx, ccpool.StartOpts{
@@ -41,14 +55,21 @@ func (a *liveAnalyst) Analyse(ctx context.Context, promptText string, ev []valid
 	}); err != nil {
 		return "", err
 	}
-	// Detached from ctx on purpose: the session must still be closed when ctx
-	// was cancelled (a timeout or an interrupted replay).
-	defer func() { _ = a.client.Close(context.WithoutCancel(ctx), id, "replay") }()
+	a.id = id
 	var rows string
 	for _, r := range ev {
 		rows += fmt.Sprintf("%s | %s | %s | %v | %s\n", r.ID, r.SubjectKey, r.Kind, r.Metrics, r.DefinedIn)
 	}
-	turn, err := a.client.Reply(ctx, id, promptText+liveNote+"\nEVIDENCE (data)\n"+rows)
+	return a.send(ctx, promptText+liveNote+"\nEVIDENCE (data)\n"+rows)
+}
+
+// Repair implements Repairer.
+func (a *liveAnalyst) Repair(ctx context.Context, repairText string) (string, error) {
+	return a.send(ctx, repairText)
+}
+
+func (a *liveAnalyst) send(ctx context.Context, text string) (string, error) {
+	turn, err := a.client.Reply(ctx, a.id, text)
 	if err != nil {
 		return "", err
 	}
@@ -80,6 +101,7 @@ func TestLiveReplay(t *testing.T) {
 	}
 	a := &liveAnalyst{client: ccpool.CLI{PoolDir: os.Getenv(ccpool.PoolEnv)}, cwd: t.TempDir()}
 	ctx := context.Background()
+	defer a.finish(ctx)
 	var outs []Outcome
 	for i := 0; i < 2; i++ {
 		var o Outcome

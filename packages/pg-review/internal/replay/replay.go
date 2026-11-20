@@ -98,6 +98,13 @@ type Analyst interface {
 	Analyse(ctx context.Context, promptText string, evidence []validate.EvidenceRow) (string, error)
 }
 
+// Repairer is an Analyst that can take a second message in the same session:
+// the repair text the runner would send after a rejected batch. Run sends it
+// at most once.
+type Repairer interface {
+	Repair(ctx context.Context, repairText string) (string, error)
+}
+
 // Canned is the deterministic analyst: it returns the next canned output,
 // fenced as a real final message, and wraps around after the last.
 type Canned struct {
@@ -178,21 +185,34 @@ func Run(ctx context.Context, f Fixture, a Analyst, ledgerPath string) (Outcome,
 	if err != nil {
 		return out, err
 	}
-	m := fenceRe.FindAllStringSubmatch(final, -1)
-	if len(m) == 0 {
-		return out, fmt.Errorf("replay: the final message has no fenced JSON block (message start: %q)", Snippet(final, snippetMax))
+	check := func(final string) error {
+		out.Doc = validate.Document{}
+		m := fenceRe.FindAllStringSubmatch(final, -1)
+		if len(m) == 0 {
+			return fmt.Errorf("replay: the final message has no fenced JSON block (message start: %q)", Snippet(final, snippetMax))
+		}
+		if err := json.Unmarshal([]byte(m[len(m)-1][1]), &out.Doc); err != nil {
+			return fmt.Errorf("replay: findings do not parse: %w", err)
+		}
+		if !out.Doc.End {
+			return errors.New("replay: findings lack the end sentinel")
+		}
+		out.CitedIDsValid = citedIDsValid(out.Doc, f.Evidence)
+		return validate.Validate(validate.Input{
+			Doc: out.Doc, Evidence: f.Evidence, Kinds: lens.Kinds,
+			FieldMaxChars: lim.FieldMaxChars, MaxFindings: maxFindings,
+		})
 	}
-	if err := json.Unmarshal([]byte(m[len(m)-1][1]), &out.Doc); err != nil {
-		return out, fmt.Errorf("replay: findings do not parse: %w", err)
+	err = check(final)
+	var ve *validate.Error
+	if r, ok := a.(Repairer); ok && errors.As(err, &ve) {
+		// The runner sends one repair after a rejected batch; so does a replay
+		// whose analyst can take a second message.
+		if final, err = r.Repair(ctx, prompt.Repair(ve.Failures)); err == nil {
+			err = check(final)
+		}
 	}
-	if !out.Doc.End {
-		return out, errors.New("replay: findings lack the end sentinel")
-	}
-	out.CitedIDsValid = citedIDsValid(out.Doc, f.Evidence)
-	if err := validate.Validate(validate.Input{
-		Doc: out.Doc, Evidence: f.Evidence, Kinds: lens.Kinds,
-		FieldMaxChars: lim.FieldMaxChars, MaxFindings: maxFindings,
-	}); err != nil {
+	if err != nil {
 		return out, err
 	}
 

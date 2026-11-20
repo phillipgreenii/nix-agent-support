@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 var bg = context.Background()
@@ -156,5 +157,23 @@ func TestExitCodeContract(t *testing.T) {
 	fakeCLI(t, "reply_exit=5\n")
 	if _, err := (CLI{}).Reply(bg, "1", "p"); IsBusy(err) {
 		t.Errorf("old busy code 5 must not read as busy")
+	}
+}
+
+// A result read that exits 0 with no text, before the final message is
+// readable, is re-read instead of reported as an empty reply.
+func TestResultRereadsAnEmptyRead(t *testing.T) {
+	fakeCLI(t, "result_empty_first=2\nresult_text='the answer'\n")
+	text, st, err := CLI{RecheckDelay: time.Millisecond}.Result(bg, "t")
+	if err != nil || st != ResultDone || text != "the answer" {
+		t.Fatalf("%q %v %v", text, st, err)
+	}
+}
+
+func TestResultStillEmptyAfterTheRereadsIsReportedEmpty(t *testing.T) {
+	fakeCLI(t, "result_empty_first=99\n")
+	text, st, err := CLI{RecheckDelay: time.Millisecond}.Result(bg, "t")
+	if err != nil || st != ResultDone || text != "" {
+		t.Fatalf("%q %v %v", text, st, err)
 	}
 }

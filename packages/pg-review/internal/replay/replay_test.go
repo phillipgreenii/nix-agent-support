@@ -424,3 +424,67 @@ func TestReplayRunRefusesAPromptWithoutARule(t *testing.T) {
 		t.Error("ErrPrompt identity")
 	}
 }
+
+// repairing answers its first message with a rejected batch and its repair
+// with the canned good one.
+type repairing struct {
+	good    string
+	repairs int
+	text    string
+}
+
+func (r *repairing) Analyse(context.Context, string, []validate.EvidenceRow) (string, error) {
+	return "```json\n{\"end\": false}\n```", nil
+}
+
+func (r *repairing) Repair(_ context.Context, text string) (string, error) {
+	r.repairs++
+	r.text = text
+	return r.good, nil
+}
+
+func TestRunSendsOneRepairAfterARejectedBatch(t *testing.T) {
+	f := load(t, "agent-workflow")
+	good, err := (&Canned{Outputs: f.Canned}).Analyse(context.Background(), "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An unfinished document is a parse-level rejection, not a validator one:
+	// it gets no repair.
+	r := &repairing{good: good}
+	if _, err := Run(context.Background(), f, r, filepath.Join(t.TempDir(), "l.db")); err == nil || r.repairs != 0 {
+		t.Fatalf("a document without the end sentinel must fail unrepaired: %v, repairs %d", err, r.repairs)
+	}
+	// A validator rejection gets one.
+	bad := strings.Replace(good, `"kind": "`, `"kind": "no-such-kind-`, 1)
+	if bad == good {
+		t.Skip("canned output has no kind field to corrupt")
+	}
+	r = &repairing{good: good}
+	a := analystFunc(func() string { return bad })
+	rr := &repairVia{first: a, r: r}
+	out, err := Run(context.Background(), f, rr, filepath.Join(t.TempDir(), "l.db"))
+	if err != nil || r.repairs != 1 || len(out.Filed) == 0 {
+		t.Fatalf("err %v, repairs %d, filed %d", err, r.repairs, len(out.Filed))
+	}
+	if !strings.Contains(r.text, "Your findings were rejected") {
+		t.Errorf("repair text = %q", r.text)
+	}
+}
+
+type analystFunc func() string
+
+func (f analystFunc) Analyse(context.Context, string, []validate.EvidenceRow) (string, error) {
+	return f(), nil
+}
+
+type repairVia struct {
+	first analystFunc
+	r     *repairing
+}
+
+func (v *repairVia) Analyse(ctx context.Context, p string, ev []validate.EvidenceRow) (string, error) {
+	return v.first.Analyse(ctx, p, ev)
+}
+
+func (v *repairVia) Repair(ctx context.Context, t string) (string, error) { return v.r.Repair(ctx, t) }
