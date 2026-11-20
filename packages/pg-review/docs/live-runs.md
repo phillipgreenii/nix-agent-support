@@ -63,3 +63,13 @@ After the live replays, the pool held six idle live sessions named after the rep
 ## Doctor
 
 On 2026-11-20, after the replays: `pg-review job doctor` reported PASS for config, ledger, providers, recorder, ccpool and hook, and FAIL for the session check with `ccpool has no free slot; rerun later or skip with --skip-session-check` (the pool-full condition above). With `--skip-session-check` the other checks passed and the session check was skipped. Earlier the same day, doctor passed all checks on two invocations (including the session check, which resolves `pg-review agent q` inside the session) and failed only the session check once with the empty-reply transient described above. The in-session resolution of `pg-review agent q` is therefore recorded from those earlier passes; it was not re-confirmed on the final invocation.
+
+## Second watched pass (2026-11-20, after the pool was freed)
+
+The pool was empty (`ccpool capacity`: free 6 of 6) before this pass.
+
+- `pg-review job doctor`, run twice: PASS for config, ledger, providers, recorder, ccpool and hook; FAIL for the session check both times with `the session finished with an empty reply (session state unknown: ccpool state: decode: invalid character 'a' in literal null (expecting 'u'))`. The empty-result re-read did not clear it, so the doctor session check is not clean and is a live defect still open (the `ccpool state` text in the message is the diagnostic read, which prints a plain `name=... state=...` line that the decoder cannot parse).
+- One lens over the workspace scope with a 7-day window failed in evidence collection, before any analyst session: `provider ccaudit: timed out after 120s` (run state Failed, exit 1, no model spend). The 24-hour window works.
+- One watched run, agent-workflow over workspace with a 24-hour window (deep-review profile, claude-opus-5-5): state Filed, exit 0, about 1.9 min, 0 queries, 0 repair replies, 0 items filed, prompt hash recorded; its pool session shows closed with close reason handler.
+- Integrity: the analyst working directory stayed empty, and the config file is a read-only store symlink whose directory was last changed by the apply before these runs. A before/after ledger snapshot was not taken in a form that can be compared (the first snapshot command used the wrong `stat` flavour), so the ledger-unchanged criterion is still not confirmed.
+- Still unmet: items filed, validated and rendered with `pg-review human show` (the run again filed nothing; `human pending` is empty), the ledger snapshot comparison, and a clean doctor run.
