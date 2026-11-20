@@ -5,9 +5,15 @@
 // The binary is built once per test process from the sibling Go module
 // packages/pg-keep-awake. A test binary calls Main from its TestMain; tests then
 // ask for the binary with Bin and an isolated state directory with UseStateDir.
-// When the pg-keep-awake source is absent (it is, inside the pa-monitor nix
-// test sandbox, whose source tree holds only pa-monitor and claude-transcript)
-// Bin skips the test.
+// The source is found from the working directory (go test runs a test binary in
+// the directory of the package under test, inside the pa-monitor module): walk
+// up to the pa-monitor go.mod, then ../pg-keep-awake/cmd/pg-keep-awake. A path
+// from this file's compiled-in location is not a real path under -trimpath.
+//
+// Inside a nix build (NIX_BUILD_TOP is set) the pg-keep-awake source is absent:
+// the pa-monitor nix test sandbox holds only pa-monitor and claude-transcript,
+// so Bin skips the test there. Anywhere else a missing source is a failure,
+// not a skip, so a broken lookup cannot pass the suite by skipping it.
 package keepertest
 
 import (
@@ -16,7 +22,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -24,25 +29,49 @@ import (
 // binPath is the built executable, or "" when the source is absent.
 var binPath string
 
-// sourceDir is packages/pg-keep-awake/cmd/pg-keep-awake, found relative to this
-// file: packages/pa-monitor/internal/core/caffeinate/keepertest/keepertest.go.
-func sourceDir() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return ""
+// sourceDir is packages/pg-keep-awake/cmd/pg-keep-awake: the sibling of the
+// pa-monitor module root, which is the first directory holding a go.mod at or
+// above the working directory.
+func sourceDir() (string, error) {
+	start, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", "..", "..", "pg-keep-awake", "cmd", "pg-keep-awake"))
+	for dir := start; ; {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return filepath.Join(filepath.Dir(dir), "pg-keep-awake", "cmd", "pg-keep-awake"), nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("no go.mod at or above %s", start)
+		}
+		dir = parent
+	}
 }
 
+// inNixBuild reports whether the test runs inside a nix builder, the one place
+// the pg-keep-awake source is expected to be absent.
+func inNixBuild() bool { return os.Getenv("NIX_BUILD_TOP") != "" }
+
 // Main builds pg-keep-awake (when its source is present), runs the tests and
-// removes the build. Call it from TestMain: os.Exit(keepertest.Main(m)).
+// removes the build. Call it from TestMain: os.Exit(keepertest.Main(m)). Outside
+// a nix build a missing source fails the run (exit 1) instead of letting every
+// test that needs the binary skip.
 func Main(m *testing.M) int {
-	src := sourceDir()
-	if src == "" {
-		return m.Run()
+	src, err := sourceDir()
+	if err == nil {
+		if fi, serr := os.Stat(src); serr != nil {
+			err = serr
+		} else if !fi.IsDir() {
+			err = fmt.Errorf("%s is not a directory", src)
+		}
 	}
-	if fi, err := os.Stat(src); err != nil || !fi.IsDir() {
-		return m.Run()
+	if err != nil {
+		if inNixBuild() {
+			return m.Run()
+		}
+		fmt.Fprintf(os.Stderr, "keepertest: cannot find the pg-keep-awake source outside a nix build: %v\n", err)
+		return 1
 	}
 	tmp, err := os.MkdirTemp("", "pa-monitor-keepertest-")
 	if err != nil {
@@ -61,12 +90,16 @@ func Main(m *testing.M) int {
 	return m.Run()
 }
 
-// Bin returns the absolute path of the built pg-keep-awake, skipping the test
-// when the source was not available to build.
+// Bin returns the absolute path of the built pg-keep-awake. Inside a nix build,
+// where the source is absent, it skips the test; elsewhere an unbuilt binary
+// fails it.
 func Bin(t testing.TB) string {
 	t.Helper()
 	if binPath == "" {
-		t.Skip("packages/pg-keep-awake source is absent (e.g. the pa-monitor nix test sandbox); cannot build the real CLI")
+		if !inNixBuild() {
+			t.Fatal("keepertest: pg-keep-awake was not built; call keepertest.Main from TestMain")
+		}
+		t.Skip("packages/pg-keep-awake source is absent in the pa-monitor nix test sandbox; cannot build the real CLI")
 	}
 	return binPath
 }

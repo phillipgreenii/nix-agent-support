@@ -27,7 +27,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -556,6 +555,9 @@ var (
 	builds    = map[string]string{}
 )
 
+// binaryImportPath is the import path of the daemon's main package.
+const binaryImportPath = "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github"
+
 // RemoveBuilds deletes the built binaries; a package's TestMain calls it after
 // the run.
 func RemoveBuilds() {
@@ -595,9 +597,11 @@ func build(t testing.TB, ldflags string) string {
 	if ldflags != "" {
 		args = append(args, "-ldflags", ldflags)
 	}
-	args = append(args, "./cmd/pg-connector-github")
+	// Build by import path from the inherited working directory (the directory
+	// of the package under test, inside this module), never from a directory
+	// derived from this file's compiled-in path, which -trimpath rewrites.
+	args = append(args, binaryImportPath)
 	cmd := exec.CommandContext(context.Background(), goBin, args...)
-	cmd.Dir = moduleRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("servetest: go build: %v\n%s", err, out)
 	}
@@ -605,21 +609,25 @@ func build(t testing.TB, ldflags string) string {
 	return bin
 }
 
-// moduleRoot is the directory holding go.mod: the one above this source file.
+// moduleRoot is the directory holding the pg-connector go.mod, found by walking
+// up from the working directory: go test runs a test binary in the directory of
+// the package under test, and every caller of this package is inside the module.
+// A path derived from this file's compiled-in location is not a real path under
+// -trimpath.
 func moduleRoot(t testing.TB) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("servetest: cannot locate its own source")
+	start, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("servetest: working directory: %v", err)
 	}
-	dir := filepath.Dir(file)
+	dir := start
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			t.Fatal("servetest: no go.mod above " + file)
+			t.Fatal("servetest: no go.mod above " + start)
 		}
 		dir = parent
 	}

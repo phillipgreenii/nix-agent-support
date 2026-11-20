@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -75,14 +74,16 @@ func lockWithNode(name, rev string) string {
 		"  \"nodes\": {\n    \""+name+"\": {\n      \"locked\": {\n        \"rev\": \""+rev+"\"\n      }\n    },\n", 1)
 }
 
-// moduleRoot is packages/pg-rescue, found from this file's own location.
+// moduleRoot is packages/pg-rescue: go test runs this binary in its package
+// directory (internal/integration), two levels below the module root. A path
+// from runtime.Caller is not a real path under -trimpath.
 func moduleRoot(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate the test source")
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return filepath.Join(filepath.Dir(file), "..", "..")
+	return root
 }
 
 var (

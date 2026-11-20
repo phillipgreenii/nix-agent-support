@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the pg-ccrec-crash-share PromQL against the shared label table
-# (packages/pg-claude-code-recorder/client/testdata/labels.json), under promtool (docket pg2-v77tsx,
+# (packages/pg-claude-code-recorder/client/clienttest/labels.json), under promtool (docket pg2-v77tsx,
 # phase 7c).
 #
 #   check-crash-share-label-table.sh <alerts.yaml> <labels.json>

@@ -28,7 +28,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -646,6 +645,9 @@ var (
 	builds    = map[string]string{}
 )
 
+// binaryImportPath is the import path of the daemon's main package.
+const binaryImportPath = "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira"
+
 // RemoveBuilds deletes the built binaries; a package's TestMain calls it after
 // the run.
 func RemoveBuilds() {
@@ -685,34 +687,16 @@ func build(t testing.TB, ldflags string) string {
 	if ldflags != "" {
 		args = append(args, "-ldflags", ldflags)
 	}
-	args = append(args, "./cmd/pg-connector-issue-jira")
+	// Build by import path from the inherited working directory (the directory
+	// of the package under test, inside this module), never from a directory
+	// derived from this file's compiled-in path, which -trimpath rewrites.
+	args = append(args, binaryImportPath)
 	cmd := exec.CommandContext(context.Background(), goBin, args...)
-	cmd.Dir = moduleRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("servetest: go build: %v\n%s", err, out)
 	}
 	builds[ldflags] = bin
 	return bin
-}
-
-// moduleRoot is the directory holding go.mod: the one above this source file.
-func moduleRoot(t testing.TB) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("servetest: cannot locate its own source")
-	}
-	dir := filepath.Dir(file)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("servetest: no go.mod above " + file)
-		}
-		dir = parent
-	}
 }
 
 // shortDir returns a fresh directory with a short absolute path (a unix socket

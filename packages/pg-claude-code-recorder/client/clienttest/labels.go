@@ -1,11 +1,11 @@
 package clienttest
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"testing"
@@ -16,13 +16,21 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/proc"
 )
 
-// The label table is one testdata file of the client package
-// (client/testdata/labels.json): one row per fixture of the crash query, with the
-// raw inputs (steps), the evidence they must produce and the label the evidence
-// must derive. Three consumers load every row: the daemon test (inputs to
-// evidence), the client test (evidence to label) and the command test (labels
-// through conversations --ended). Covered fails a consumer that did not load
-// every row.
+// The label table is one file beside this package (client/clienttest/labels.json),
+// compiled in with go:embed: one row per fixture of the crash query, with the raw
+// inputs (steps), the evidence they must produce and the label the evidence must
+// derive. Three consumers load every row: the daemon test (inputs to evidence),
+// the client test (evidence to label) and the command test (labels through
+// conversations --ended). Covered fails a consumer that did not load every row.
+//
+// The table is embedded rather than read from disk because this package is
+// imported from other packages and other modules: a test binary runs in the
+// directory of the package under test, and a path derived from the compiled-in
+// source location is not a real path under -trimpath. It lives outside a
+// testdata directory because mkGoApp filters testdata out of a package source.
+
+//go:embed labels.json
+var labelTable []byte
 
 // LabelEvidence is the evidence a row expects (the booleans of client.Evidence).
 type LabelEvidence struct {
@@ -78,18 +86,10 @@ type LabelRow struct {
 // LabelRows loads the table.
 func LabelRows(t testing.TB) []LabelRow {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate the label table")
-	}
-	b, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "testdata", "labels.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var tab struct {
 		Rows []LabelRow `json:"rows"`
 	}
-	if err := json.Unmarshal(b, &tab); err != nil {
+	if err := json.Unmarshal(labelTable, &tab); err != nil {
 		t.Fatalf("labels.json: %v", err)
 	}
 	seen := map[string]bool{}

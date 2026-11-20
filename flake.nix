@@ -1263,6 +1263,42 @@
           pass_filenames = true;
         };
 
+        # Keep Go code working under -trimpath, which rewrites recorded source
+        # paths to <import path>/<file>.go and leaves the compiled-in GOROOT
+        # empty: a Go file MUST NOT derive a path from runtime.Caller,
+        # runtime.Callers, CallersFrames or a frame's File, nor call
+        # importer.Default (it finds go under GOROOT), unless the line ends with
+        # `// trimpath-ok: <reason>`. Helpers resolve files from the working
+        # directory, go:embed them or build by import path instead. Every Go
+        # file counts, whatever its build tags, because the integration and
+        # smoke tiers that would expose a break do not run at commit. The logic
+        # lives in scripts/check-trimpath-safe-go.sh (a whole-tree run with no
+        # file arguments); its regression guard is
+        # tests/check-trimpath-safe-go.bats. Pure text scan: no tool beyond
+        # bash, grep, find and xargs, so it also runs inside the nix sandbox.
+        trimpath-safe-go = {
+          enable = true;
+          name = "trimpath-safe-go";
+          description = "flag a Go path or GOROOT lookup from compiled-in data (runtime.Caller, CallersFrames, importer.Default) that breaks under -trimpath";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "trimpath-safe-go-hook";
+              runtimeInputs = [
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gnugrep
+                pkgs.gnused
+              ];
+              text = ''
+                exec bash ${./scripts/check-trimpath-safe-go.sh} "$@"
+              '';
+            }
+          }/bin/trimpath-safe-go-hook";
+          language = "system";
+          files = "\\.go$";
+          pass_filenames = true;
+        };
+
         # PR lane refactor, P8a-1: the pg-desk outcome alert rules (grafana/alerting/alerts.yaml)
         # have a promtool rule-test harness (checks.<system>.test-pg-desk-alert-rules) and a
         # structure check (test-pg-desk-alert-structure). This path-scoped hook puts both, with
@@ -1732,6 +1768,7 @@
           prevent-main-rebase = "check";
           run-unit-tests = "check";
           section-sign-citations = "check";
+          trimpath-safe-go = "check";
         };
         # `pg-hooks fix` regenerates the pg-connector filesets after `git add`
         # (the hook above only checks). Uses the `go` on PATH, GOTOOLCHAIN=local.
@@ -9423,7 +9460,7 @@
               # behaviour of each Prometheus rule through the pg-connector wrapping script (one
               # <uid>.test.yaml per rule, guards tested both ways: heartbeat-stale with up == 1 and
               # with up == 0), then the crash-share PromQL against the shared
-              # label table (client/testdata/labels.json) with a negative control (a mutated rule
+              # label table (client/clienttest/labels.json) with a negative control (a mutated rule
               # must be rejected). Grafana-only fields are pinned by the structure check below.
               test-pg-claude-code-recorder-alert-rules =
                 pkgs.runCommand "test-pg-claude-code-recorder-alert-rules"
@@ -9443,7 +9480,7 @@
                     bash ${./packages/pg-connector/grafana/check-alert-rules.sh} "$alerts" \
                       ${./packages/pg-claude-code-recorder/grafana/alerting/rule-tests}
                     script=${./packages/pg-claude-code-recorder/grafana/check-crash-share-label-table.sh}
-                    table=${./packages/pg-claude-code-recorder/client/testdata/labels.json}
+                    table=${./packages/pg-claude-code-recorder/client/clienttest/labels.json}
                     bash "$script" "$alerts" "$table"
                     # Negative control: the crashed class selector flipped must not read the table's share.
                     yq '(.groups[0].rules[] | select(.uid == "pg-ccrec-crash-share") | .data[0].model.expr) |= sub("clear_entry=\"false\"", "clear_entry=\"true\"")' "$alerts" > mutant.yaml

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"syscall"
 	"testing"
@@ -40,9 +39,32 @@ type Result struct {
 // Fixture returns the path of a canned report in testdata/reports/, for
 // example Fixture("first-attempt"). The canned reports are:
 // first-attempt, three-prior-attempts, stdin-mode and unknown-schema-version.
+//
+// The path is found from the working directory, not from this file's
+// compiled-in location (which -trimpath rewrites): go test runs a test binary
+// in the directory of the package under test, every caller is inside the
+// pg-rescue module, so walking up to its go.mod finds the module root. It
+// panics when no go.mod is above the working directory.
 func Fixture(name string) string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "testdata", "reports", name+".json")
+	return filepath.Join(moduleRoot(), "testdata", "reports", name+".json")
+}
+
+// moduleRoot walks up from the working directory to the directory holding go.mod.
+func moduleRoot() string {
+	start, err := os.Getwd()
+	if err != nil {
+		panic("contracttest: working directory: " + err.Error())
+	}
+	for dir := start; ; {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			panic("contracttest: no go.mod above " + start)
+		}
+		dir = parent
+	}
 }
 
 // Run executes argv as the handler would be executed: cwd is the report's

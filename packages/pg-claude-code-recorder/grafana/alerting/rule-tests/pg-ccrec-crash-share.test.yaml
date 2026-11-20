@@ -13,7 +13,7 @@ evaluation_interval: 1m
 # Crash share over 1 day: (crashed evidence class + stale-at-discovery) / (all ends + stale-at-discovery),
 # above 0.2, with at least 20 ends in the day. The crashed class is registry_present=true,
 # exit_observed=true, clear_entry=false, exit_entry=false. The same PromQL runs against the label table
-# (client/testdata/labels.json) in check-crash-share-label-table.sh.
+# (client/clienttest/labels.json) in check-crash-share-label-table.sh.
 # Counters rise linearly from t=0; the cases evaluate at 2d, so the 1d window is full.
 tests:
   - name: a crashed class of 1/min against 3/min of closed fires (share 1440 / 5760 = 0.25 over 1d)

@@ -1,6 +1,7 @@
 package interpret
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -10,11 +11,13 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -197,7 +200,40 @@ type scanImporter struct {
 
 const repoPackagesPrefix = "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/"
 
+// setGOROOTOnce fills build.Default.GOROOT from `go env GOROOT` when it is
+// empty. importer.Default() finds the go command at
+// filepath.Join(build.Default.GOROOT, "bin", "go"); a test binary built with
+// -trimpath has no compiled-in GOROOT, and go test does not set GOROOT in the
+// environment, so that would be the relative path bin/go.
+var (
+	setGOROOTOnce sync.Once
+	setGOROOTErr  error
+)
+
+func ensureGOROOT() error {
+	setGOROOTOnce.Do(func() {
+		if build.Default.GOROOT != "" {
+			return
+		}
+		out, err := exec.CommandContext(context.Background(), "go", "env", "GOROOT").Output()
+		if err != nil {
+			setGOROOTErr = fmt.Errorf("go env GOROOT: %w", err)
+			return
+		}
+		root := strings.TrimSpace(string(out))
+		if root == "" {
+			setGOROOTErr = fmt.Errorf("go env GOROOT printed nothing")
+			return
+		}
+		build.Default.GOROOT = root
+	})
+	return setGOROOTErr
+}
+
 func newScanImporter(fset *token.FileSet) (*scanImporter, error) {
+	if err := ensureGOROOT(); err != nil {
+		return nil, err
+	}
 	dir, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -206,7 +242,7 @@ func newScanImporter(fset *token.FileSet) (*scanImporter, error) {
 		// A checkout has .../packages/pg-desk; the nix sandbox source root is
 		// the packages directory itself under another name (.../source/pg-desk).
 		if _, err := os.Stat(filepath.Join(d, "pg-desk", "go.mod")); err == nil {
-			return &scanImporter{fset: fset, std: importer.Default(), seen: map[string]*types.Package{}, packagesDir: d}, nil
+			return &scanImporter{fset: fset, std: importer.Default(), seen: map[string]*types.Package{}, packagesDir: d}, nil // trimpath-ok: ensureGOROOT set build.Default.GOROOT above
 		}
 		if d == filepath.Dir(d) {
 			return nil, fmt.Errorf("no enclosing directory holding pg-desk/go.mod above %s", dir)

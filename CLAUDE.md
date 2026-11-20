@@ -394,6 +394,14 @@ contribution MAY carry a `url`; a put with the same `id` replaces the earlier on
   `allow-import-from-derivation=false` over that module, plus an IFD negative control) and
   `scripts/check-no-ifd.sh` (all of `checks`, `packages`, `devShells` for one system; run it through
   `bgrun`, with the workspace `--override-input` siblings).
+- **Go code MUST work under `-trimpath`**: a test helper MUST NOT derive a file path from
+  `runtime.Caller`/`runtime.Callers`/`CallersFrames`/a frame's `File`, nor call `importer.Default()`
+  without first setting `build.Default.GOROOT` from `go env GOROOT` (`-trimpath` rewrites recorded
+  source paths and leaves the compiled-in GOROOT empty). Resolve a file from the working directory
+  (`go test` runs a test binary in the directory of the package under test), `//go:embed` it, or
+  build a binary by import path. The `trimpath-safe-go` pre-commit hook
+  (`scripts/check-trimpath-safe-go.sh`, regression guard `tests/check-trimpath-safe-go.bats`)
+  rejects those forms in every `.go` file unless the line ends with `// trimpath-ok: <reason>`.
 
 ## Beads Labels
 

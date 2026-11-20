@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -109,8 +108,13 @@ func newLockEnv(t *testing.T) *lockEnv {
 		"#!/bin/sh\nexec env GO_WANT_HELPER_PROCESS=1 '"+os.Args[0]+"' -test.run='^$' -- \"$@\"\n")
 
 	if _, err := exec.LookPath(handlerName); err != nil {
-		_, file, _, _ := runtime.Caller(0)
-		src := filepath.Join(filepath.Dir(file), "..", "..", "..", handlerName, handlerName, handlerName+".sh")
+		// go test runs this binary in its package directory
+		// (packages/pg-rescue/cmd/pg-rescue), so the handler source is three levels
+		// up; a path from runtime.Caller is not a real path under -trimpath.
+		src, err := filepath.Abs(filepath.Join("..", "..", "..", handlerName, handlerName, handlerName+".sh"))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, err := os.Stat(src); err != nil {
 			t.Fatalf("%s is neither on PATH nor at %s", handlerName, src)
 		}

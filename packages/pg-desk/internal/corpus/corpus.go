@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -193,11 +192,4 @@ func AssertBytes(t testing.TB, path string, got []byte) {
 	if !bytes.Equal(want, got) {
 		t.Errorf("%s drifted from its golden.\n--- want ---\n%s\n--- got ---\n%s", path, want, got)
 	}
-}
-
-// ModuleDir returns the absolute path of the pg-desk module root, so a test in
-// any package can name a shared golden directory.
-func ModuleDir() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..")
 }
