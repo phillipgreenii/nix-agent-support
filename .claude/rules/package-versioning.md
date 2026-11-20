@@ -47,6 +47,19 @@ staleness rule). The updater runs it for the regenerated module, library modules
 3 before `update-locks.sh` can commit; the `go-deps-wired` check runs it over every module. Tests:
 `tests/check-go-deps-wired.bats`, `tests/update-gomod2nix-deps-build.bats`.
 
+**The go directive tracks this repo's locked nixpkgs and relies on a same-time relock of each consumer.**
+`go-deps-wired` judges every `packages/*/go.mod` directive against `pkgs.go.version` of THIS repo's
+own locked nixpkgs. A consumer that makes this repo follow its own nixpkgs (the terminal
+`nix-ziprecruiter` does) builds the modules with ITS Go, which this repo cannot see: when that
+nixpkgs lags, every directive exceeds the toolchain and the build fails with `go: download go1.N.M
+... toolchain not available` (happened on 2026-11-19 after the 2026-11-18 directive bump to Go
+1.26.10, against a consumer locked to Go 1.26.8). This is intentional and unchecked here: a
+nixpkgs bump in this repo that raises the directive MUST be followed, before the consumer builds,
+by relocking the consumer's `nixpkgs` input to a revision whose Go is at least the directive
+(operator-run `pn workspace update`). No check can enforce it from inside this repo, because a
+consumer's nixpkgs is not an input of this flake; recover by relocking the consumer, not by
+lowering the directive.
+
 `mkGoApp` (and so `mkGoBinary`) excludes every `*_test.go` file and every `testdata/` directory from
 `src`, and therefore from the version digest and the build input, unless `doCheck = true`
 (`phillipg-nix-repo-base` ADR 0006 amendment 2026-11-10). A test-only edit changes no derivation,
