@@ -1,7 +1,6 @@
 # pg-router source acknowledgement after handler acceptance: design
 
-- **Status**: Proposed: awaiting operator approval. Nothing is implemented. Do not decompose until the operator
-  approves.
+- **Status**: Accepted (operator approval, Phillip, 2026-11-20, verbatim: "approved"). Nothing is implemented.
 - **Date**: 2026-11-11.
 - **Scope**: the `INTF-SOURCE` contract of pg-router (a new core-to-source acceptance report), the
   `pg-router-source-pg-connector` adapter's opt-in use of `pg-connector changes --no-ack` and `changes-ack`, and the event-id
@@ -470,9 +469,9 @@ approved, with the same cardinality bound as `DEC-OBS-13` (no event id, session 
 - **Answered from code, no longer open.** Former OQ-1 (is a mid-batch `seq` a valid position): yes, section 5.2.
   Former OQ-2 (a repeated or lower acknowledgement): `Feed.Ack` treats a value at or below the stored position as a
   no-op and refuses only a value above the log head, so a re-sent report is harmless and logs no error.
-- **OQ-3: default `ack_hold_limit`.** 24 hours is proposed (section 5.3) and MUST stay below the 14 day log retention. The operator may prefer longer, since
+- **OQ-3: default `ack_hold_limit`. Resolved (operator, 2026-11-20): 24 hours.** 24 hours is proposed (section 5.3) and MUST stay below the 14 day log retention. The operator may prefer longer, since
   abandonment is the one place the design still loses an event.
-- **OQ-4: reset of the consumer.** `--reset` replays history. The core MUST drop the lane ledger for that query when the
+- **OQ-4: reset of the consumer. Resolved (operator, 2026-11-20): an operator step, not signalled by the adapter.** `--reset` replays history. The core MUST drop the lane ledger for that query when the
   operator resets the consumer, or stale tokens would be reported. Whether the reset is observable to the core (the
   adapter would have to say so) or an operator step is not settled here.
 
