@@ -29,6 +29,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgconnector"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggwm"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggwmworktree"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgnixlogwrapped"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgreview"
@@ -351,6 +352,11 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// only evaluate/replay, not this chain). No consumer config; "pg-review"
 		// is recognized by no other rule here.
 		pgreview.New(),
+		// pg-gwm approves the read-only verbs (list, info, preserved list, config
+		// check, reap --dry-run, completion, version), mirroring the pg-gwm command
+		// spec, which alone drives only evaluate/replay. The raw-worktree deny is the
+		// separate pggwmworktree rule above.
+		pggwm.New(),
 		// pg-connector approves the `pg-connector issue show/comment/update/
 		// close` verb family already granted by
 		// PG_ROUTER_CCPOOL_HANDLER_CONFIG's allowedTools (bead pg2-s9zh5),
