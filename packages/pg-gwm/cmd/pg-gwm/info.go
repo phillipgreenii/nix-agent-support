@@ -50,6 +50,8 @@ func (a *app) list(args []string) int {
 	c.register(fs, false)
 	var unmanaged bool
 	fs.BoolVar(&unmanaged, "include-unmanaged", false, "also list worktrees pg-gwm does not manage")
+	var exceptions bool
+	fs.BoolVar(&exceptions, "exceptions", false, "list the repository's standing exceptions instead of worktrees")
 	pos, err := parseInterleaved(fs, args)
 	if err != nil {
 		return a.usageErr(err)
@@ -60,6 +62,12 @@ func (a *app) list(args []string) int {
 	}
 	if len(pos) > 0 {
 		return a.emitErr(format, false, manager.ErrUsage("list takes no arguments", "", nil))
+	}
+	if exceptions && unmanaged {
+		return a.emitErr(format, false, manager.ErrUsage("--exceptions and --include-unmanaged cannot be combined", "", nil))
+	}
+	if exceptions {
+		return a.listExceptions(format, c.repo)
 	}
 	ctx, stop := cmdContext()
 	defer stop()

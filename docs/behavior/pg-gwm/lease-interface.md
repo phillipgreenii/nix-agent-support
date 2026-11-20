@@ -241,7 +241,8 @@ manager does not manage reports the pseudo-status `unmanaged`.
   - `release <lease id> | --name N`
   - `expire <lease id> | --name N`
   - `info <key> | --path P | --id W | --lease-id L | --name N [--print=path]`
-  - `list [--include-unmanaged]`
+  - `list [--include-unmanaged | --exceptions]` (`--exceptions` prints the repository's standing
+    exceptions instead of worktrees; see the README's "Standing exceptions")
   - `preserved list`, `preserved prune [--older-than <duration>] [--dry-run]`
   - `reap [--all-repos] [--dry-run] [--deadline <duration>]`
   - `config check [--config <path>]`: prints the configuration findings and exits 2 on any error;

@@ -74,6 +74,7 @@ func Check(f File) []Finding {
 		if _, err := provision.ValidateKeep(c.KeepList); err != nil {
 			errf("%v", err)
 		}
+		out = append(out, checkExceptions(k, c.Exceptions)...)
 		dirs := map[string]bool{}
 		name := filepath.Base(k)
 		for i := 0; i < sampleCount(c); i++ {

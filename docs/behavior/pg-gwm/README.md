@@ -124,6 +124,26 @@ very close to unmanaged, but you get the reap to help with clean up.")_
 | `create-timeout`            | `30m`                               | Timeout of a creation or a clean (`INV-GWM-31`)                                                                   |
 | `index-lock-stale-after`    | `10m`                               | Age after which a zero-byte index lock is stale (`INV-GWM-31`)                                                    |
 | `tombstone-retention`       | `7d`                                | How long a reclaimed lease's record is kept (`INV-GWM-7`, `INV-GWM-34`)                                           |
+| `exceptions`                | (empty)                             | Standing exceptions: worktrees that legitimately live outside pg-gwm (see "Standing exceptions")                  |
+
+### Standing exceptions
+
+`exceptions` is a list of tables, `[[repos."<key>".exceptions]]`, the one source of truth for worktrees
+that legitimately live outside pg-gwm (a workforest set, a pg-router worktree directory, a short-lived
+tool worktree). Other tools that audit or refuse unmanaged worktrees MUST read this list rather than keep
+their own. Each entry has four keys, all required:
+
+| Key         | Meaning                                                                                                  |
+| ----------- | -------------------------------------------------------------------------------------------------------- |
+| `path`      | An absolute path or a glob: `*` matches within one path element, `**` across elements, `?` one character |
+| `reason`    | Why the worktree is outside pg-gwm                                                                       |
+| `owner`     | Who answers for the exception                                                                            |
+| `review-by` | A quoted date, `YYYY-MM-DD`, by which the exception is reviewed again                                    |
+
+`pg-gwm config check` MUST report an entry with no `path`, `reason` or `owner`, or with a missing or
+malformed `review-by`, as an error (exit 2), and an entry whose `review-by` date has passed as a warning.
+`pg-gwm list --exceptions` MUST print the repository's entries (path, reason, owner, review-by; JSON with
+`--json`) instead of worktrees.
 
 The scheduled reaper's interval is not a per-repository key: one machine runs one reaper, so it is the
 reaper's own setting, `reaper.intervalSeconds` (default 600 seconds, `INV-GWM-32`).

@@ -48,7 +48,7 @@ commands:
   release  <lease id> | --name N
   expire   <lease id> | --name N
   info     <key> | --path P | --id W | --lease-id L | --name N [--print=path]
-  list     [--include-unmanaged]
+  list     [--include-unmanaged | --exceptions]
   reap     [--all-repos] [--dry-run] [--deadline D]
   preserved list
   preserved prune [--older-than D] [--dry-run]

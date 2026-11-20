@@ -31,6 +31,9 @@ type RepoConfig struct {
 	CreateTimeout       Duration `toml:"create-timeout"`
 	IndexLockStaleAfter Duration `toml:"index-lock-stale-after"`
 	TombstoneRetention  Duration `toml:"tombstone-retention"`
+	// Exceptions are the standing exceptions: worktrees that legitimately live
+	// outside pg-gwm. Declared as [[repos."<key>".exceptions]] tables.
+	Exceptions []Exception `toml:"exceptions"`
 }
 
 // File is the whole configuration file: one table per repository, keyed by the
