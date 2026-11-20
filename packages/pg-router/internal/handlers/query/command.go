@@ -157,5 +157,12 @@ func (o OSCommander) RunEnvFiles(ctx context.Context, argv []string, env []strin
 	cmd.Env = env
 	cmd.ExtraFiles = files
 	procenv.Group(cmd, CancelGrace)
-	return cmd.Output()
+	out, err := cmd.Output()
+	// A cancelled run returns as soon as the leader exits, which would take the
+	// group's SIGKILL timer with this process: end any descendant that ignored
+	// SIGTERM before returning (ADR 0130).
+	if ctx.Err() != nil && cmd.Process != nil {
+		procenv.ReapGroup(cmd.Process.Pid, CancelGrace)
+	}
+	return out, err
 }

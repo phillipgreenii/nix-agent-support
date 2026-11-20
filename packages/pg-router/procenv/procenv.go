@@ -81,3 +81,33 @@ func Group(cmd *exec.Cmd, grace time.Duration) {
 		return nil
 	}
 }
+
+// ReapGroup ends what is left of the process group pgid after its leader has
+// been waited for on a cancelled context. Group sends SIGTERM to the group and
+// schedules the SIGKILL on a timer in the calling process, so a caller that
+// returns as soon as the leader exits (a shell that dies on SIGTERM) takes the
+// timer with it and a descendant that ignores SIGTERM survives. ReapGroup waits
+// up to grace for the group to disappear, then sends SIGKILL to the group and
+// waits briefly for that to take effect. It returns true when the group is gone.
+func ReapGroup(pgid int, grace time.Duration) bool {
+	if pgid <= 1 {
+		return true
+	}
+	gone := func(wait time.Duration) bool {
+		deadline := time.Now().Add(wait)
+		for {
+			if errors.Is(syscall.Kill(-pgid, 0), syscall.ESRCH) {
+				return true
+			}
+			if !time.Now().Before(deadline) {
+				return false
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if gone(grace) {
+		return true
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	return gone(2 * time.Second)
+}

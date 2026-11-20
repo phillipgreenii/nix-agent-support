@@ -121,3 +121,29 @@ func TestGroupSetsWaitDelayOnlyWhenZero(t *testing.T) {
 		t.Fatal("Setpgid not set")
 	}
 }
+
+func TestReapGroupKillsDescendantThatIgnoresTerm(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "d.pid")
+	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-c", `(trap '' TERM; exec sleep 600 </dev/null >/dev/null 2>&1) & echo $! > "$1.tmp"; mv "$1.tmp" "$1"; wait`, "sh", pidFile)
+	Group(cmd, time.Second)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pgid := cmd.Process.Pid
+	pid, _ := strconv.Atoi(waitFile(t, pidFile))
+	_ = syscall.Kill(pgid, syscall.SIGTERM) // the leader only, as a cancelled leader exits alone
+	_ = cmd.Wait()
+	if gone(pid) {
+		t.Fatal("descendant should survive the leader's exit")
+	}
+	if !ReapGroup(pgid, 200*time.Millisecond) {
+		t.Fatal("ReapGroup left the group alive")
+	}
+	waitGone(t, pid, "descendant")
+}
+
+func TestReapGroupOnEmptyGroup(t *testing.T) {
+	if !ReapGroup(0, time.Millisecond) || !ReapGroup(1<<22, time.Millisecond) {
+		t.Fatal("an absent group is already gone")
+	}
+}

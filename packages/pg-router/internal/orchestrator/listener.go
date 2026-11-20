@@ -374,6 +374,12 @@ const DeclineDetailDispatchRetry = "dispatch-retry"
 // the same string and its OnDeclined does not count it.
 const DeclineDetailShutdown = "shutdown"
 
+// InterruptedByDaemonShutdown is the value of the `interrupted_by` log field on
+// the line that records a dispatch cut short because the daemon is stopping (a
+// pn workspace apply replaces the daemon, or any other stop). A handler failure
+// never carries the field.
+const InterruptedByDaemonShutdown = "daemon_shutdown"
+
 // shouldRetry reports whether this failed attempt gets re-run: the role opted
 // in (maxRetries > 0), the run is not shutting down, the event has not already
 // expired (the queue treats an attempt past expiresAt as the last one), the
@@ -540,7 +546,10 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 			l.reofferObs.OnReofferedAfterShutdown(l.role.Name)
 		}
 		slog.Info("orchestrator: dispatch cut short by shutdown; leaving the event for the next daemon to re-offer",
-			"role", l.role.Name, "event", evt.ID, "err", err)
+			"role", l.role.Name, "event", evt.ID, "event_type", evt.Type,
+			// A distinct field so a dispatch cut short by a stop (an apply replaces
+			// the daemon) is told from a handler failure in the log (ADR 0130).
+			"interrupted_by", InterruptedByDaemonShutdown, "err", err)
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailShutdown}
 	}
 	// A resource-limit hit (l.resourceLimitObs) has no wire-level signal to
