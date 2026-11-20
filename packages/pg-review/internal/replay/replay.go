@@ -135,6 +135,20 @@ type Outcome struct {
 // ErrPrompt means the assembled prompt lacks a rule.
 var ErrPrompt = errors.New("replay: prompt check failed")
 
+// snippetMax bounds the part of an analyst message quoted in an error.
+const snippetMax = 300
+
+// Snippet returns at most n runes of s, whitespace collapsed, with an ellipsis
+// when it cut the text.
+func Snippet(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
+}
+
 var fenceRe = regexp.MustCompile("(?s)```[A-Za-z]*[ \t]*\r?\n(.*?)\r?\n?```")
 
 // Run performs one replay pass of fixture f with analyst a against a fresh
@@ -166,7 +180,7 @@ func Run(ctx context.Context, f Fixture, a Analyst, ledgerPath string) (Outcome,
 	}
 	m := fenceRe.FindAllStringSubmatch(final, -1)
 	if len(m) == 0 {
-		return out, errors.New("replay: the final message has no fenced JSON block")
+		return out, fmt.Errorf("replay: the final message has no fenced JSON block (message start: %q)", Snippet(final, snippetMax))
 	}
 	if err := json.Unmarshal([]byte(m[len(m)-1][1]), &out.Doc); err != nil {
 		return out, fmt.Errorf("replay: findings do not parse: %w", err)

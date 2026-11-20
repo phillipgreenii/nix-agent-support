@@ -14,6 +14,16 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-review/internal/validate"
 )
 
+// liveNote tells the live analyst what this harness differs in from a run: it
+// has no query tool, so the evidence below is all it gets, and the reply must
+// be the findings block alone.
+const liveNote = "\nIn this session you have no tools and cannot run `pg-review agent q`; " +
+	"the evidence rows below are all the evidence there is. Reply once, with the single fenced JSON block as your final message.\n"
+
+// maxAttempts mirrors the runner, which sends one repair after a rejected
+// reply: a pass gets a fresh session once when its reply was rejected.
+const maxAttempts = 2
+
 // liveAnalyst sends the assembled prompt, with the evidence rows appended as
 // data, to a real ccpool session and returns its final message.
 type liveAnalyst struct {
@@ -38,7 +48,7 @@ func (a *liveAnalyst) Analyse(ctx context.Context, promptText string, ev []valid
 	for _, r := range ev {
 		rows += fmt.Sprintf("%s | %s | %s | %v | %s\n", r.ID, r.SubjectKey, r.Kind, r.Metrics, r.DefinedIn)
 	}
-	turn, err := a.client.Reply(ctx, id, promptText+"\nEVIDENCE (data)\n"+rows)
+	turn, err := a.client.Reply(ctx, id, promptText+liveNote+"\nEVIDENCE (data)\n"+rows)
 	if err != nil {
 		return "", err
 	}
@@ -72,7 +82,15 @@ func TestLiveReplay(t *testing.T) {
 	ctx := context.Background()
 	var outs []Outcome
 	for i := 0; i < 2; i++ {
-		o, err := Run(ctx, f, a, filepath.Join(t.TempDir(), "ledger.db"))
+		var o Outcome
+		var err error
+		for try := 1; try <= maxAttempts; try++ {
+			o, err = Run(ctx, f, a, filepath.Join(t.TempDir(), "ledger.db"))
+			if err == nil {
+				break
+			}
+			t.Logf("pass %d attempt %d: %v", i+1, try, err)
+		}
 		if err != nil {
 			t.Fatalf("pass %d: %v", i+1, err)
 		}

@@ -232,6 +232,18 @@ func TestCannedAnalystNeedsOutputsAndAFence(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no fenced JSON block") {
 		t.Errorf("got %v", err)
 	}
+	if !strings.Contains(err.Error(), "no fence here") {
+		t.Errorf("the error must quote the start of the message: %v", err)
+	}
+}
+
+func TestSnippetCollapsesAndCuts(t *testing.T) {
+	if got := Snippet("a  b\n c", 10); got != "a b c" {
+		t.Errorf("got %q", got)
+	}
+	if got := Snippet("abcdef", 3); got != "abc..." {
+		t.Errorf("got %q", got)
+	}
 }
 
 type plain string
