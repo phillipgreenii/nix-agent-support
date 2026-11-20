@@ -29,6 +29,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgconnector"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggwmworktree"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgnixlogwrapped"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgreview"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnwf"
@@ -238,6 +239,13 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		envvars.NewWithEvaluator(eng),
 		assume.New(),
 		new(webfetch.Rule),
+		// pg-gwm-worktree MUST precede claudetools (which auto-approves
+		// EnterWorktree and Agent) and the git rule (which approves
+		// `git worktree add`): first-match-wins, and it denies a raw worktree in
+		// a pg-gwm-managed repository unless a logged exception reason is given.
+		// It is not-applicable for everything else, including every repository
+		// the pg-gwm configuration does not list.
+		pggwmworktree.New(),
 		claudetools.New(),
 		// killshell gates the (non-Bash) KillShell tool by shell ownership. It is
 		// harmless for every other tool (ErrNotApplicable — NOT a terminal NoOpinion,
