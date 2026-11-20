@@ -114,6 +114,14 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
      backgrounded shell commands; an agent that dispatches Agent children (e.g.
      the plan-decompose decomposer agents) waits for them by ending its turn,
      and a brief MUST NOT tell it otherwise.
+   - **pg-gwm worktree (when ISOLATE reported `isolation=pg-gwm`).** The
+     worktree path in the brief MUST be the LEASED absolute path from ISOLATE's
+     `worktree=` field, stated once. The brief MUST say the worktree is leased
+     and owned by pg-gwm, and that the subagent MUST NOT run
+     `git worktree remove`, `git worktree unlock` or `rm -rf` on it (or on any
+     worktree), and MUST NOT lease, renew, release or expire (`pg-gwm`): the
+     orchestrator renews the lease at each step boundary and gives it back in
+     FINISH. The same sentence goes in a curated-path brief.
    - **no mutation testing.** The subagent MUST NOT run `pg-go-mutate` or the
      `go-test-gaps` skill, and a brief MUST NOT ask for it (V-5). A bead that
      closes gaps a past analysis found is ordinary test-writing: the brief points

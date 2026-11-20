@@ -144,11 +144,46 @@ and the container's own priority, then:
    - Single repo → ONE call:
 
      ```bash
-     pb drain isolate --bead <id> --repo <abs-canonical-clone-path>
+     pb drain isolate --bead <id> --repo <abs-canonical-clone-path> --actor "ID"
      ```
 
-     It reuses an existing worktree or parked branch, otherwise creates
-     `.worktrees/<id>` on `<work-branch>` off the repo's primary branch. It asks
+     It reuses an existing worktree or parked branch, otherwise creates the
+     worktree on `<work-branch>` off the repo's primary branch. Which path it
+     takes is decided by a guard (`--isolation auto`, the default): the
+     **pg-gwm path** when `pg-gwm config check` passes for the repo, the config
+     names the repo and its worktree root is writable; otherwise the **legacy
+     path** (`.worktrees/<id>`, as before). Do not choose by hand; read
+     `isolation=` in the output line (`Result.Isolation` in `--json`).
+
+     In the **pg-gwm path** pb LEASES the worktree from pg-gwm: lease name and
+     branch `drain/<id>`, owner `--actor` (so `--actor` is required there),
+     TTL 4h, metadata `bead`, `session` (`--session`, default the actor) and
+     `role=drain`. The output line adds `lease=<name> lease_id=<id>` and
+     `worktree=` is the leased ABSOLUTE path; use exactly that path as `WT` and
+     in every brief. A redispatch of the same bead renews the existing lease
+     instead of colliding with it. In this path nothing calls `wtdone`, and
+     nothing runs `git worktree` removal: pg-gwm owns the worktree.
+
+     **Lease renewal (pg-gwm path).** The 4h TTL is sized above the longest
+     single subagent step. The ORCHESTRATOR MUST renew the lease ONCE at each
+     step boundary (after ISOLATE, after DELEGATE returns, after VALIDATE and
+     before LAND) with
+     `pg-gwm renew --name drain/<id> --repo <abs-canonical-clone-path>`;
+     subagents MUST NOT renew, lease, release or expire. A renew that reports
+     lease-lost (the lease lapsed and the reaper preserved the work) is handled
+     like the isolate refusal below: re-run `pb drain isolate`.
+
+     **Refusals (pg-gwm path).** Exit 12 (max-reached: pb already retried once
+     with `--wait 10m`) is TRANSIENT: defer or release the bead per the Rules,
+     never STUCK, and never remove another session's worktree to free a slot.
+     Exit 11 (the lease name is held by another owner, or the branch is checked
+     out elsewhere; pb already passes `--or-renew`) is a conflict: route to
+     STUCK, force nothing. A lost lease (the lapse preserved the work on a
+     `pg-gwm/dirty-reaped-*` branch) is recovered by pb itself: it finds the
+     preserved branch with `pg-gwm preserved list` and re-leases it under
+     `drain/<id>` only when no commit would be dropped; if it cannot, it exits
+     1 with a lease-lost message and the bead goes to STUCK with that message.
+     Any other refusal exits 1: route per the Rules. In both paths pb asks
      `pg-hooks status --porcelain` about the hooks (its `hooks=` key first, the
      state name only for an older `pg-hooks`) and writes nothing into the
      worktree: git runs the hooks from the shared common dir. The
@@ -175,7 +210,8 @@ and the container's own priority, then:
      — surface it to the operator in your report.
 
    - Multiple repos → a coordinated set via the
-     `pn-workspace-rules:fork-workforest` skill, keyed to the bead id.
+     `pn-workspace-rules:fork-workforest` skill, keyed to the bead id. A
+     multi-repo set never uses pg-gwm: it is always a workforest.
 
 4. **DELEGATE THE WORK** to a subagent (REQUIRED — this preserves your context).
    Read `references/rules.md` and `references/delegate.md` in full first: they hold
@@ -229,7 +265,7 @@ and the container's own priority, then:
    work is pushed, not merged, so review feedback still needs that worktree, and
    whoever merges the PR retires them.
 
-   Both retirement paths this step relies on — `ff-merge-to-main`'s FF-4 for a
+   LEGACY path only: both retirement paths this step relies on — `ff-merge-to-main`'s FF-4 for a
    single repo, `pn-workspace-rules:cleanup-workforest` for a set — now teardown
    through the guarded `wtdone` script (bead `pg2-hpurf`) rather than a bare
    `git worktree remove`/`branch -d`. This is a NEW failure mode this command must
@@ -255,8 +291,28 @@ and the container's own priority, then:
    any member, teardown is INCOMPLETE: finish landing that member (re-invoke
    `pn-workspace-rules:land-workforest`), then retire the set; if it cannot land,
    leave the set IN PLACE and route the bead to STUCK, which preserves the isolation.
-   - `done`: CLEANUP the worktree (for a set,
-     `pn-workspace-rules:cleanup-workforest`), then
+   **CLEANUP in the pg-gwm path** (`isolation=pg-gwm` from step 3). The
+   orchestrator MUST NOT run the legacy teardown for this worktree; pg-gwm owns
+   it. After the landing is verified, give the lease back with
+   `pb drain release --bead <id> --repo <abs-canonical-clone-path> --landed ff-merge|pull-request`
+   (output `outcome=released|none branch=<work-branch> isolation=...`). BOTH
+   landing kinds release the lease and KEEP the branch: after a `pull-request`
+   land nothing is lost by releasing (the branch is pushed, the worktree clean),
+   and a lease held through the review would occupy one of the repo's few
+   worktree slots; a later review-fix session runs `pb drain isolate` again and
+   re-leases the kept branch. The merged branch itself is not deleted by
+   release (pg-gwm keeps the released slot with it checked out), so a lingering
+   merged `drain/<id>` is expected, not a failure. `outcome=none` (no lease)
+   means the legacy cleanup applies. A non-zero exit because the worktree holds
+   unsaved work is not forced: save the work, or route to STUCK (whose RECLAIM
+   expires the lease). If the lander reports its own teardown refused because
+   the worktree is pg-gwm managed, that is expected: do not retry it or force
+   anything, and release with the command above.
+
+   **CLEANUP in the legacy path** (`isolation=legacy`) is everything above this
+   paragraph: the guarded `wtdone` retirement.
+   - `done`: CLEANUP the worktree (pg-gwm path: `pb drain release`; legacy
+     path, and for a set, `pn-workspace-rules:cleanup-workforest`), then
      `bd close <id> --reason "<short note>" --actor "ID"`.
    - `done-pending-apply-verification`: run `pb gate attach-verified-child` per
      **POST-DEPLOY VERIFICATION GATE** (`references/post-deploy-gate.md`); exit 0 → cleanup + close; exit 5/21

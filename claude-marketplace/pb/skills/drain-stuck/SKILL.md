@@ -293,7 +293,19 @@ bead isolated as a set.
 
   `--branch` is needed only when `<work-branch>` is not `drain/<id>`.
 
-- The tool decides, never the agent: it removes the worktree (through `wtdone`, never forced) ONLY
+- **Two paths, chosen by the tool, not the agent.** When `pg-gwm config check` passes for the repo
+  and the worktree is a pg-gwm lease (`pg-gwm info --path` says managed; the output then reads
+  `isolation=pg-gwm`), RECLAIM uses the pg-gwm path below; otherwise (`isolation=legacy`) the legacy
+  `wtdone` path in the next bullet applies. In the pg-gwm path the tool never calls `wtdone` and
+  never removes a worktree: a clean worktree with zero commits ahead of the primary branch is given
+  back with `pg-gwm release` (`lease=released`; the zero-commit branch is then deleted with a plain
+  `git branch -d`), and a worktree that is dirty or whose branch has commits is KEPT and its lease
+  ended with `pg-gwm expire`, never `release` (`lease=expired`): the reaper then frees the slot and
+  preserves the unsaved work on a `pg-gwm/dirty-reaped-*` branch after its next reap, so a parked
+  bead's work is found there (`pg-gwm preserved list`) and `pb drain isolate` re-leases it on resume.
+  The agent MUST NOT run `pg-gwm release` or `pg-gwm expire` itself: `pb drain reclaim` decides.
+
+- (Legacy path.) The tool decides, never the agent: it removes the worktree (through `wtdone`, never forced) ONLY
   when `git status --porcelain` is empty AND the branch has zero commits the primary branch lacks,
   and then adds the clean-up note to the bead itself. Reading `outcome=`: `removed` (worktree gone,
   bead noted; `wtdone` also deletes the zero-commit branch, which loses nothing and which
