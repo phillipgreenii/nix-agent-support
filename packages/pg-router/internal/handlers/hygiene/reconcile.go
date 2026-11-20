@@ -168,6 +168,7 @@ func (tp teardownPorts) reconcileClosedBeadSessionsGuarded(ctx context.Context, 
 	if resumable {
 		cands = rotateAfter(cands, cursor.load())
 	}
+	finishedAny := false
 	for _, s := range cands {
 		if ctx.Err() != nil {
 			return closed // cut: the cursor stays on the last finished candidate
@@ -175,6 +176,14 @@ func (tp teardownPorts) reconcileClosedBeadSessionsGuarded(ctx context.Context, 
 		counts.examined()
 		closed += tp.reconcileOneClosedBead(ctx, cc, open, br, repoRoot, worktreeDir, quiet, guard, sessions, s)
 		if resumable && ctx.Err() == nil {
+			cursor.save(s.ExternalID)
+			finishedAny = true
+		} else if resumable && !finishedAny {
+			// The share expired inside the FIRST candidate this run attempted: it
+			// alone costs more than a whole share (a huge worktree's git guard or
+			// removal), so resuming at it would repeat it, and be cut, on every
+			// run, starving the rest of the pool. Step past it; the walk comes
+			// back to it on the next cycle.
 			cursor.save(s.ExternalID)
 		}
 	}

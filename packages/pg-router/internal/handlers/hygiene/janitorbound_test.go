@@ -209,3 +209,24 @@ func TestResumeCursor_isPerPoolAndPrefix(t *testing.T) {
 		t.Error("no resume without withResume")
 	}
 }
+
+// A candidate that alone outlasts the share must not pin the walk: the cursor
+// steps past it, so the next run reaches the candidates behind it.
+func TestReconcileClosedBead_stepsPastACandidateThatAloneOutlastsTheShare(t *testing.T) {
+	lockDir := t.TempDir()
+	cc := &fakeCC{ListSeq: [][]ccpool.Session{eightySessions()}}
+	open := (&fakeWorktreeOpener{}).Open
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	bd1 := &countingBD{cancel: cancel1, after: 1} // cut inside the first candidate
+	reconcileClosedBeadSessions(withResume(ctx1, lockDir, "pool"), cc, open, bd1, "pg-router-", "/repo", "", nil)
+	if len(bd1.calls) != 1 {
+		t.Fatalf("run 1 examined %d, want 1", len(bd1.calls))
+	}
+
+	bd2 := &countingBD{}
+	reconcileClosedBeadSessions(withResume(context.Background(), lockDir, "pool"), cc, open, bd2, "pg-router-", "/repo", "", nil)
+	if len(bd2.calls) != 79 || bd2.calls[0] == bd1.calls[0] {
+		t.Fatalf("run 2 examined %d starting at %v, want 79 starting after the slow candidate %v", len(bd2.calls), bd2.calls[:1], bd1.calls[0])
+	}
+}
