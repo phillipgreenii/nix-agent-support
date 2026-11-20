@@ -176,8 +176,40 @@ func TestStripGrafanaFolder(t *testing.T) {
 		{"r|severity=w,type=x", "r|severity=w,type=x"},
 		{"binary-hash-mismatch", "binary-hash-mismatch"},
 	} {
-		if got := stripGrafanaFolder(tc.in); got != tc.want {
-			t.Errorf("stripGrafanaFolder(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := stripExcludedLabels(tc.in); got != tc.want {
+			t.Errorf("stripExcludedLabels(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// A rebuild of the emitter (new Go toolchain, SDK, scope) must not change
+// the alert's identity.
+func TestGrafanaAlertFingerprintExcludesVolatileResourceLabels(t *testing.T) {
+	base := map[string]string{"severity": "warning", "type": "pr.changed"}
+	want := grafanaAlertFingerprint("r", base)
+	for k := range volatileResourceLabels {
+		withOld := map[string]string{"severity": "warning", "type": "pr.changed", k: "old"}
+		withNew := map[string]string{"severity": "warning", "type": "pr.changed", k: "new"}
+		if a, b := grafanaAlertFingerprint("r", withOld), grafanaAlertFingerprint("r", withNew); a != b || a != want {
+			t.Errorf("%s changed the fingerprint: %q vs %q (want %q)", k, a, b, want)
+		}
+	}
+	a := grafanaAlertFingerprint("r", map[string]string{"type": "x", "process_runtime_version": "go1.26.8"})
+	b := grafanaAlertFingerprint("r", map[string]string{"type": "x", "process_runtime_version": "go1.26.10"})
+	if a != b || strings.Contains(a, "process_runtime_version") {
+		t.Fatalf("process_runtime_version leaked: %q vs %q", a, b)
+	}
+}
+
+func TestStripExcludedLabelsVolatile(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"r|process_runtime_version=go1.26.8,severity=w,type=x", "r|severity=w,type=x"},
+		{"r|otel_scope_name=a,process_runtime_name=go,process_runtime_version=go1.26.8,severity=w", "r|severity=w"},
+		{"r|grafana_folder=a,b,process_runtime_version=go1.26.8,severity=w", "r|severity=w"},
+		{"r|severity=w,telemetry_sdk_version=1.2.3", "r|severity=w"},
+	} {
+		if got := stripExcludedLabels(tc.in); got != tc.want {
+			t.Errorf("stripExcludedLabels(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

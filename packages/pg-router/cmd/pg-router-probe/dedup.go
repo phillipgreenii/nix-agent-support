@@ -50,22 +50,23 @@ const (
 )
 
 // groupFingerprint is the bead fingerprint shared by every label set of a
-// grouped rule uid. It has no "|", so stripGrafanaFolder leaves it alone
+// grouped rule uid. It has no "|", so stripExcludedLabels leaves it alone
 // and it can never equal a per-label-set fingerprint.
 func groupFingerprint(ruleUID string) string { return "group:" + ruleUID }
 
 // matchExisting finds the first existing issue whose own fingerprint
 // metadata, or semicolon-joined alias list, equals f.Fingerprint —
 // exact-match only, no fuzzy matching [design: "Fingerprint metadata
-// key" paragraph]. The comparison is insensitive to the grafana_folder
-// label on both sides (stripGrafanaFolder), so beads whose stored
-// fingerprint or aliases still carry a folder keep matching.
+// key" paragraph]. The comparison is insensitive to the excluded
+// labels (grafana_folder and the volatile OTel resource labels) on both
+// sides (stripExcludedLabels), so beads whose stored fingerprint or
+// aliases still carry one keep matching.
 //
 // A grouped finding (GroupKey set) matches its own per-label-set
 // fingerprint first (a bead filed before the rule was grouped keeps
 // receiving its own label set), then the shared group bead.
 func matchExisting(f finding, existing []connectorIssue) *connectorIssue {
-	if m := matchFingerprint(stripGrafanaFolder(f.Fingerprint), existing); m != nil || f.GroupKey == "" {
+	if m := matchFingerprint(stripExcludedLabels(f.Fingerprint), existing); m != nil || f.GroupKey == "" {
 		return m
 	}
 	return matchFingerprint(f.GroupKey, existing)
@@ -74,11 +75,11 @@ func matchExisting(f finding, existing []connectorIssue) *connectorIssue {
 func matchFingerprint(want string, existing []connectorIssue) *connectorIssue {
 	for i := range existing {
 		e := &existing[i]
-		if stripGrafanaFolder(e.Metadata[metaFingerprint]) == want {
+		if stripExcludedLabels(e.Metadata[metaFingerprint]) == want {
 			return e
 		}
 		for _, alias := range splitAliases(e.Metadata[metaFingerprintAlias]) {
-			if stripGrafanaFolder(alias) == want {
+			if stripExcludedLabels(alias) == want {
 				return e
 			}
 		}

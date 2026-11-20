@@ -272,3 +272,28 @@ func TestMatchExistingIgnoresGrafanaFolderOnStoredSide(t *testing.T) {
 		t.Errorf("distinct type matched: %v", m)
 	}
 }
+
+// An open bead filed while the emitter ran go1.26.8 stores a fingerprint
+// (and alias) carrying that runtime version; a firing alert now labelled
+// go1.26.10 must still match it instead of filing a duplicate.
+func TestMatchExistingIgnoresRuntimeVersionOnStoredSide(t *testing.T) {
+	newFP := grafanaAlertFingerprint("r", map[string]string{"severity": "warning", "type": "pr.changed", "process_runtime_version": "go1.26.10"})
+	oldFP := "r|process_runtime_name=go,process_runtime_version=go1.26.8,severity=warning,type=pr.changed"
+	f := finding{Kind: kindGrafanaAlert, Fingerprint: newFP}
+	for name, md := range map[string]map[string]string{
+		"fingerprint": {metaFingerprint: oldFP},
+		"alias":       {metaFingerprint: "other", metaFingerprintAlias: "x;" + oldFP},
+	} {
+		existing := []connectorIssue{{ID: "b1", Metadata: md}}
+		if m := matchExisting(f, existing); m == nil || m.ID != "b1" {
+			t.Errorf("%s: runtime-version-carrying stored value did not match %q", name, newFP)
+		}
+		if action, _ := decideAction(f, existing, noGrafanaCtx); action == actionCreate {
+			t.Errorf("%s: decideAction would file a duplicate", name)
+		}
+	}
+	other := finding{Kind: kindGrafanaAlert, Fingerprint: grafanaAlertFingerprint("r", map[string]string{"severity": "warning", "type": "escalated.zr"})}
+	if m := matchExisting(other, []connectorIssue{{ID: "b1", Metadata: map[string]string{metaFingerprint: oldFP}}}); m != nil {
+		t.Errorf("distinct type matched: %v", m)
+	}
+}
