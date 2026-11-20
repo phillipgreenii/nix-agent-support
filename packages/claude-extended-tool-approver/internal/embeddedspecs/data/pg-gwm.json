@@ -1,0 +1,1507 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-gwm",
+  "command": {
+    "name": "pg-gwm",
+    "provenance": "packages/pg-gwm/cmd/pg-gwm main.go usage and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+    "citations": {
+      "provenance": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+      },
+      "stdin": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+      },
+      "stdout": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+      },
+      "unknownFlag": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "packages/pg-gwm/cmd/pg-gwm/main.go usage text: \"-h, --help\" prints the usage and exits (no state change)"
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "packages/pg-gwm/cmd/pg-gwm/main.go usage text: \"-h, --help\" prints the usage and exits (no state change)"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "completion": {
+        "name": "completion",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "config": {
+        "name": "config",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm configcmd.go (config check)",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "check": {
+            "name": "check",
+            "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              }
+            },
+            "flags": {
+              "--config": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "--format": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
+      "expire": {
+        "name": "expire",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--name": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "info": {
+        "name": "info",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--id": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--lease-id": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--name": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--path": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--print": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "lease": {
+        "name": "lease",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--detach": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--metadata": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--name": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--or-renew": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--owner": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--print": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--ttl": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--wait": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-B": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-b": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "list": {
+        "name": "list",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--include-unmanaged": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "preserved": {
+        "name": "preserved",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm preserved.go (list, prune); only list is modeled",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "list": {
+            "name": "list",
+            "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+            "citations": {
+              "provenance": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              },
+              "stdin": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              },
+              "stdout": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              },
+              "unknownFlag": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              }
+            },
+            "flags": {
+              "--format": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+              }
+            },
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
+      "reap": {
+        "name": "reap",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--all-repos": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--deadline": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--dry-run": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "unmodeled"
+            }
+          ],
+          "leadingSkippedByFlags": ["--dry-run"],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "release": {
+        "name": "release",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--name": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "renew": {
+        "name": "renew",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--metadata": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--name": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--print": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "--ttl": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "version": {
+        "name": "version",
+        "provenance": "packages/pg-gwm/cmd/pg-gwm (main.go usage, flags.go, per-verb flag sets) and share/tldr/pages.common/pg-gwm.md, this repo 2026-11-20",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-gwm\"]"
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

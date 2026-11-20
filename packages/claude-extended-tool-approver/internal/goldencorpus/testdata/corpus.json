@@ -17200,5 +17200,309 @@
     "rules_config": {},
     "expected_verdict": "reject",
     "notes": "An agent never assumes a role, --exec included (operator ruling, Phillip, 2026-11-17)."
+  },
+  {
+    "case": "pg_gwm_list",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm list --include-unmanaged"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "read-only verb"
+  },
+  {
+    "case": "pg_gwm_info",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm info --name x --format=json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "read-only verb"
+  },
+  {
+    "case": "pg_gwm_preserved_list",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm preserved list"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "read-only verb"
+  },
+  {
+    "case": "pg_gwm_config_check",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm config check"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "read-only verb"
+  },
+  {
+    "case": "pg_gwm_reap_dry_run",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm reap --dry-run"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "read-only: reap with --dry-run"
+  },
+  {
+    "case": "pg_gwm_completion",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm completion bash"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "read-only verb"
+  },
+  {
+    "case": "pg_gwm_lease",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm lease --name x -b feature/x --print=path"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "lease-class verb"
+  },
+  {
+    "case": "pg_gwm_renew",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm renew --name x --ttl 30m"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "lease-class verb"
+  },
+  {
+    "case": "pg_gwm_release",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm release --name x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "lease-class verb"
+  },
+  {
+    "case": "pg_gwm_expire",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm expire --name x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "lease-class verb"
+  },
+  {
+    "case": "pg_gwm_lease_subst_cd",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "p=$(pg-gwm lease --name x -b feature/x --print=path) && cd \"$p\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "documented command-substitution form"
+  },
+  {
+    "case": "pg_gwm_list_json_piped",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm list --format=json | jq ."
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "documented piped json form"
+  },
+  {
+    "case": "pg_gwm_repo_outside_path",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm list --repo /etc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "--repo is path-checked like git -C"
+  },
+  {
+    "case": "pg_gwm_reap_not_dry_run",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm reap"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "operator-class: reap without --dry-run"
+  },
+  {
+    "case": "pg_gwm_preserved_prune",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm preserved prune"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "operator-class"
+  },
+  {
+    "case": "pg_gwm_serve",
+    "tags": ["pg-gwm", "tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-gwm serve"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "operator-class"
   }
 ]
