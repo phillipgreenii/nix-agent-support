@@ -244,10 +244,10 @@ retained event that is still unsettled re-opens attempts for the handlers that h
 re-open rule of `INTF-SOURCE`).
 ```
 
-In the same file, add a new invariant after `INV-EVT-7`:
+In the same file, add a new invariant after `INV-EVT-9` (`INV-EVT-8` and `INV-EVT-9` were ratified on main after this design was first written, so the new settlement invariant takes the next free id):
 
 ```markdown
-- **`INV-EVT-8`** — **A cursor-feed source's cursor moves only on settlement.** For a source that declares a `settle`
+- **`INV-EVT-10`** <!-- uuid: 7ec4604c-764f-4fac-b0f8-b1e3fe8789bb --> — **A cursor-feed source's cursor moves only on settlement.** For a source that declares a `settle`
   invocation, the core MUST report a lane's frontier only for events that are settled and every earlier event of that
   lane settled, and MUST NOT report any position on any other basis (not an expiry, not a drop of a retired event, not
   a timeout of the report). The one exception is the hold limit, which abandons an event visibly and counts it. Delivery
@@ -410,7 +410,7 @@ requires `--retry-window` and a backend that owns its changes) the adapter passe
   changes` flushes its answer and acknowledges nothing. Without it the cursor still advances at emit, as before. Each printed item carries `ack` `{lane, token}` (lane is the
 backend name, token the position to acknowledge, section "Settlement" below), and pg-router acknowledges by running
 `settle`, which sends `changes-ack`, once every event up to that token has been accepted by every handler that matches
-it (pg-router `INV-EVT-8`). Delivery is at-least-once: a poll re-prints every row after the last acknowledged position,
+it (pg-router `INV-EVT-10`). Delivery is at-least-once: a poll re-prints every row after the last acknowledged position,
 so an event that expired un-accepted, or a batch the adapter failed to print, is offered again at the next poll.
 A poll that returns no change acknowledges each succeeded source's `next_seq` itself. Pinned by
 `TestChanges_DeferredAck_PassesNoAck_CursorAdvancesOnlyOnSettle`, and the unchanged default by the renamed
