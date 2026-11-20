@@ -2,9 +2,11 @@
 // failure backoff, change-compared and coalesced invalidation, the idle rule and visibility.
 import { expect, test } from 'claude-code/testing'
 import {
+  clearValue,
   defineSource,
   initSources,
   noteEvent,
+  onChange,
   readCached,
   refresh,
   setValue,
@@ -195,4 +197,56 @@ test('a source feeding only an undrawn surface drives no timer', async () => {
   expect(n.band).toBe(b) // collapsed band: its timer stops
   expect(n.modal).toBe(m)
   expect(n.alert > 5).toBe(true) // the alert source survives a collapse
+})
+
+test('clearValue drops the cached value, redraws once and tells the listeners once', async () => {
+  const { clock, stub } = setup()
+  defineSource<number>({ id: 's', intervalMs: 0 })
+  let told = 0
+  onChange('s', () => told++)
+  setValue('s', 1)
+  await clock.advance(0)
+  const before = stub.calls.filter(c => c === 'ui.invalidate').length
+  told = 0
+  clearValue('s')
+  clearValue('s') // nothing cached any more: no second redraw, no second call
+  await clock.advance(0)
+  expect(readCached('s')).toBe(undefined)
+  expect(stub.calls.filter(c => c === 'ui.invalidate').length - before).toBe(1)
+  expect(told).toBe(1)
+})
+
+test('clearValue for a source that was never started is a no-op', async () => {
+  const { clock, stub } = setup()
+  clearValue('ghost')
+  await clock.advance(0)
+  expect(stub.calls).toEqual([])
+})
+
+test('a fetch already in flight when clearValue runs drops its result', async () => {
+  const { clock } = setup()
+  let release: (v: string) => void = () => undefined
+  defineSource<string>({
+    id: 's',
+    intervalMs: 0,
+    fetch: () => new Promise<string>(r => (release = r)),
+  })
+  refresh('s')
+  await settle()
+  clearValue('s') // the old conversation's fetch is still out
+  release('old conversation')
+  await clock.advance(0)
+  expect(readCached('s')).toBe(undefined)
+})
+
+test('a fetch started after clearValue stores its result', async () => {
+  const { clock } = setup()
+  let n = 0
+  defineSource<string>({ id: 's', intervalMs: 0, fetch: async () => `v${++n}` })
+  refresh('s')
+  await clock.advance(0)
+  clearValue('s')
+  refresh('s', { force: true })
+  await clock.advance(0)
+  expect(readCached('s')).toBe('v2')
 })

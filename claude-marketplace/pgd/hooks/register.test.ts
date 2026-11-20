@@ -70,3 +70,12 @@ test('registering the mod registers the github-pr and jira link kinds with the e
     'see [acme/widgets#5](https://github.com/acme/widgets/pull/5) and [ABC-12](https://tracker.example/browse/ABC-12)',
   )
 })
+
+test('registering the mod registers the one session.end hook that refreshes the band after a clear', () => {
+  const seen: string[] = []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(register as any)((name: string) => {
+    seen.push(name)
+  })
+  expect(seen.filter(n => n === 'session.end')).toHaveLength(1)
+})

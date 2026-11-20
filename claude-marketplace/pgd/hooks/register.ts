@@ -10,6 +10,7 @@ import { registerGitHeadHooks, startGitHead } from './gitHead'
 import { registerModelEffortHooks, startModelEffort } from './modelEffort'
 import { registerUsageHooks, startUsage } from './usage'
 import { registerBandHooks } from './band'
+import { registerClearHooks } from './clear'
 import { registerAlertHooks } from './alerts'
 import { initLimitsCapture } from './limits-capture'
 import { initLog, log } from './log'
@@ -75,6 +76,7 @@ export const register: Register = on => {
   registerModelEffortHooks(on)
   registerGitHeadHooks(on)
   registerBandHooks(on)
+  registerClearHooks(on)
   registerAlertHooks(on)
   registerModalEventHooks(on)
   registerGithubPrKind()

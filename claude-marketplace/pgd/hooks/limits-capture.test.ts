@@ -1,6 +1,6 @@
 // Tests of the rate-limit capture: a usage reading in, the status.jsonl line pa-monitor reads out.
 import { expect, test } from 'claude-code/testing'
-import { buildRecord, captureLimits, flushLimitsCapture, initLimitsCapture, projectSlug } from './limits-capture'
+import { buildRecord, captureLimits, flushLimitsCapture, initLimitsCapture, projectSlug, resetLimitsCapture } from './limits-capture'
 import { stubHost } from './testkit'
 import type { Usage } from './usage'
 
@@ -107,4 +107,18 @@ test('without CLAUDE_CONFIG_DIR the file goes under HOME/.claude, and a failed w
   }
   captureLimits(usage(2))
   await flushLimitsCapture()
+})
+
+test('resetLimitsCapture forgets the old file text and the last signature', async () => {
+  const { s, clock } = boot()
+  captureLimits(usage(10))
+  await flushLimitsCapture()
+  resetLimitsCapture()
+  s.state.id = 'def-456'
+  clock.t += 60_000
+  captureLimits(usage(10)) // same limits: written anyway, to the new session's file, alone
+  await flushLimitsCapture()
+  const last = s.writes[s.writes.length - 1]!
+  expect(last.path).toBe('/cfg/projects/-work-my-repo-1/def-456.status.jsonl')
+  expect(last.text.trim().split('\n')).toHaveLength(1)
 })

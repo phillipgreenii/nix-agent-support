@@ -122,3 +122,11 @@ export function captureLimits(usage: Usage): void {
 export function flushLimitsCapture(): Promise<void> {
   return chain
 }
+
+// /clear and an in-process resume move the process to another session id and another
+// status.jsonl: forget the old file's text and the last signature, so the next reading seeds from
+// the new file and its first record is written even when the limits did not move.
+export function resetLimitsCapture(): void {
+  buffer = undefined
+  lastSig = undefined
+}

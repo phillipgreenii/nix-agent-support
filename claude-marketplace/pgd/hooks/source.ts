@@ -59,6 +59,8 @@ interface Entry {
   def: SourceDef<unknown>
   cache?: { value: unknown; fetchedAt: number }
   inFlight: boolean
+  // Bumped by clearValue: a fetch that began under an older generation drops its result.
+  gen: number
   rerun?: boolean
   forced?: boolean
   failures: number
@@ -125,6 +127,7 @@ async function runFetch(e: Entry): Promise<void> {
   e.inFlight = true
   e.forced = false
   e.lastAttemptAt = clock.now()
+  const gen = e.gen
   const labels = { source: e.def.id }
   let startedAt: number | undefined
   try {
@@ -145,7 +148,7 @@ async function runFetch(e: Entry): Promise<void> {
       if (hit && age >= 0 && age < e.def.intervalMs) {
         e.failures = 0
         record('pgd_cache_hits_total', 1, labels)
-        store(e, hit.value, hit.fetchedAt)
+        if (e.gen === gen) store(e, hit.value, hit.fetchedAt)
         return
       }
     }
@@ -155,6 +158,7 @@ async function runFetch(e: Entry): Promise<void> {
     const value = await e.def.fetch({ host })
     record('pgd_fetch_duration_seconds', metricsNow() - startedAt, labels)
     e.failures = 0
+    if (e.gen !== gen) return // cleared while this fetch ran: the result is the old conversation's
     store(e, value)
     if (sharedStore && key !== undefined) await sharedStore.write(key, value)
   } catch (err) {
@@ -206,7 +210,7 @@ export function initSources(h: ModApi, c?: Partial<Clock>): void {
 
 export function defineSource<T>(def: SourceDef<T>): void {
   entries.get(def.id)?.timer?.cancel()
-  const e: Entry = { def: def as SourceDef<unknown>, inFlight: false, failures: 0 }
+  const e: Entry = { def: def as SourceDef<unknown>, inFlight: false, gen: 0, failures: 0 }
   entries.set(def.id, e)
   schedule(e)
 }
@@ -286,4 +290,15 @@ export function noteEvent(): void {
 export function setVisible(surface: Surface, isVisible: boolean): void {
   visible[surface] = isVisible
   for (const e of entries.values()) schedule(e)
+}
+
+// Drop a source's cached value (a redraw follows when there was one) and discard the result of any
+// fetch already in flight, which belongs to the old conversation. A polled source then refetches on
+// its own timer; refresh(id, { force: true }) reads it at once. A source never started is a no-op.
+// Used when the conversation changes under the process (/clear, /resume).
+export function clearValue(id: string): void {
+  const e = entries.get(id)
+  if (!e) return
+  e.gen += 1
+  if (e.cache !== undefined) store(e, undefined)
 }
