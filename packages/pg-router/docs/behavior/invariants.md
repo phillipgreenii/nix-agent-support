@@ -414,6 +414,15 @@ here changes a level or `INV-LIFE-2`.
   then cancel its payload's process group exactly as for a `SIGTERM` (within its cancel grace plus
   one second). A role with `survives_shutdown` MUST get no such pipe, and an adapter meant to
   outlive the daemon (the ccpool adapter) MUST ignore it: their work is deliberately left running.
+  **A command payload does not outlive its daemon.** Whatever the payload's descendants do with
+  `SIGTERM`, the command adapter MUST NOT return until every member of the payload's process group
+  is gone: it MUST send `SIGKILL` to the group once the cancel grace has passed with members still
+  alive. A command payload's whole process group therefore ends within the shutdown drain plus the
+  cancel grace of a daemon stop, and a command role MUST NOT declare `survives_shutdown`. A payload
+  that has left its process group is outside this guarantee. **A dispatch cut short because the
+  daemon is stopping** MUST be recorded in the router log with the field
+  `interrupted_by=daemon_shutdown`, a field a handler failure never carries, so a stop that
+  interrupted a dispatch is distinguishable from a failed one.
 
 ## Wiring
 
