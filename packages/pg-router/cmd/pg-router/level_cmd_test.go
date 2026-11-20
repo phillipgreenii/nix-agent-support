@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	apistatus "github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/levels"
@@ -45,12 +46,8 @@ func TestFormatRemaining(t *testing.T) {
 
 func TestOverrideTextAndRenderLevels(t *testing.T) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
-	exp := now.Add(3 * time.Hour).Format(time.RFC3339)
 	v := levelView{Resource: "cpu", Level: "HIGH", Source: "operator", Owner: "operator", AgeS: 5}
-	v.Override = &struct {
-		UntilCleared bool   `json:"until_cleared"`
-		ExpiresAt    string `json:"expires_at"`
-	}{false, exp}
+	v.Override = &apistatus.LevelOverride{UntilCleared: false, ExpiresAt: now.Add(3 * time.Hour)}
 	if got := overrideText(v, now); got != "OVERRIDE by operator, expires in 3h" {
 		t.Errorf("override text = %q", got)
 	}

@@ -22,7 +22,7 @@ import (
 const logLimitDropOrder = 4
 
 // view converts l for the shared operator-notice wording.
-func (l QueueLog) view() core.LogLimitView {
+func logLimitView(l QueueLog) core.LogLimitView {
 	return core.LogLimitView{
 		Bytes: l.Bytes, LimitBytes: l.LimitBytes, SoftBytes: l.SoftBytes, State: l.State,
 		RejectedLogFull: l.Rejected.LogFull, RejectedLogUnwritable: l.Rejected.LogUnwritable, Detail: l.Detail,
@@ -33,7 +33,7 @@ func (l QueueLog) view() core.LogLimitView {
 // nil when the log is healthy. Each logical line starts at column 0 (the headline
 // with "! "), continuations are indented two columns.
 func logLimitNoticeLines(l QueueLog, width int) []string {
-	notice := core.LogLimitNotice(l.view())
+	notice := core.LogLimitNotice(logLimitView(l))
 	if len(notice) == 0 {
 		return nil
 	}

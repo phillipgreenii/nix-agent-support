@@ -6,7 +6,9 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
+	apistatus "github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/core"
 )
@@ -184,12 +186,7 @@ func TestRoute_status(t *testing.T) {
 // does (bead pg2-vtuou).
 func TestRenderStatusText_ActivityDroppedNote(t *testing.T) {
 	base := statusReply{
-		Activity: []struct {
-			Seq       uint64 `json:"seq"`
-			StartedAt string `json:"startedAt"`
-			Type      string `json:"type"`
-			Outcome   string `json:"outcome"`
-		}{{Seq: 4, Type: "review-requested", Outcome: "delivered"}},
+		Activity: []apistatus.ActivityEntry{{Seq: 4, Type: "review-requested", Outcome: "delivered"}},
 	}
 	cases := []struct {
 		name    string
@@ -228,10 +225,10 @@ func TestStatusCmd_RendersWidenedListenersSources(t *testing.T) {
 			{Role: "review", Binds: []string{"review-requested"}, Enabled: true, Excluded: false, Delivered: 3, Declined: 1},
 		},
 		Sources: []sourceView{
-			{Name: "feedback-ready", Type: "pull", Enabled: true, Excluded: false, Mode: "pull", LastTick: "2026-09-01T00:05:00Z"},
+			{Name: "feedback-ready", Type: "pull", Enabled: true, Excluded: false, Mode: "pull", LastTick: mustTime("2026-09-01T00:05:00Z")},
 			{
 				Name: "urgent-ready", Type: "pull", Enabled: true, Excluded: true, Mode: "pull",
-				Failure: &failureView{Count: 2, NextEligible: "2026-09-01T00:06:00Z"},
+				Failure: &failureView{Count: 2, NextEligible: mustTime("2026-09-01T00:06:00Z")},
 			},
 		},
 	}
@@ -261,7 +258,7 @@ func TestStatusCmd_RendersWidenedListenersSources(t *testing.T) {
 // predates the field.
 func TestRenderStatusText_QueueLogLine(t *testing.T) {
 	var out strings.Builder
-	renderStatusText(&out, "/s", statusReply{QueueLog: &queueLogView{Bytes: 33291620, Compactions: 2}})
+	renderStatusText(&out, "/s", statusReply{QueueLog: queueLogView{Bytes: 33291620, Compactions: 2}})
 	if want := "queue log: bytes=33291620 (31.7 MiB) compactions=2\n"; !strings.Contains(out.String(), want) {
 		t.Fatalf("stdout = %q, want %q", out.String(), want)
 	}
@@ -277,8 +274,8 @@ func TestRenderStatusText_QueueLogLine(t *testing.T) {
 // the line says so rather than vanishing.
 func TestRenderStatusText_LastCompaction(t *testing.T) {
 	var out strings.Builder
-	renderStatusText(&out, "/s", statusReply{QueueLog: &queueLogView{Bytes: 4096, Compactions: 1, LastCompaction: &lastCompactionView{
-		At: "2026-09-01T13:04:05Z", Trigger: "manual", BytesBefore: 33291620, BytesAfter: 3808, RecordsBefore: 182157, RecordsAfter: 9, DurationMs: 41,
+	renderStatusText(&out, "/s", statusReply{QueueLog: queueLogView{Bytes: 4096, Compactions: 1, LastCompaction: &lastCompactionView{
+		At: mustTime("2026-09-01T13:04:05Z"), Trigger: "manual", BytesBefore: 33291620, BytesAfter: 3808, RecordsBefore: 182157, RecordsAfter: 9, DurationMs: 41,
 	}}})
 	for _, want := range []string{"(manual): 31.7 MiB -> 3.7 KiB, 182157 -> 9 records, 41ms", "  last compaction: "} {
 		if !strings.Contains(out.String(), want) {
@@ -286,7 +283,7 @@ func TestRenderStatusText_LastCompaction(t *testing.T) {
 		}
 	}
 	out.Reset()
-	renderStatusText(&out, "/s", statusReply{QueueLog: &queueLogView{Bytes: 4096}})
+	renderStatusText(&out, "/s", statusReply{QueueLog: queueLogView{Bytes: 4096}})
 	if want := "  last compaction: none since this core started\n"; !strings.Contains(out.String(), want) {
 		t.Errorf("status text lacks %q:\n%s", want, out.String())
 	}
@@ -296,7 +293,7 @@ func TestRenderStatusText_LastCompaction(t *testing.T) {
 // no notice (bead pg2-5d3ui).
 func TestRenderStatusText_QueueLogLimitLineHealthy(t *testing.T) {
 	var out strings.Builder
-	renderStatusText(&out, "/s", statusReply{QueueLog: &queueLogView{Bytes: 33291620, Compactions: 2, LimitBytes: 64 << 20, SoftBytes: 60397977, Percent: 49.6, State: "ok"}})
+	renderStatusText(&out, "/s", statusReply{QueueLog: queueLogView{Bytes: 33291620, Compactions: 2, LimitBytes: 64 << 20, SoftBytes: 60397977, Percent: 49.6, State: "ok"}})
 	if want := "queue log: bytes=33291620 (31.7 MiB) compactions=2 limit=67108864 (64.0 MiB) used=49.6% state=ok\n"; !strings.Contains(out.String(), want) {
 		t.Fatalf("stdout = %q, want %q", out.String(), want)
 	}
@@ -334,7 +331,7 @@ func TestRenderStatusText_QueueLogLimitNotices(t *testing.T) {
 			v := base
 			tc.mod(&v)
 			var out strings.Builder
-			renderStatusText(&out, "/s", statusReply{QueueLog: &v})
+			renderStatusText(&out, "/s", statusReply{QueueLog: v})
 			for _, want := range tc.wants {
 				if !strings.Contains(out.String(), want) {
 					t.Errorf("status text lacks %q:\n%s", want, out.String())
@@ -402,4 +399,13 @@ func TestRenderStatusText_BusySection(t *testing.T) {
 	if !strings.Contains(sb.String(), "BUSY:\n  (none)\n") {
 		t.Errorf("status text lacks the empty BUSY marker:\n%s", sb.String())
 	}
+}
+
+// mustTime parses an RFC 3339 test timestamp.
+func mustTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }

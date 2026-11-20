@@ -102,7 +102,7 @@ func writeRequires(w io.Writer, role string, st statusReply) {
 			continue
 		}
 		for _, c := range r.Requires {
-			fmt.Fprintf(w, "  requires %s\n", c.requiresText())
+			fmt.Fprintf(w, "  requires %s\n", requiresClauseText(c))
 		}
 	}
 }

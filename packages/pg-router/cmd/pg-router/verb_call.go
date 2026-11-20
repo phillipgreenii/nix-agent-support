@@ -102,3 +102,19 @@ func shortTime(rfc string) string {
 	}
 	return t.Local().Format("15:04:05")
 }
+
+// shortTimeOf is shortTime for a decoded time; the zero time reads as absent.
+func shortTimeOf(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.Local().Format("15:04:05")
+}
+
+// timeText is the RFC 3339 text of a decoded time, empty for the zero time.
+func timeText(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339Nano)
+}

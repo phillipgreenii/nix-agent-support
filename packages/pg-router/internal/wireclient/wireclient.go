@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/roles"
@@ -394,7 +395,7 @@ func decodeDeclineBody(stdout []byte) BusyDecline {
 
 // SchemaVersion is the wire envelope version this client stamps on every
 // request it builds (DEC-WIRE-1's "schemaVersion").
-const SchemaVersion = "1"
+const SchemaVersion = status.SchemaVersion
 
 // Dispatch implements HandlerClient: it sends handler.dispatch over the
 // registered participant's own invoked command (DEC-WIRE-1's default CLI

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	apistatus "github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/config"
@@ -212,12 +213,9 @@ func doctorCalendar(rep *doctorReport, cfg config.Config, logDir string, now tim
 	_ = os.Remove(name)
 }
 
-// doctorStatus is the part of the status reply doctor reads.
-type doctorStatus struct {
-	Levels      []levelView      `json:"levels"`
-	PausedRoles []pausedRoleView `json:"pausedRoles"`
-	Listeners   []listenerView   `json:"listeners"`
-}
+// doctorStatus is the status reply, of which doctor reads the levels, the
+// paused roles and the listeners.
+type doctorStatus = apistatus.Reply
 
 // doctorSocket probes that a core's socket is reachable and, when it is, reads one
 // status reply from it. The bool is false when the socket probe FAILed.

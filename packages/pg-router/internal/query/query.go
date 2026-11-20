@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/item"
 	"github.com/phillipgreenii/x/cmdrun"
@@ -343,7 +344,7 @@ type wireEvent struct {
 // querySchemaVersion is the wire envelope version this client stamps on
 // every request it builds (DEC-WIRE-1's "schemaVersion") — matches
 // wireclient.SchemaVersion's own value.
-const querySchemaVersion = "1"
+const querySchemaVersion = status.SchemaVersion
 
 // Run implements Query: it sends INTF-SOURCE's `query` message to the
 // registered participant's own invoked command (Command, with "query"

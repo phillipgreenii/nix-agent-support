@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	apistatus "github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -120,200 +121,37 @@ func busyRefusalMessage(reply []byte) string {
 	return errBody.Error
 }
 
-// statusReply is the cli.status-reply shape, as a CONSUMER (the human
-// renderer) reads it — mirrors internal/core's composeStatusReply output
-// (schemas/cli.status-reply.schema.json).
-type statusReply struct {
-	Deliveries []struct {
-		ID      string `json:"id"`
-		Handler string `json:"handler"`
-		Event   string `json:"event"`
-	} `json:"deliveries"`
-	Queues []struct {
-		Type  string `json:"type"`
-		Depth int    `json:"depth"`
-	} `json:"queues"`
-	Core *struct {
-		State      string `json:"state"`
-		Version    string `json:"version"`
-		PID        int    `json:"pid"`
-		StartedAt  string `json:"startedAt"`
-		ConfigPath string `json:"configPath"`
-	} `json:"core"`
-	Mode           string `json:"mode"`
-	ResolvedConfig *struct {
-		RepoRoot       string `json:"repoRoot"`
-		BeadsPrefix    string `json:"beadsPrefix"`
-		PollIntervalMs int    `json:"pollIntervalMs"`
-		ActiveRoles    int    `json:"activeRoles"`
-		ActiveQueries  int    `json:"activeQueries"`
-	} `json:"resolvedConfig"`
-	Levels []levelView `json:"levels"`
-	// PausedRoles are the roles a level requirement blocks right now.
-	PausedRoles []pausedRoleView `json:"pausedRoles"`
-	// QueueLog is the durable write-ahead log's size and compaction count (bead
-	// pg2-8e0m6); nil when the core predates the field.
-	QueueLog *queueLogView `json:"queueLog"`
-	// Listeners is listeners[]'s WIDENED per-role shape (Task 4.1,
-	// operator-widened scope) — a dedicated decode target. Task 4.1 also
-	// removed the prior {id,kind,state,self} decode this array shared with
-	// registry[] (neither this CLI's statusReply nor its renderer ever
-	// decoded registry[] itself, so no replacement decode target is needed
-	// for it here): the two arrays diverged on the wire, and reusing one
-	// type for both would silently mix them up again.
-	Listeners []listenerView `json:"listeners"`
-	// Registry is registry[]; only the per-entry requires verdicts are decoded
-	// (explain reads them), the rest of the entry is the TUI's and listeners'.
-	Registry []registryView `json:"registry"`
-	// Sources is sources[]'s WIDENED shape (Task 4.1): the prior
-	// {name, rejected} decode target is gone along with the wire field it
-	// named — `rejected` was never part of the frozen tree and nothing
-	// rendered it.
-	Sources           []sourceView `json:"sources"`
-	UnmatchedBindings []string     `json:"unmatchedBindings"`
-	Activity          []struct {
-		Seq       uint64 `json:"seq"`
-		StartedAt string `json:"startedAt"`
-		Type      string `json:"type"`
-		Outcome   string `json:"outcome"`
-	} `json:"activity"`
-	// ActivityDropped reports whether entries strictly between the request's
-	// `since` cursor and what the ring now retains were already evicted
-	// before this read (internal/activity.Ring.Read's own doc; bead
-	// pg2-vtuou). This subcommand never sends a nonzero `since` (see
-	// runStatus's doc), so it is always false through this CLI today — the
-	// field exists for a future since-cursor caller (Task 4.0's TUI) and for
-	// parity with the wire contract.
-	ActivityDropped bool   `json:"activityDropped"`
-	LastTickAt      string `json:"lastTickAt"`
-	TickIntervalMs  int    `json:"tickIntervalMs"`
-}
+// The status reply and its parts are the published contract
+// (packages/pg-router/api/status); these names keep the renderers short.
+type (
+	statusReply        = apistatus.Reply
+	queueLogView       = apistatus.QueueLog
+	lastCompactionView = apistatus.LastCompaction
+	failureView        = apistatus.Failure
+	listenerView       = apistatus.Listener
+	progressView       = apistatus.Progress
+	sourceView         = apistatus.Source
+	calendarView       = apistatus.Calendar
+	levelView          = apistatus.Level
+	pausedRoleView     = apistatus.PausedRole
+	failingClauseView  = apistatus.FailingClause
+	requiresClauseView = apistatus.RequiresClause
+	registryView       = apistatus.Registration
+)
 
-// queueLogView is the status reply's `queueLog` object (beads pg2-8e0m6,
-// pg2-5d3ui): the write-ahead log's size and compaction count plus the log-size
-// limit state. Every limit field is absent (zero) from a core that predates it.
-type queueLogView struct {
-	Bytes          int64   `json:"bytes"`
-	Compactions    int64   `json:"compactions"`
-	LimitBytes     int64   `json:"limitBytes"`
-	SoftBytes      int64   `json:"softBytes"`
-	Percent        float64 `json:"percent"`
-	State          string  `json:"state"`
-	EmittersHalted bool    `json:"emittersHalted"`
-	Rejected       struct {
-		LogFull       int64 `json:"logFull"`
-		LogUnwritable int64 `json:"logUnwritable"`
-	} `json:"rejected"`
-	Detail string `json:"detail"`
-	// LastCompaction is the most recent compaction this core process completed
-	// (bead pg2-maxn1); nil before the first, or from a core that predates it.
-	LastCompaction *lastCompactionView `json:"lastCompaction"`
-}
-
-// lastCompactionView is queueLog.lastCompaction.
-type lastCompactionView struct {
-	At            string `json:"at"`
-	Trigger       string `json:"trigger"`
-	BytesBefore   int64  `json:"bytesBefore"`
-	BytesAfter    int64  `json:"bytesAfter"`
-	RecordsBefore int    `json:"recordsBefore"`
-	RecordsAfter  int    `json:"recordsAfter"`
-	DurationMs    int64  `json:"durationMs"`
-}
-
-// String renders it as one operator line: when, what triggered it, and what it did.
-func (l lastCompactionView) String() string {
+// lastCompactionText renders it as one operator line: when, what triggered it, and what it did.
+func lastCompactionText(l lastCompactionView) string {
 	return fmt.Sprintf("%s (%s): %s -> %s, %d -> %d records, %s",
-		shortTime(l.At), textsafe.Sanitize(l.Trigger), humanBytes(l.BytesBefore), humanBytes(l.BytesAfter),
+		shortTimeOf(l.At), textsafe.Sanitize(l.Trigger), humanBytes(l.BytesBefore), humanBytes(l.BytesAfter),
 		l.RecordsBefore, l.RecordsAfter, (time.Duration(l.DurationMs) * time.Millisecond).Round(time.Millisecond))
 }
 
 // limitView converts v for the shared operator-notice wording (core.LogLimitNotice).
-func (v queueLogView) limitView() core.LogLimitView {
+func queueLogLimitView(v queueLogView) core.LogLimitView {
 	return core.LogLimitView{
 		Bytes: v.Bytes, LimitBytes: v.LimitBytes, SoftBytes: v.SoftBytes, State: v.State,
 		RejectedLogFull: v.Rejected.LogFull, RejectedLogUnwritable: v.Rejected.LogUnwritable, Detail: v.Detail,
 	}
-}
-
-// backoffView is listeners[].backoff's / sources[].failure's shared
-// {streak|count, nextEligible} shape — nil (the JSON `null` decode target,
-// via a pointer) whenever nothing is currently backing off.
-type backoffView struct {
-	Streak       int    `json:"streak"`
-	NextEligible string `json:"nextEligible"`
-}
-
-// failureView is sources[].failure's shape — {count, nextEligible} —
-// distinct from backoffView only in its first field's name (the wire
-// vocabulary Task 4.1's schema uses for each array), not its meaning.
-type failureView struct {
-	Count        int    `json:"count"`
-	NextEligible string `json:"nextEligible"`
-}
-
-// listenerView is listeners[]'s widened per-role item shape (Task 4.1,
-// operator-widened scope): role/binds/enabled/excluded/delivered/declined/
-// backoff.
-type listenerView struct {
-	Role      string       `json:"role"`
-	Binds     []string     `json:"binds"`
-	Enabled   bool         `json:"enabled"`
-	Excluded  bool         `json:"excluded"`
-	Delivered int          `json:"delivered"`
-	Declined  int          `json:"declined"`
-	Backoff   *backoffView `json:"backoff"`
-	// InFlight is true while the role has an offer outstanding; Busy is the
-	// core's busy verdict for it (an offer in flight, or busy-kind declines since
-	// its last progress; bead pg2-8ij5o).
-	InFlight bool `json:"inFlight"`
-	Busy     bool `json:"busy"`
-	// SelfReportState is the role's self-status (healthy / degraded /
-	// unavailable), "" when it never reported; UnavailableReason is why core
-	// marked it unavailable (docket pg2-12gr4.8), "" when it is available.
-	SelfReportState   string `json:"selfReportState"`
-	UnavailableReason string `json:"unavailableReason"`
-	// Progress is the state behind the role-progress gauges (age since the role
-	// last made progress, 0 while an offer is in flight, plus the unsuccessful and
-	// busy counts since then); nil for a role with no progress series, or from a
-	// core that predates the field.
-	Progress *progressView `json:"progress"`
-}
-
-// progressView is listeners[].progress's shape.
-type progressView struct {
-	AgeSeconds   float64 `json:"ageSeconds"`
-	Unsuccessful int64   `json:"unsuccessful"`
-	Busy         int64   `json:"busy"`
-}
-
-// sourceView is sources[]'s widened item shape (Task 4.1): name/type/
-// enabled/excluded/mode/lastTick/failure.
-type sourceView struct {
-	Name     string       `json:"name"`
-	Type     string       `json:"type"`
-	Enabled  bool         `json:"enabled"`
-	Excluded bool         `json:"excluded"`
-	Mode     string       `json:"mode"`
-	LastTick string       `json:"lastTick"`
-	Failure  *failureView `json:"failure"`
-	// Calendar is set only for a calendar-triggered source.
-	Calendar *calendarView `json:"calendar"`
-	// InFlight and Busy are both true while a fetch of the source is in flight.
-	InFlight bool `json:"inFlight"`
-	Busy     bool `json:"busy"`
-}
-
-// calendarView is sources[].calendar's shape.
-type calendarView struct {
-	Schedule string `json:"schedule"`
-	OnMissed string `json:"onMissed"`
-	Next     string `json:"next"`
-	Last     *struct {
-		Slot    string `json:"slot"`
-		Outcome string `json:"outcome"`
-		Reason  string `json:"reason"`
-	} `json:"last"`
 }
 
 // line renders the one operator line of a calendar query, for example
@@ -323,7 +161,7 @@ type calendarView struct {
 //
 // The stored outcome fired renders as fired (with its reason, for example late
 // by 5s), catch_up as catch-up, skipped as SKIPPED; the reason is shown as stored.
-func (c calendarView) line(name string) string {
+func calendarLine(c calendarView, name string) string {
 	last := "no slot handled yet"
 	suffix := " | on_missed=" + c.OnMissed
 	if l := c.Last; l != nil {
@@ -378,9 +216,9 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 	}
 
 	fmt.Fprintf(w, "socket: %s\n", dash(socket))
-	if st.Core != nil {
+	if st.Core != (apistatus.CoreInfo{}) {
 		fmt.Fprintf(w, "core: state=%s version=%s pid=%d startedAt=%s configPath=%s\n",
-			dash(st.Core.State), dash(st.Core.Version), st.Core.PID, dash(st.Core.StartedAt), dash(st.Core.ConfigPath))
+			dash(st.Core.State), dash(st.Core.Version), st.Core.PID, dash(timeText(st.Core.StartedAt)), dash(st.Core.ConfigPath))
 	} else {
 		fmt.Fprintln(w, "core: -")
 	}
@@ -396,20 +234,20 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		fmt.Fprintln(w, "config: -")
 	}
 
-	if ql := st.QueueLog; ql != nil {
+	if ql := st.QueueLog; ql != (apistatus.QueueLog{}) {
 		fmt.Fprintf(w, "queue log: bytes=%d (%s) compactions=%d", ql.Bytes, humanBytes(ql.Bytes), ql.Compactions)
 		if ql.LimitBytes > 0 {
 			fmt.Fprintf(w, " limit=%d (%s) used=%.1f%% state=%s", ql.LimitBytes, humanBytes(ql.LimitBytes), ql.Percent, dash(ql.State))
 		}
 		fmt.Fprintln(w)
 		if ql.LastCompaction != nil {
-			fmt.Fprintf(w, "  last compaction: %s\n", ql.LastCompaction)
+			fmt.Fprintf(w, "  last compaction: %s\n", lastCompactionText(*ql.LastCompaction))
 		} else {
 			fmt.Fprintln(w, "  last compaction: none since this core started")
 		}
 		// The soft step is not a level, so nothing in LEVELS says it is in force:
 		// state what is halted, what still runs, why, and the remedies here.
-		for _, line := range core.LogLimitNotice(ql.limitView()) {
+		for _, line := range core.LogLimitNotice(queueLogLimitView(ql)) {
 			fmt.Fprintf(w, "  ! %s\n", line)
 		}
 	} else {
@@ -454,7 +292,7 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		for _, l := range st.Listeners {
 			backoff := "-"
 			if l.Backoff != nil {
-				backoff = fmt.Sprintf("streak=%d nextEligible=%s", l.Backoff.Streak, dash(l.Backoff.NextEligible))
+				backoff = fmt.Sprintf("streak=%d nextEligible=%s", l.Backoff.Streak, dash(timeText(l.Backoff.NextEligible)))
 			}
 			fmt.Fprintf(w, "  %s: binds=%v enabled=%t excluded=%t delivered=%d declined=%d backoff=%s",
 				dash(l.Role), l.Binds, l.Enabled, l.Excluded, l.Delivered, l.Declined, backoff)
@@ -469,12 +307,12 @@ func renderStatusText(w io.Writer, socket string, st statusReply) {
 		for _, s := range st.Sources {
 			failure := "-"
 			if s.Failure != nil {
-				failure = fmt.Sprintf("count=%d nextEligible=%s", s.Failure.Count, dash(s.Failure.NextEligible))
+				failure = fmt.Sprintf("count=%d nextEligible=%s", s.Failure.Count, dash(timeText(s.Failure.NextEligible)))
 			}
 			fmt.Fprintf(w, "  %s: type=%s enabled=%t excluded=%t mode=%s lastTick=%s failure=%s\n",
-				dash(s.Name), dash(s.Type), s.Enabled, s.Excluded, dash(s.Mode), dash(s.LastTick), failure)
+				dash(s.Name), dash(s.Type), s.Enabled, s.Excluded, dash(s.Mode), dash(timeText(s.LastTick)), failure)
 			if s.Calendar != nil {
-				fmt.Fprintf(w, "    %s\n", textsafe.Sanitize(s.Calendar.line(s.Name)))
+				fmt.Fprintf(w, "    %s\n", textsafe.Sanitize(calendarLine(*s.Calendar, s.Name)))
 			}
 		}
 	})

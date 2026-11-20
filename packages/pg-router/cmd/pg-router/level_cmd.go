@@ -52,29 +52,6 @@ func parseOverrideFor(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// levelView is one entry of a level-list reply or the status levels array.
-type levelView struct {
-	Resource   string `json:"resource"`
-	Level      string `json:"level"`
-	Source     string `json:"source"`
-	Owner      string `json:"owner"`
-	ObservedAt string `json:"observed_at"`
-	ReceivedAt string `json:"received_at"`
-	ExpiresAt  string `json:"expires_at"`
-	AgeS       int64  `json:"age_s"`
-	Stale      bool   `json:"stale"`
-	Since      string `json:"since"`
-	NoSensor   bool   `json:"no_sensor"`
-	Reading    *struct {
-		Value float64 `json:"value"`
-		Unit  string  `json:"unit"`
-	} `json:"reading"`
-	Override *struct {
-		UntilCleared bool   `json:"until_cleared"`
-		ExpiresAt    string `json:"expires_at"`
-	} `json:"override"`
-}
-
 // formatRemaining writes d rounded DOWN to the minute with at most two units
 // (3h, 1h58m, 12m, 0m).
 func formatRemaining(d time.Duration) string {
@@ -102,8 +79,8 @@ func overrideText(v levelView, now time.Time) string {
 	if v.Override.UntilCleared {
 		return "OVERRIDE by " + who + ", until cleared"
 	}
-	t, err := time.Parse(time.RFC3339Nano, v.Override.ExpiresAt)
-	if err != nil {
+	t := v.Override.ExpiresAt
+	if t.IsZero() {
 		return "OVERRIDE by " + who
 	}
 	return "OVERRIDE by " + who + ", expires in " + formatRemaining(t.Sub(now))

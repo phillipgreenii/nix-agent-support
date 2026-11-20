@@ -1,5 +1,6 @@
 {
   "shared": [
+    "api/status",
     "conformance",
     "conformance/driver",
     "conformance/golden",

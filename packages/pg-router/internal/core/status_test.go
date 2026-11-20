@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
@@ -134,10 +135,10 @@ func TestStatusListeners_SelfReportStateJoinsByRoleName(t *testing.T) {
 	regs := []Registration{{ID: "df-feedback", Kind: "handler", State: conformance.Started, Self: SelfDegraded}}
 
 	rows := statusListeners(declared, nil, counts, regs, nil, nil)
-	if got := rows[0]["selfReportState"]; got != "degraded" {
+	if got := rows[0].SelfReportState; got != "degraded" {
 		t.Fatalf("selfReportState = %v, want %q (the self-status, not the lifecycle state)", got, "degraded")
 	}
-	if got := rows[0]["unavailableReason"]; got != "" {
+	if got := rows[0].UnavailableReason; got != "" {
 		t.Fatalf("unavailableReason = %v, want empty for an available role", got)
 	}
 }
@@ -151,10 +152,10 @@ func TestStatusListeners_UnavailableRoleShowsSelfStatusAndReason(t *testing.T) {
 	regs := []Registration{{ID: "w", Kind: "handler", State: conformance.Started, Self: SelfUnavailable, UnavailableReason: "bad pool dir"}}
 
 	rows := statusListeners(declared, nil, counts, regs, nil, nil)
-	if got := rows[0]["selfReportState"]; got != "unavailable" {
+	if got := rows[0].SelfReportState; got != "unavailable" {
 		t.Fatalf("selfReportState = %v, want unavailable", got)
 	}
-	if got := rows[0]["unavailableReason"]; got != "bad pool dir" {
+	if got := rows[0].UnavailableReason; got != "bad pool dir" {
 		t.Fatalf("unavailableReason = %v, want %q", got, "bad pool dir")
 	}
 }
@@ -170,15 +171,12 @@ func TestStatusListeners_ProgressObject(t *testing.T) {
 	progress := map[string]metrics.RoleProgress{"on": {AgeSeconds: 12.5, Unsuccessful: 2, Busy: 3}}
 
 	rows := statusListeners(declared, nil, nil, nil, nil, progress)
-	want := map[string]any{"ageSeconds": 12.5, "unsuccessful": int64(2), "busy": int64(3)}
-	if got := rows[1]["progress"]; !reflect.DeepEqual(got, want) { // sorted: off, on
+	want := &status.Progress{AgeSeconds: 12.5, Unsuccessful: 2, Busy: 3}
+	if got := rows[1].Progress; !reflect.DeepEqual(got, want) { // sorted: off, on
 		t.Errorf("on progress = %#v, want %#v", got, want)
 	}
-	if got := rows[0]["progress"]; got != nil {
+	if got := rows[0].Progress; got != nil {
 		t.Errorf("off progress = %#v, want nil", got)
-	}
-	if _, ok := rows[0]["progress"]; !ok {
-		t.Errorf("off listener has no progress key; want it present as null")
 	}
 }
 
@@ -190,7 +188,7 @@ func TestStatusListeners_SelfReportStateEmptyWhenNeverRegistered(t *testing.T) {
 	counts := map[string]*ListenerCounts{"df-feedback": {}}
 
 	rows := statusListeners(declared, nil, counts, nil, nil, nil)
-	if got := rows[0]["selfReportState"]; got != "" {
+	if got := rows[0].SelfReportState; got != "" {
 		t.Fatalf("selfReportState = %v, want empty string", got)
 	}
 }
@@ -219,34 +217,34 @@ func TestStatusListeners_RoleBindsEnabledExcluded(t *testing.T) {
 		listenerCounts: map[string]*ListenerCounts{"review": reviewCounts},
 	}
 	reply := svc.composeStatusReply(t.Context(), 0)
-	listeners, ok := reply["listeners"].([]map[string]any)
-	if !ok || len(listeners) != 3 {
-		t.Fatalf("listeners = %v, want 3 entries (the full declared set)", reply["listeners"])
+	listeners := reply.Listeners
+	if len(listeners) != 3 {
+		t.Fatalf("listeners = %v, want 3 entries (the full declared set)", reply.Listeners)
 	}
-	byRole := make(map[string]map[string]any, len(listeners))
+	byRole := make(map[string]status.Listener, len(listeners))
 	for _, l := range listeners {
-		byRole[l["role"].(string)] = l
+		byRole[l.Role] = l
 	}
-	if got := byRole["review"]; got["enabled"] != true || got["excluded"] != false {
+	if got := byRole["review"]; got.Enabled != true || got.Excluded != false {
 		t.Fatalf("review = %+v, want enabled=true excluded=false", got)
 	}
-	if got := byRole["worker"]; got["enabled"] != true || got["excluded"] != true {
+	if got := byRole["worker"]; got.Enabled != true || got.Excluded != true {
 		t.Fatalf("worker = %+v, want enabled=true excluded=true (selector-excluded)", got)
 	}
-	if got := byRole["feedback"]; got["enabled"] != false || got["excluded"] != false {
+	if got := byRole["feedback"]; got.Enabled != false || got.Excluded != false {
 		t.Fatalf("feedback = %+v, want enabled=false excluded=false (config-disabled, never selector-excluded)", got)
 	}
-	if got, ok := byRole["review"]["binds"].([]string); !ok || !reflect.DeepEqual(got, []string{"review-requested"}) {
-		t.Fatalf("review.binds = %v, want [review-requested]", byRole["review"]["binds"])
+	if got := byRole["review"].Binds; !reflect.DeepEqual(got, []string{"review-requested"}) {
+		t.Fatalf("review.binds = %v, want [review-requested]", byRole["review"].Binds)
 	}
-	if byRole["review"]["backoff"] != nil {
-		t.Fatalf("review.backoff = %v, want null (no live roleListener reference reaches core)", byRole["review"]["backoff"])
+	if byRole["review"].Backoff != nil {
+		t.Fatalf("review.backoff = %v, want null (no live roleListener reference reaches core)", byRole["review"].Backoff)
 	}
-	if byRole["review"]["delivered"] != int64(5) || byRole["review"]["declined"] != int64(2) {
-		t.Fatalf("review delivered/declined = %v/%v, want 5/2 (from ListenerCounts)", byRole["review"]["delivered"], byRole["review"]["declined"])
+	if byRole["review"].Delivered != 5 || byRole["review"].Declined != 2 {
+		t.Fatalf("review delivered/declined = %v/%v, want 5/2 (from ListenerCounts)", byRole["review"].Delivered, byRole["review"].Declined)
 	}
-	if byRole["worker"]["delivered"] != int64(0) || byRole["worker"]["declined"] != int64(0) {
-		t.Fatalf("worker delivered/declined = %v/%v, want 0/0 (no ListenerCounts entry for it)", byRole["worker"]["delivered"], byRole["worker"]["declined"])
+	if byRole["worker"].Delivered != 0 || byRole["worker"].Declined != 0 {
+		t.Fatalf("worker delivered/declined = %v/%v, want 0/0 (no ListenerCounts entry for it)", byRole["worker"].Delivered, byRole["worker"].Declined)
 	}
 }
 
@@ -266,22 +264,18 @@ func TestStatusListeners_DescriptionAlwaysPresent(t *testing.T) {
 		},
 	}
 	reply := svc.composeStatusReply(t.Context(), 0)
-	listeners, ok := reply["listeners"].([]map[string]any)
-	if !ok || len(listeners) != 2 {
-		t.Fatalf("listeners = %v, want 2 entries", reply["listeners"])
+	listeners := reply.Listeners
+	if len(listeners) != 2 {
+		t.Fatalf("listeners = %v, want 2 entries", reply.Listeners)
 	}
-	byRole := make(map[string]map[string]any, len(listeners))
+	byRole := make(map[string]status.Listener, len(listeners))
 	for _, l := range listeners {
-		byRole[l["role"].(string)] = l
+		byRole[l.Role] = l
 	}
-	if got := byRole["review"]["description"]; got != "reviews incoming PRs" {
+	if got := byRole["review"].Description; got != "reviews incoming PRs" {
 		t.Fatalf("review.description = %v, want %q", got, "reviews incoming PRs")
 	}
-	got, present := byRole["worker"]["description"]
-	if !present {
-		t.Fatal("worker.description absent, want an always-present key")
-	}
-	if got != "" {
+	if got := byRole["worker"].Description; got != "" {
 		t.Fatalf("worker.description = %v, want empty string (unset in config)", got)
 	}
 }
@@ -309,18 +303,15 @@ func TestStatusListeners_DeclinedByReasonBreaksDownDeclined(t *testing.T) {
 		listenerCounts: map[string]*ListenerCounts{"review": reviewCounts},
 	}
 	reply := svc.composeStatusReply(t.Context(), 0)
-	listeners, ok := reply["listeners"].([]map[string]any)
-	if !ok || len(listeners) != 2 {
-		t.Fatalf("listeners = %v, want 2 entries", reply["listeners"])
+	listeners := reply.Listeners
+	if len(listeners) != 2 {
+		t.Fatalf("listeners = %v, want 2 entries", reply.Listeners)
 	}
-	byRole := make(map[string]map[string]any, len(listeners))
+	byRole := make(map[string]status.Listener, len(listeners))
 	for _, l := range listeners {
-		byRole[l["role"].(string)] = l
+		byRole[l.Role] = l
 	}
-	reviewByReason, ok := byRole["review"]["declinedByReason"].(map[string]int64)
-	if !ok {
-		t.Fatalf("review.declinedByReason = %v (%T), want map[string]int64", byRole["review"]["declinedByReason"], byRole["review"]["declinedByReason"])
-	}
+	reviewByReason := byRole["review"].DeclinedByReason
 	if reviewByReason["at-capacity"] != 2 || reviewByReason["capacity-unknown"] != 1 {
 		t.Fatalf("review.declinedByReason = %v, want at-capacity=2 capacity-unknown=1", reviewByReason)
 	}
@@ -328,12 +319,12 @@ func TestStatusListeners_DeclinedByReasonBreaksDownDeclined(t *testing.T) {
 	for _, v := range reviewByReason {
 		sum += v
 	}
-	if sum != byRole["review"]["declined"].(int64) {
-		t.Fatalf("declinedByReason sums to %d, want it to equal the flat declined total %v", sum, byRole["review"]["declined"])
+	if sum != byRole["review"].Declined {
+		t.Fatalf("declinedByReason sums to %d, want it to equal the flat declined total %v", sum, byRole["review"].Declined)
 	}
-	workerByReason, ok := byRole["worker"]["declinedByReason"].(map[string]int64)
-	if !ok || len(workerByReason) != 0 {
-		t.Fatalf("worker.declinedByReason = %v, want an EMPTY (not absent/nil) map — no ListenerCounts entry for it", byRole["worker"]["declinedByReason"])
+	workerByReason := byRole["worker"].DeclinedByReason
+	if workerByReason == nil || len(workerByReason) != 0 {
+		t.Fatalf("worker.declinedByReason = %v, want an EMPTY (not absent/nil) map — no ListenerCounts entry for it", byRole["worker"].DeclinedByReason)
 	}
 }
 
@@ -353,7 +344,7 @@ func TestStatusListeners_SortedByRoleName(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("len(rows) = %d, want 3", len(rows))
 	}
-	got := []string{rows[0]["role"].(string), rows[1]["role"].(string), rows[2]["role"].(string)}
+	got := []string{rows[0].Role, rows[1].Role, rows[2].Role}
 	want := []string{"alpha", "mid", "zeta"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("role order = %v, want alphabetical %v", got, want)
@@ -374,20 +365,20 @@ func TestStatusListeners_InFlight(t *testing.T) {
 	inFlight := map[string]string{"busy-role": "pr.changed"}
 
 	rows := statusListeners(declared, nil, nil, nil, inFlight, nil)
-	byRole := map[string]map[string]any{}
+	byRole := map[string]status.Listener{}
 	for _, r := range rows {
-		byRole[r["role"].(string)] = r
+		byRole[r.Role] = r
 	}
-	if got := byRole["busy-role"]["inFlight"]; got != true {
+	if got := byRole["busy-role"].InFlight; got != true {
 		t.Fatalf("busy-role inFlight = %v, want true", got)
 	}
-	if got := byRole["busy-role"]["inFlightEventType"]; got != "pr.changed" {
+	if got := byRole["busy-role"].InFlightEventType; got != "pr.changed" {
 		t.Fatalf("busy-role inFlightEventType = %v, want %q", got, "pr.changed")
 	}
-	if got := byRole["idle-role"]["inFlight"]; got != false {
+	if got := byRole["idle-role"].InFlight; got != false {
 		t.Fatalf("idle-role inFlight = %v, want false", got)
 	}
-	if got := byRole["idle-role"]["inFlightEventType"]; got != "" {
+	if got := byRole["idle-role"].InFlightEventType; got != "" {
 		t.Fatalf("idle-role inFlightEventType = %v, want empty string", got)
 	}
 }
@@ -414,44 +405,43 @@ func TestStatusSources_TypeModeLastTickFailure(t *testing.T) {
 		},
 	})
 	reply := svc.composeStatusReply(t.Context(), 0)
-	sources, ok := reply["sources"].([]map[string]any)
-	if !ok || len(sources) != 3 {
-		t.Fatalf("sources = %v, want 3 entries (2 active + 1 selector-excluded)", reply["sources"])
+	sources := reply.Sources
+	if len(sources) != 3 {
+		t.Fatalf("sources = %v, want 3 entries (2 active + 1 selector-excluded)", reply.Sources)
 	}
-	byName := make(map[string]map[string]any, len(sources))
+	byName := make(map[string]status.Source, len(sources))
 	for _, s := range sources {
-		byName[s["name"].(string)] = s
+		byName[s.Name] = s
 	}
 
 	active := byName["active-src"]
-	if active["type"] != "pull" || active["mode"] != "pull" || active["enabled"] != true || active["excluded"] != false {
+	if active.Type != "pull" || active.Mode != "pull" || active.Enabled != true || active.Excluded != false {
 		t.Fatalf("active-src = %+v, want type/mode=pull enabled=true excluded=false", active)
 	}
-	if want := now.UTC().Format(time.RFC3339Nano); active["lastTick"] != want {
-		t.Fatalf("active-src.lastTick = %v, want %v", active["lastTick"], want)
+	if want := now.UTC(); !active.LastTick.Equal(want) {
+		t.Fatalf("active-src.lastTick = %v, want %v", active.LastTick, want)
 	}
-	if active["failure"] != nil {
-		t.Fatalf("active-src.failure = %v, want nil (no failure this pass)", active["failure"])
+	if active.Failure != nil {
+		t.Fatalf("active-src.failure = %v, want nil (no failure this pass)", active.Failure)
 	}
 
 	failing := byName["failing-src"]
-	failureMap, ok := failing["failure"].(map[string]any)
-	if !ok || failureMap["count"] != 2 {
-		t.Fatalf("failing-src.failure = %v, want {count:2, nextEligible:...}", failing["failure"])
+	if failing.Failure == nil || failing.Failure.Count != 2 {
+		t.Fatalf("failing-src.failure = %v, want {count:2, nextEligible:...}", failing.Failure)
 	}
-	if _, present := failing["lastTick"]; present {
-		t.Fatalf("failing-src.lastTick = %v, want omitted (never fired this pass)", failing["lastTick"])
+	if !failing.LastTick.IsZero() {
+		t.Fatalf("failing-src.lastTick = %v, want omitted (never fired this pass)", failing.LastTick)
 	}
 
 	excluded := byName["disabled-src"]
-	if excluded["enabled"] != true || excluded["excluded"] != true {
+	if excluded.Enabled != true || excluded.Excluded != true {
 		t.Fatalf("disabled-src = %+v, want enabled=true excluded=true", excluded)
 	}
-	if _, present := excluded["lastTick"]; present {
-		t.Fatalf("disabled-src.lastTick = %v, want omitted (selector-excluded; never fired)", excluded["lastTick"])
+	if !excluded.LastTick.IsZero() {
+		t.Fatalf("disabled-src.lastTick = %v, want omitted (selector-excluded; never fired)", excluded.LastTick)
 	}
-	if excluded["failure"] != nil {
-		t.Fatalf("disabled-src.failure = %v, want nil", excluded["failure"])
+	if excluded.Failure != nil {
+		t.Fatalf("disabled-src.failure = %v, want nil", excluded.Failure)
 	}
 }
 
@@ -475,22 +465,22 @@ func TestStatusSources_MergedAndSortedByName(t *testing.T) {
 	}
 	got := make([]string, len(rows))
 	for i, r := range rows {
-		got[i] = r["name"].(string)
+		got[i] = r.Name
 	}
 	want := []string{"alpha-excluded", "beta-excluded", "yankee-active", "zeta-active"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("name order = %v, want alphabetical (active+excluded merged) %v", got, want)
 	}
 	// The excluded/active flags travel with the right row through the sort.
-	byName := make(map[string]map[string]any, len(rows))
+	byName := make(map[string]status.Source, len(rows))
 	for _, r := range rows {
-		byName[r["name"].(string)] = r
+		byName[r.Name] = r
 	}
-	if byName["alpha-excluded"]["excluded"] != true {
-		t.Fatalf("alpha-excluded.excluded = %v, want true", byName["alpha-excluded"]["excluded"])
+	if byName["alpha-excluded"].Excluded != true {
+		t.Fatalf("alpha-excluded.excluded = %v, want true", byName["alpha-excluded"].Excluded)
 	}
-	if byName["zeta-active"]["excluded"] != false {
-		t.Fatalf("zeta-active.excluded = %v, want false", byName["zeta-active"]["excluded"])
+	if byName["zeta-active"].Excluded != false {
+		t.Fatalf("zeta-active.excluded = %v, want false", byName["zeta-active"].Excluded)
 	}
 }
 
@@ -508,19 +498,19 @@ func TestStatusSources_InFlight(t *testing.T) {
 	inFlight := map[string]bool{"fetching-now": true}
 
 	rows := statusSources(active, nil, nil, inFlight, nil)
-	byName := make(map[string]map[string]any, len(rows))
+	byName := make(map[string]status.Source, len(rows))
 	for _, r := range rows {
-		byName[r["name"].(string)] = r
+		byName[r.Name] = r
 	}
-	if got := byName["fetching-now"]["inFlight"]; got != true {
+	if got := byName["fetching-now"].InFlight; got != true {
 		t.Fatalf("fetching-now (active) inFlight = %v, want true", got)
 	}
-	if got := byName["idle"]["inFlight"]; got != false {
+	if got := byName["idle"].InFlight; got != false {
 		t.Fatalf("idle inFlight = %v, want false", got)
 	}
 
 	excludedRows := statusSources(nil, excludedSources, nil, inFlight, nil)
-	if got := excludedRows[0]["inFlight"]; got != false {
+	if got := excludedRows[0].InFlight; got != false {
 		t.Fatalf("excluded source inFlight = %v, want false unconditionally, even though its name is present in the inFlight set", got)
 	}
 }
@@ -534,10 +524,10 @@ func TestStatusActivity_ParticipantField(t *testing.T) {
 		{Type: "pr.changed", Outcome: "delivered", Participant: "df-feedback"},
 		{Type: "pr.changed", Outcome: "missed"},
 	})
-	if got := rows[0]["participant"]; got != "df-feedback" {
+	if got := rows[0].Participant; got != "df-feedback" {
 		t.Fatalf("rows[0].participant = %v, want %q", got, "df-feedback")
 	}
-	if got := rows[1]["participant"]; got != "" {
+	if got := rows[1].Participant; got != "" {
 		t.Fatalf("rows[1].participant = %v, want empty string (no single participant settled it)", got)
 	}
 }
@@ -557,7 +547,7 @@ func TestStatusQueues_SortedByType(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("len(rows) = %d, want 3", len(rows))
 	}
-	got := []string{rows[0]["type"].(string), rows[1]["type"].(string), rows[2]["type"].(string)}
+	got := []string{rows[0].Type, rows[1].Type, rows[2].Type}
 	want := []string{"alpha-type", "mid-type", "zeta-type"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("type order = %v, want alphabetical %v", got, want)
@@ -585,22 +575,18 @@ func TestStatusSources_DescriptionAlwaysPresent(t *testing.T) {
 		},
 	})
 	reply := svc.composeStatusReply(t.Context(), 0)
-	sources, ok := reply["sources"].([]map[string]any)
-	if !ok || len(sources) != 2 {
-		t.Fatalf("sources = %v, want 2 entries (1 active + 1 selector-excluded)", reply["sources"])
+	sources := reply.Sources
+	if len(sources) != 2 {
+		t.Fatalf("sources = %v, want 2 entries (1 active + 1 selector-excluded)", reply.Sources)
 	}
-	byName := make(map[string]map[string]any, len(sources))
+	byName := make(map[string]status.Source, len(sources))
 	for _, s := range sources {
-		byName[s["name"].(string)] = s
+		byName[s.Name] = s
 	}
-	if got := byName["active-src"]["description"]; got != "polls the tracker for active-src items" {
+	if got := byName["active-src"].Description; got != "polls the tracker for active-src items" {
 		t.Fatalf("active-src.description = %v, want %q", got, "polls the tracker for active-src items")
 	}
-	got, present := byName["disabled-src"]["description"]
-	if !present {
-		t.Fatal("disabled-src.description absent, want an always-present key")
-	}
-	if got != "" {
+	if got := byName["disabled-src"].Description; got != "" {
 		t.Fatalf("disabled-src.description = %v, want empty string (no SourceDescriptions entry)", got)
 	}
 }
@@ -611,27 +597,22 @@ func TestStatusSources_DescriptionAlwaysPresent(t *testing.T) {
 // holding map[string]any{} — present and empty, never omitted or nil.
 func TestStatusResolvedConfig_PerParticipantPresentButEmpty(t *testing.T) {
 	got := statusResolvedConfig(ResolvedConfig{RepoRoot: "/repo", ActiveRoles: 1, ActiveQueries: 1})
-	pp, ok := got["perParticipant"]
-	if !ok {
-		t.Fatal("perParticipant key absent, want always present")
+	if got.PerParticipant == nil || len(got.PerParticipant) != 0 {
+		t.Fatalf("perParticipant = %#v, want an empty, non-nil map", got.PerParticipant)
 	}
-	m, ok := pp.(map[string]any)
-	if !ok || len(m) != 0 {
-		t.Fatalf("perParticipant = %#v, want an empty, non-nil map[string]any{}", pp)
-	}
-	if _, present := got["pollIntervalMs"]; present {
-		t.Fatalf("pollIntervalMs = %v, want omitted when PollInterval is nil", got["pollIntervalMs"])
+	if got.PollIntervalMs != 0 {
+		t.Fatalf("pollIntervalMs = %v, want omitted when PollInterval is nil", got.PollIntervalMs)
 	}
 
 	// A non-nil PollInterval is echoed back as pollIntervalMs (Task 3.5 Step
 	// 7's pre-existing branch, unchanged by this widening) — carries perParticipant too.
 	pi := 10 * time.Second
 	got2 := statusResolvedConfig(ResolvedConfig{RepoRoot: "/repo", PollInterval: &pi})
-	if got2["pollIntervalMs"] != int64(10000) {
-		t.Fatalf("pollIntervalMs = %v, want 10000", got2["pollIntervalMs"])
+	if got2.PollIntervalMs != 10000 {
+		t.Fatalf("pollIntervalMs = %v, want 10000", got2.PollIntervalMs)
 	}
-	if _, ok := got2["perParticipant"].(map[string]any); !ok {
-		t.Fatalf("perParticipant = %#v, want present alongside pollIntervalMs too", got2["perParticipant"])
+	if got2.PerParticipant == nil {
+		t.Fatal("perParticipant absent, want present alongside pollIntervalMs too")
 	}
 }
 
@@ -658,14 +639,14 @@ func TestStatusCounters_MirrorsMetricCatalogVerbatim(t *testing.T) {
 		metricsReader: reader,
 	}
 	reply := svc.composeStatusReply(t.Context(), 0)
-	counters, ok := reply["counters"].(map[string]any)
-	if !ok {
-		t.Fatalf("counters absent = %v, want present when MetricsReader != nil", reply["counters"])
+	counters := reply.Counters
+	if counters == nil {
+		t.Fatalf("counters absent = %v, want present when MetricsReader != nil", reply.Counters)
 	}
-	want := map[string]any{
-		"unconsumedExpired":   map[string]int64{"t1": 1},
-		"unknownTypeRejected": map[string]int64{"t2": 1},
-		"deduped":             map[string]int64{"t3": 1},
+	want := &status.Counters{
+		UnconsumedExpired:   map[string]int64{"t1": 1},
+		UnknownTypeRejected: map[string]int64{"t2": 1},
+		Deduped:             map[string]int64{"t3": 1},
 	}
 	if !reflect.DeepEqual(counters, want) {
 		t.Fatalf("counters = %+v, want %+v", counters, want)
@@ -683,8 +664,8 @@ func TestStatusCounters_NilMetricsReaderOmitsKey(t *testing.T) {
 		reg:      NewRegistry(nil),
 	}
 	reply := svc.composeStatusReply(t.Context(), 0)
-	if _, present := reply["counters"]; present {
-		t.Fatalf("counters = %v, want omitted entirely when MetricsReader is nil", reply["counters"])
+	if reply.Counters != nil {
+		t.Fatalf("counters = %v, want omitted entirely when MetricsReader is nil", reply.Counters)
 	}
 }
 
@@ -707,7 +688,7 @@ func TestStatusListeners_Busy(t *testing.T) {
 	rows := statusListeners(declared, nil, nil, nil, inFlight, progress)
 	got := map[string]any{}
 	for _, r := range rows {
-		got[r["role"].(string)] = r["busy"]
+		got[r.Role] = r.Busy
 	}
 	want := map[string]any{"flying": true, "declined": true, "calm": false, "failing": false, "off": false}
 	if !reflect.DeepEqual(got, want) {
@@ -723,7 +704,7 @@ func TestStatusSources_Busy(t *testing.T) {
 	rows := statusSources(active, []string{"skipped"}, nil, inFlight, nil)
 	got := map[string]any{}
 	for _, r := range rows {
-		got[r["name"].(string)] = r["busy"]
+		got[r.Name] = r.Busy
 	}
 	want := map[string]any{"fetching": true, "idle": false, "skipped": false}
 	if !reflect.DeepEqual(got, want) {
@@ -734,12 +715,10 @@ func TestStatusSources_Busy(t *testing.T) {
 // TestStatusBusy_ListsTheBusyRowsSorted proves the top-level `busy` object names
 // exactly the rows whose own flag is set, sorted, with both lists always present.
 func TestStatusBusy_ListsTheBusyRowsSorted(t *testing.T) {
-	listeners := []map[string]any{
-		{"role": "zeta", "busy": true}, {"role": "alpha", "busy": true}, {"role": "mid", "busy": false},
-	}
-	sources := []map[string]any{{"name": "s2", "busy": false}}
+	listeners := []status.Listener{{Role: "zeta", Busy: true}, {Role: "alpha", Busy: true}, {Role: "mid"}}
+	sources := []status.Source{{Name: "s2"}}
 	got := statusBusy(listeners, sources)
-	want := map[string]any{"roles": []string{"alpha", "zeta"}, "sources": []string{}}
+	want := status.Busy{Roles: []string{"alpha", "zeta"}, Sources: []string{}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("statusBusy = %#v, want %#v", got, want)
 	}
@@ -761,21 +740,20 @@ func TestStatusSources_Calendar(t *testing.T) {
 		},
 	})
 	reply := svc.composeStatusReply(t.Context(), 0)
-	rows := reply["sources"].([]map[string]any)
-	by := map[string]map[string]any{}
+	rows := reply.Sources
+	by := map[string]status.Source{}
 	for _, r := range rows {
-		by[r["name"].(string)] = r
+		by[r.Name] = r
 	}
-	if _, ok := by["plain"]["calendar"]; ok {
+	if by["plain"].Calendar != nil {
 		t.Fatal("a non-calendar source must carry no calendar key")
 	}
-	cal := by["weekly-scan"]["calendar"].(map[string]any)
-	last := cal["last"].(map[string]any)
-	if cal["schedule"] != "calendar 03:30 sun America/Los_Angeles" || cal["onMissed"] != "next-slot" || cal["next"] != "2026-11-08T03:30-08:00" ||
-		last["slot"] != "2026-11-01T03:30-08:00" || last["outcome"] != "skipped" || last["reason"] != "router not running" {
+	cal := by["weekly-scan"].Calendar
+	if cal == nil || cal.Last == nil || cal.Schedule != "calendar 03:30 sun America/Los_Angeles" || cal.OnMissed != "next-slot" || cal.Next != "2026-11-08T03:30-08:00" ||
+		cal.Last.Slot != "2026-11-01T03:30-08:00" || cal.Last.Outcome != "skipped" || cal.Last.Reason != "router not running" {
 		t.Fatalf("calendar row = %v", cal)
 	}
-	if _, ok := by["fresh"]["calendar"].(map[string]any)["last"]; ok {
+	if by["fresh"].Calendar.Last != nil {
 		t.Fatal("no state entry yet: last must be absent")
 	}
 	check := func() error {
@@ -789,7 +767,7 @@ func TestStatusSources_Calendar(t *testing.T) {
 		t.Fatalf("reply failed its own schema: %v", err)
 	}
 	// A wrong outcome is rejected by the schema.
-	cal["last"].(map[string]any)["outcome"] = "bogus"
+	cal.Last.Outcome = "bogus"
 	if err := check(); err == nil {
 		t.Fatal("schema accepted an unknown calendar outcome")
 	}

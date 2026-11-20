@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/phillipgreenii/pg-router/api/status"
 )
 
 //go:embed *.schema.json
@@ -16,7 +18,7 @@ var files embed.FS
 
 // SchemaVersion is the current message-schema envelope version every request and
 // reply carries (interfaces.md "common manager contract").
-const SchemaVersion = "1"
+const SchemaVersion = status.SchemaVersion
 
 // DeclineDetailMaxLen is the schema's maxLength for the optional "detail" of a
 // pre-accept decline body (handler.dispatch-reply's third branch), counted in

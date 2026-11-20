@@ -28,25 +28,6 @@ func (r readingView) String() string {
 	return strings.TrimSpace(formatNumber(r.Value) + " " + textsafe.Sanitize(r.Unit))
 }
 
-// failingClauseView is one entry of status pausedRoles[].failing.
-type failingClauseView struct {
-	Clause   string       `json:"clause"`
-	Resource string       `json:"resource"`
-	Level    string       `json:"level"`
-	Kind     string       `json:"kind"`
-	Source   string       `json:"source"`
-	Owner    string       `json:"owner"`
-	Since    string       `json:"since"`
-	Allowed  []string     `json:"allowed"`
-	Reading  *readingView `json:"reading"`
-}
-
-// pausedRoleView is one entry of the status reply's pausedRoles array.
-type pausedRoleView struct {
-	Role    string              `json:"role"`
-	Failing []failingClauseView `json:"failing"`
-}
-
 // formatNumber writes v with at most two decimals and no trailing zeros.
 func formatNumber(v float64) string {
 	return strconv.FormatFloat(math.Round(v*100)/100, 'f', -1, 64)
@@ -69,7 +50,7 @@ func formatSince(since string, now time.Time) string {
 
 // who names where a level came from: the sensor, an operator override, or a
 // sensor value held through its grace period.
-func (f failingClauseView) who() string {
+func failingWho(f failingClauseView) string {
 	switch f.Source {
 	case "operator":
 		return "OVERRIDE by " + textsafe.Sanitize(f.Owner)
@@ -81,20 +62,20 @@ func (f failingClauseView) who() string {
 
 // explainText is one failing clause as the paused-role line writes it:
 // "<clause> now <LEVEL> (<reading>), since <time>, <sensor>".
-func (f failingClauseView) explainText(now time.Time) string {
+func failingExplainText(f failingClauseView, now time.Time) string {
 	level := textsafe.Sanitize(f.Level)
 	if f.Kind == "unknown" {
 		return fmt.Sprintf("%s now %s (no reading)", textsafe.Sanitize(f.Clause), level)
 	}
 	reading := "no numeric reading"
 	if f.Reading != nil {
-		reading = f.Reading.String()
+		reading = readingView(*f.Reading).String()
 	}
 	s := fmt.Sprintf("%s now %s (%s)", textsafe.Sanitize(f.Clause), level, reading)
-	if f.Since != "" {
-		s += ", since " + formatSince(f.Since, now)
+	if !f.Since.IsZero() {
+		s += ", since " + formatSince(f.Since.Format(time.RFC3339Nano), now)
 	}
-	if w := f.who(); w != "" {
+	if w := failingWho(f); w != "" {
 		s += ", " + w
 	}
 	return s
@@ -108,7 +89,7 @@ func (f failingClauseView) explainText(now time.Time) string {
 func pausedRoleLine(p pausedRoleView, now time.Time) string {
 	parts := make([]string, 0, len(p.Failing))
 	for _, f := range p.Failing {
-		parts = append(parts, f.explainText(now))
+		parts = append(parts, failingExplainText(f, now))
 	}
 	noun := "requirements"
 	if len(p.Failing) == 1 {
@@ -129,37 +110,19 @@ func pausedRoleSummary(p pausedRoleView, now time.Time) string {
 		case f.Kind == "unknown":
 			inner = "no reading, reads " + textsafe.Sanitize(f.Level)
 		case f.Reading != nil:
-			inner += ", " + f.Reading.String()
+			inner += ", " + readingView(*f.Reading).String()
 		}
-		if f.Kind != "unknown" && f.Since != "" {
-			inner += " since " + formatSince(f.Since, now)
+		if f.Kind != "unknown" && !f.Since.IsZero() {
+			inner += " since " + formatSince(f.Since.Format(time.RFC3339Nano), now)
 		}
 		parts = append(parts, fmt.Sprintf("%s (%s)", textsafe.Sanitize(f.Clause), inner))
 	}
 	return strings.Join(parts, "; ")
 }
 
-// requiresClauseView is one entry of status registry[].requires: an original
-// requires clause with its current verdict ("pass" or "fail"), the level it was
-// judged against and, for a failing clause, why (level, unknown or stale).
-type requiresClauseView struct {
-	Clause   string   `json:"clause"`
-	Resource string   `json:"resource"`
-	Allowed  []string `json:"allowed"`
-	Verdict  string   `json:"verdict"`
-	Level    string   `json:"level"`
-	Kind     string   `json:"kind"`
-}
-
-// registryView is the part of a status registry[] entry the CLI reads.
-type registryView struct {
-	ID       string               `json:"id"`
-	Requires []requiresClauseView `json:"requires"`
-}
-
 // requiresText is the explain detail of one clause, for example
 // "disk >= OK: pass (now OK)" or "net == UP: FAIL (now DOWN)".
-func (c requiresClauseView) requiresText() string {
+func requiresClauseText(c requiresClauseView) string {
 	verdict := "pass"
 	if c.Verdict == "fail" {
 		verdict = "FAIL"

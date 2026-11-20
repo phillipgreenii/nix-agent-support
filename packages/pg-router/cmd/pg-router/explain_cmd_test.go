@@ -81,11 +81,11 @@ func TestExplainRole_NotPausedDisabledExcludedAndUnknown(t *testing.T) {
 // An override and a stale value say so in the clause.
 func TestFailingClause_OverrideAndStaleWording(t *testing.T) {
 	op := failingClauseView{Clause: "disk >= OK", Resource: "disk", Level: "EXHAUSTED", Kind: "level", Source: "operator", Owner: "operator"}
-	if got := op.explainText(explainNow); !strings.Contains(got, ", OVERRIDE by operator") {
+	if got := failingExplainText(op, explainNow); !strings.Contains(got, ", OVERRIDE by operator") {
 		t.Errorf("override = %q", got)
 	}
 	st := failingClauseView{Clause: "disk >= OK", Resource: "disk", Level: "TIGHT", Kind: "stale", Source: "grace_fallback", Owner: "host-sensor"}
-	if got := st.explainText(explainNow); !strings.Contains(got, ", host-sensor, stale") {
+	if got := failingExplainText(st, explainNow); !strings.Contains(got, ", host-sensor, stale") {
 		t.Errorf("stale = %q", got)
 	}
 }

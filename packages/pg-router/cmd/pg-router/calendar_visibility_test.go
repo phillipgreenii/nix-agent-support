@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	apistatus "github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -64,11 +65,7 @@ func TestAttachCalendar_firedAndSkippedLines(t *testing.T) {
 		c := reports[i].Calendar
 		v := calendarView{Schedule: c.Schedule, OnMissed: c.OnMissed, Next: c.Next}
 		if c.Last != nil {
-			v.Last = &struct {
-				Slot    string `json:"slot"`
-				Outcome string `json:"outcome"`
-				Reason  string `json:"reason"`
-			}{c.Last.Slot, c.Last.Outcome, c.Last.Reason}
+			v.Last = &apistatus.CalendarLast{Slot: c.Last.Slot, Outcome: c.Last.Outcome, Reason: c.Last.Reason}
 		}
 		return v
 	}
@@ -81,7 +78,7 @@ func TestAttachCalendar_firedAndSkippedLines(t *testing.T) {
 		"new-q  " + sched + "  last: no slot handled yet | next: 2026-11-08T03:30-08:00 | on_missed=run-now",
 	}
 	for i, w := range want {
-		if got := view(i).line(srcs[i].Name); got != w {
+		if got := calendarLine(view(i), srcs[i].Name); got != w {
 			t.Errorf("line %d:\n got %q\nwant %q", i, got, w)
 		}
 	}

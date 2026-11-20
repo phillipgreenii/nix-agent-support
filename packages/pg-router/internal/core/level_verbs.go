@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -104,35 +105,32 @@ func (s *Service) handleLevelIngest(stdin io.Reader, stdout io.Writer) int {
 }
 
 // LevelEntries renders the level-list / status entries of the projection.
-func LevelEntries(p *LevelProjection) []map[string]any {
+func LevelEntries(p *LevelProjection) []status.Level {
 	details := p.Details()
-	out := make([]map[string]any, 0, len(details))
+	out := make([]status.Level, 0, len(details))
 	for _, d := range details {
-		e := map[string]any{"resource": d.Resource}
-		if d.NoSensor {
-			e["no_sensor"] = true
-		}
+		e := status.Level{Resource: d.Resource, NoSensor: d.NoSensor}
 		if d.HasLevel {
-			e["level"] = d.Level
-			e["source"] = d.Source
-			e["owner"] = d.Owner
-			e["observed_at"] = d.ObservedAt.UTC().Format(time.RFC3339Nano)
-			e["received_at"] = d.ReceivedAt.UTC().Format(time.RFC3339Nano)
+			e.Level = d.Level
+			e.Source = d.Source
+			e.Owner = d.Owner
+			e.ObservedAt = d.ObservedAt.UTC()
+			e.ReceivedAt = d.ReceivedAt.UTC()
 			if !d.ExpiresAt.IsZero() {
-				e["expires_at"] = d.ExpiresAt.UTC().Format(time.RFC3339Nano)
+				e.ExpiresAt = d.ExpiresAt.UTC()
 			}
-			e["age_s"] = int64(d.Age / time.Second)
-			e["stale"] = d.Stale
-			e["since"] = d.Since.UTC().Format(time.RFC3339Nano)
+			e.AgeS = int64(d.Age / time.Second)
+			e.Stale = d.Stale
+			e.Since = d.Since.UTC()
 			if d.Reading != nil {
-				e["reading"] = map[string]any{"value": d.Reading.Value, "unit": d.Reading.Unit}
+				e.Reading = &status.LevelReading{Value: d.Reading.Value, Unit: d.Reading.Unit}
 			}
 			if d.Override != nil {
-				ov := map[string]any{"until_cleared": d.Override.UntilCleared}
+				ov := &status.LevelOverride{UntilCleared: d.Override.UntilCleared}
 				if !d.Override.UntilCleared {
-					ov["expires_at"] = d.Override.ExpiresAt.UTC().Format(time.RFC3339Nano)
+					ov.ExpiresAt = d.Override.ExpiresAt.UTC()
 				}
-				e["override"] = ov
+				e.Override = ov
 			}
 		}
 		out = append(out, e)

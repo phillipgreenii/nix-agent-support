@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -127,18 +128,18 @@ func (s *Service) handleLogCompact(stdin io.Reader, stdout io.Writer) int {
 
 // lastCompactionStatus renders the status reply's queueLog.lastCompaction object,
 // or nil before this process's first compaction.
-func lastCompactionStatus(q *eventqueue.Queue) map[string]any {
+func lastCompactionStatus(q *eventqueue.Queue) *status.LastCompaction {
 	info, ok := q.LastCompaction()
 	if !ok {
 		return nil
 	}
-	return map[string]any{
-		"at":            info.At.UTC().Format(time.RFC3339Nano),
-		"trigger":       info.Trigger,
-		"bytesBefore":   info.BytesBefore,
-		"bytesAfter":    info.BytesAfter,
-		"recordsBefore": info.RecordsBefore,
-		"recordsAfter":  info.RecordsAfter,
-		"durationMs":    info.Duration.Milliseconds(),
+	return &status.LastCompaction{
+		At:            info.At.UTC(),
+		Trigger:       info.Trigger,
+		BytesBefore:   info.BytesBefore,
+		BytesAfter:    info.BytesAfter,
+		RecordsBefore: info.RecordsBefore,
+		RecordsAfter:  info.RecordsAfter,
+		DurationMs:    info.Duration.Milliseconds(),
 	}
 }
