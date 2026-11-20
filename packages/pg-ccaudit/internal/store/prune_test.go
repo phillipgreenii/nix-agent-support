@@ -3,7 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -89,6 +94,122 @@ func TestPruneRemovesOnlyFilesWhoseNewestEventIsOlderThanCutoff(t *testing.T) {
 	again, err := Prune(context.Background(), db, cutoff, false)
 	if err != nil || again.Files != 0 || again.Vacuumed {
 		t.Fatalf("second prune = %+v, %v", again, err)
+	}
+}
+
+func TestPlanVacuumFormula(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.db")
+	if err := os.WriteFile(path, make([]byte, 100), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+"-wal", make([]byte, 7), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := PlanVacuum(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// margin = max(10% of 100, 1 GiB) = 1 GiB; needed = 2*100 + 7 + 1 GiB.
+	if p.MarginBytes != gib || p.NeededBytes != 207+gib {
+		t.Fatalf("plan = %+v", p)
+	}
+}
+
+// dirBytes sums the size of every file under dir (database, WAL, journal, temp).
+func dirBytes(dir string) int64 {
+	var n int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if fi, e := d.Info(); e == nil {
+				n += fi.Size()
+			}
+		}
+		return nil
+	})
+	return n
+}
+
+// TestVacuumPeakStaysWithinTheBudget runs the real VACUUM on a WAL-mode database
+// and checks the extra disk it used never exceeds the formula PlanVacuum budgets
+// (2 x db + wal + margin), so a wrong factor shows up here.
+func TestVacuumPeakStaysWithinTheBudget(t *testing.T) {
+	dir := t.TempDir()
+	tmp := filepath.Join(dir, "tmp")
+	if err := os.Mkdir(tmp, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("SQLITE_TMPDIR", tmp)
+	path := filepath.Join(dir, "transcripts.db")
+	db, err := Open(t.Context(), path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	blob := strings.Repeat("x", 4096)
+	for i := range 4000 {
+		if _, err := db.ExecContext(context.Background(),
+			`INSERT INTO assistant_text (path, seq, text) VALUES (?, ?, ?)`, "p"+strconv.Itoa(i%50), i, blob); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM assistant_text WHERE seq % 2 = 0`); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := PlanVacuum(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.DBBytes+plan.WALBytes < 8<<20 {
+		t.Fatalf("fixture too small to mean anything: %+v", plan)
+	}
+	before := dirBytes(dir)
+
+	var peak atomic.Int64
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for {
+			if b := dirBytes(dir); b > peak.Load() {
+				peak.Store(b)
+			}
+			select {
+			case <-done:
+				return
+			default:
+			}
+		}
+	}()
+	_, vErr := db.ExecContext(context.Background(), `VACUUM`)
+	close(done)
+	<-finished
+	if vErr != nil {
+		t.Fatal(vErr)
+	}
+	extra := peak.Load() - before
+	// The budget minus the margin is the part SQLite actually documents; the
+	// margin is pure slack, so the check is against the strict part.
+	strict := 2*plan.DBBytes + plan.WALBytes
+	if extra > strict {
+		t.Fatalf("VACUUM used %d extra bytes, formula (2 x db + wal) allows %d", extra, strict)
+	}
+	t.Logf("db=%d wal=%d extra=%d budget=%d", plan.DBBytes, plan.WALBytes, extra, strict)
+}
+
+func TestPruneTruncatesTheWALBeforeVacuum(t *testing.T) {
+	path, db := tempDB(t, false)
+	now := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	seedFile(t, db, "old/g1", now.AddDate(0, 0, -200).Format(TSLayout), now.Unix())
+	got, err := Prune(context.Background(), db, now.AddDate(0, 0, -90), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.WALTruncated || !got.Vacuumed {
+		t.Fatalf("result = %+v", got)
+	}
+	if fi, err := os.Stat(path + "-wal"); err == nil && fi.Size() > 4096*4 {
+		t.Fatalf("WAL is %d bytes after prune", fi.Size())
 	}
 }
 

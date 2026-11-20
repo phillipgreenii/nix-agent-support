@@ -21,6 +21,10 @@ type PruneResult struct {
 	Rows map[string]int64 `json:"rows"`
 	// Vacuumed is true when VACUUM ran (only after at least one deletion).
 	Vacuumed bool `json:"vacuumed"`
+	// WALTruncated is true when the WAL was checkpointed and truncated between the
+	// delete and the VACUUM; false when a reader kept it busy (the space budget
+	// already includes the WAL).
+	WALTruncated bool `json:"wal_truncated"`
 }
 
 // pathTables are the tables keyed by a `path` column that has no foreign key to
@@ -39,7 +43,9 @@ SELECT f.path FROM files f
 
 // Prune deletes every indexed file whose newest event is older than cutoff,
 // along with all its rows, then runs VACUUM if anything was deleted and dryRun
-// is false. VACUUM needs free disk space about the size of the database.
+// is false. The delete grows the WAL, so the WAL is checkpointed (TRUNCATE)
+// before VACUUM, which needs up to about twice the database size in free space
+// (see PlanVacuum; the caller checks the budget before calling with dryRun false).
 // feed_cursors is never touched, so ingest resumes where it was and does not
 // re-read what was pruned.
 func Prune(ctx context.Context, db *sql.DB, cutoff time.Time, dryRun bool) (PruneResult, error) {
@@ -98,10 +104,17 @@ func Prune(ctx context.Context, db *sql.DB, cutoff time.Time, dryRun bool) (Prun
 		return res, fmt.Errorf("commit prune: %w", err)
 	}
 	if res.Files > 0 {
+		var busy, logFrames, checkpointed int64
+		if err := db.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logFrames, &checkpointed); err == nil {
+			res.WALTruncated = busy == 0
+		}
 		if _, err := db.ExecContext(ctx, `VACUUM`); err != nil {
 			return res, fmt.Errorf("vacuum: %w", err)
 		}
 		res.Vacuumed = true
+		// VACUUM writes the rebuilt database back through the WAL; give that
+		// space back too (best effort).
+		_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
 	}
 	return res, nil
 }

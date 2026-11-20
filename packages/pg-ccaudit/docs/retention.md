@@ -28,8 +28,18 @@ The key words MUST, SHOULD and MAY are used as in RFC 2119.
   with no events at all is removed only once it was last touched before the cutoff.
 - Feed cursors and the gold set file are never touched, so ingest resumes where it
   was.
-- After deleting, `VACUUM` returns the space. It needs free disk space about the
-  size of the database and takes the ingest lock for its duration.
+- After deleting, the WAL is checkpointed (`wal_checkpoint(TRUNCATE)`; if a reader
+  keeps it busy the run says `WAL not truncated (reader active)` and continues) and
+  `VACUUM` returns the space. SQLite documents that VACUUM may need up to about 2 x
+  the database size in free space, so the guard budgets
+  `needed = 2 x db + WAL + margin`, `margin = max(10 percent of db, 1 GiB)`, read
+  with `statfs` on the database directory (and on TMPDIR when it is on another
+  volume). With `--yes`, when less is available the command exits 1 (never 75, which
+  the reclaimer reads as skip) before deleting anything; `--force-low-space`
+  overrides. The dry run prints needed and available bytes and an `OK` or
+  `WOULD-REFUSE` verdict, and `--json` carries `needed_bytes`, `available_bytes` and
+  `refused`. VACUUM holds the ingest lock and the SQLite write lock for the whole
+  run, so recorder writes wait. A lower `--days` does not reduce the VACUUM cost much.
 
 ## Disk reclaimer
 

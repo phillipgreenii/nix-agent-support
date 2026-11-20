@@ -12,19 +12,19 @@ resumable, and schedulable.
 
 ## Commands
 
-| Command                                  | What it does                                                    |
-| ---------------------------------------- | --------------------------------------------------------------- |
-| `pg-ccaudit ingest`                      | Index new and appended transcripts. Writes. Single-instance.    |
-| `pg-ccaudit status`                      | Coverage and staleness. Read-only.                              |
-| `pg-ccaudit query <name> [args…]`        | Run a named, versioned canned query. Read-only.                 |
-| `pg-ccaudit queries [--verbose]`         | List the canned queries, with notes and SQL under `--verbose`.  |
-| `pg-ccaudit schema [--thinking]`         | Print the DDL.                                                  |
-| `pg-ccaudit candidates`                  | Tier 1 of the mistake census: structural candidates, SQL only.  |
-| `pg-ccaudit classify`                    | Tier 2: which candidates are real, with a reported run cost.    |
-| `pg-ccaudit report`                      | Tier 3: ONE ranked report, mistakes and failures, each routed.  |
-| `pg-ccaudit evaluate`                    | Score a classifier against the gold set AND the naive baseline. |
-| `pg-ccaudit gold <seed\|sample\|status>` | Maintain the evaluation set and count the file channel.         |
-| `pg-ccaudit prune [--days N] [--yes]`    | Drop indexed history older than N days (default 45), VACUUM.    |
+| Command                                  | What it does                                                                     |
+| ---------------------------------------- | -------------------------------------------------------------------------------- |
+| `pg-ccaudit ingest`                      | Index new and appended transcripts. Writes. Single-instance.                     |
+| `pg-ccaudit status`                      | Coverage and staleness. Read-only.                                               |
+| `pg-ccaudit query <name> [args…]`        | Run a named, versioned canned query. Read-only.                                  |
+| `pg-ccaudit queries [--verbose]`         | List the canned queries, with notes and SQL under `--verbose`.                   |
+| `pg-ccaudit schema [--thinking]`         | Print the DDL.                                                                   |
+| `pg-ccaudit candidates`                  | Tier 1 of the mistake census: structural candidates, SQL only.                   |
+| `pg-ccaudit classify`                    | Tier 2: which candidates are real, with a reported run cost.                     |
+| `pg-ccaudit report`                      | Tier 3: ONE ranked report, mistakes and failures, each routed.                   |
+| `pg-ccaudit evaluate`                    | Score a classifier against the gold set AND the naive baseline.                  |
+| `pg-ccaudit gold <seed\|sample\|status>` | Maintain the evaluation set and count the file channel.                          |
+| `pg-ccaudit prune [--days N] [--yes]`    | Drop indexed history older than N days (default 45), VACUUM (needs ~2x db free). |
 
 Paths resolve from `--db` / `--root`, else `PG_CCAUDIT_DB` / `PG_CCAUDIT_ROOT`
 (the home-manager module exports both), else

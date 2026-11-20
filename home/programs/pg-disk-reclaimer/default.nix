@@ -109,9 +109,11 @@ let
           # restore what the recorder itself still holds. Retention window: 45 days,
           # several times the look-back of the analysis skills (improvement-retro,
           # tool-error-waste-review), which work in weeks; see
-          # docs/retention.md in packages/pg-ccaudit. VACUUM needs free space about the
-          # size of the database, so this is not a low-disk-space emergency tool and
-          # is never part of the scheduled run (levels 1 to 3 only).
+          # docs/retention.md in packages/pg-ccaudit. VACUUM needs up to about 2 x the
+          # database size plus the WAL plus a margin free (the command refuses with a
+          # non-zero exit, not 75, when that is not available, so a refusal reports
+          # failed), so this is not a low-disk-space emergency tool and is never part
+          # of the scheduled run (levels 1 to 3 only).
           aggressiveness = 4;
           variantDescription = "pg-ccaudit prune: drop indexed files whose newest event is older than 45 days, then VACUUM (no undo)";
           dryRunCommand = "pg-ccaudit prune --days 45";
