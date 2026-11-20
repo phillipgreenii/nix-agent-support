@@ -54,3 +54,9 @@ func TestPruneCommandDryRunThenYes(t *testing.T) {
 		t.Fatal("--days 0 must be refused")
 	}
 }
+
+func TestDefaultRetentionDays(t *testing.T) {
+	if defaultRetentionDays != 45 {
+		t.Fatalf("defaultRetentionDays = %d, want 45", defaultRetentionDays)
+	}
+}

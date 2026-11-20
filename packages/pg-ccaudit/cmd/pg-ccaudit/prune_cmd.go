@@ -14,10 +14,10 @@ import (
 )
 
 // defaultRetentionDays is the retention window `prune --days` documents and the
-// pg-disk-reclaimer registry item passes. 90 days covers the widest window any
-// analysis skill (improvement-retro, tool-error-waste-review) looks back over,
-// with a margin of about a quarter.
-const defaultRetentionDays = 90
+// pg-disk-reclaimer registry item passes. 45 days (operator ruling, 2026-11-19) is several
+// times the widest window any analysis skill (improvement-retro,
+// tool-error-waste-review) looks back over.
+const defaultRetentionDays = 45
 
 func cmdPrune(ctx context.Context, args []string, stdout, stderr *os.File) error {
 	fs := flag.NewFlagSet("prune", flag.ContinueOnError)

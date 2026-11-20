@@ -93,29 +93,29 @@ let
     }
     {
       id = "pg-ccaudit-index";
-      description = "pg-ccaudit index: files whose newest event is older than 90 days";
+      description = "pg-ccaudit index: files whose newest event is older than 45 days";
       path = "~/.local/share/pg-ccaudit";
       displayCommand = "du -sh ~/.local/share/pg-ccaudit";
       displayTimeoutSeconds = 300;
       sizeCommand = "du -sk ~/.local/share/pg-ccaudit/transcripts.db* 2>/dev/null | awk '{s+=$1} END {print s+0}'";
       sizeKind = "upper_bound";
       sizeMethod = "du-whole-db";
-      sizeBasis = "du -sk over transcripts.db and its WAL/SHM files (the gold set and lock file are excluded); the prune keeps every file whose newest event is within 90 days, so it frees at most this much.";
+      sizeBasis = "du -sk over transcripts.db and its WAL/SHM files (the gold set and lock file are excluded); the prune keeps every file whose newest event is within 45 days, so it frees at most this much.";
       variants = [
         {
           # Level 4 (costly or irreversible): pruned rows are gone from the index.
           # The index is fed by the recorder's change feed with a cursor kept in the
           # index, so removed history is not re-read, and a recorder resync could only
-          # restore what the recorder itself still holds. Retention window: 90 days,
-          # the widest look-back of the analysis skills (improvement-retro,
-          # tool-error-waste-review) plus about a quarter of margin; see
+          # restore what the recorder itself still holds. Retention window: 45 days,
+          # several times the look-back of the analysis skills (improvement-retro,
+          # tool-error-waste-review), which work in weeks; see
           # docs/retention.md in packages/pg-ccaudit. VACUUM needs free space about the
           # size of the database, so this is not a low-disk-space emergency tool and
           # is never part of the scheduled run (levels 1 to 3 only).
           aggressiveness = 4;
-          variantDescription = "pg-ccaudit prune: drop indexed files whose newest event is older than 90 days, then VACUUM (no undo)";
-          dryRunCommand = "pg-ccaudit prune --days 90";
-          removeCommand = "pg-ccaudit prune --days 90 --yes";
+          variantDescription = "pg-ccaudit prune: drop indexed files whose newest event is older than 45 days, then VACUUM (no undo)";
+          dryRunCommand = "pg-ccaudit prune --days 45";
+          removeCommand = "pg-ccaudit prune --days 45 --yes";
         }
       ];
     }
@@ -212,9 +212,9 @@ in
       description = ''
         Contribute the registry items for the largest growers on the Data
         volume: the pg-claude-code-recorder store (through the recorder's own
-        retention command only), `~/.claude/projects`, the pg-ccaudit index and
-        the claude-extended-tool-approver decision log (each pruned to 90 days,
-        level 4), `~/.cache/pg2-*-scratch` and `~/Library/Caches`. Each has a size, a dry-run command and an age
+        retention command only), `~/.claude/projects`, the pg-ccaudit index (pruned to 45 days) and
+        the claude-extended-tool-approver decision log (pruned to 90 days),
+        both level 4, `~/.cache/pg2-*-scratch` and `~/Library/Caches`. Each has a size, a dry-run command and an age
         cutoff.
       '';
     };
