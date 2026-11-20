@@ -267,7 +267,8 @@ type roleListener struct {
 // o.HandlerFailureObserver (bead pg2-97539) is captured identically.
 func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqueue.Listener {
 	return &roleListener{
-		o: o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff,
+		retries: retryLedger{log: o.RetryLog, listenerID: role.Name},
+		o:       o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff,
 		reg: o.Registry, resourceLimitObs: o.ResourceLimitObserver,
 		handlerFailureObs: o.HandlerFailureObserver,
 		retryObs:          o.DispatchRetryObserver,

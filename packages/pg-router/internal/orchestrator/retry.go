@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"log/slog"
 	"sync"
 	"time"
 
@@ -55,15 +56,45 @@ func classifyTransient(err error) (class string, ok bool) {
 	return transient.Classify(err)
 }
 
+// RetryLog is the durable home of the retry count (ADR 0121): the event queue
+// persists one record per scheduled re-run and rebuilds the count on replay, so
+// a restart no longer starts it over. *eventqueue.Queue implements it. nil keeps
+// the ledger purely in memory.
+type RetryLog interface {
+	// RecordRetry durably records that listenerID has scheduled count re-runs of
+	// eventID.
+	RecordRetry(eventID, listenerID string, count int) error
+	// RetryCount reports the durable count for (eventID, listenerID), 0 if none.
+	RetryCount(eventID, listenerID string) int
+}
+
 // retryLedger counts, per event id, the re-runs already scheduled for one
-// listener. It is deliberately in-memory and transient: the queue persists no
-// attempt history (DEC-EVENT-1), and a restart simply starts the count over,
-// still bounded by the event's own expiry. Entries are removed the moment the
-// event stops being retried (success, a non-transient failure, or exhaustion),
-// so the map holds only events currently waiting on a retry.
+// listener. The in-memory map is a cache over the durable count in log (ADR
+// 0121, DEC-EVENT-1): a count is appended to the queue log only when a re-run is
+// scheduled (never for a decline, a busy offer or a first attempt), read back
+// from it when the map has no entry (after a restart), and dropped by the queue
+// with the event (eviction, compaction) or on accept. Map entries are removed the
+// moment the event stops being retried (success, a non-transient failure, or
+// exhaustion), so the map holds only events currently waiting on a retry.
 type retryLedger struct {
 	mu     sync.Mutex
 	counts map[string]int
+	// log and listenerID name the durable store and this ledger's listener; log
+	// nil means in-memory only.
+	log        RetryLog
+	listenerID string
+}
+
+// count returns the re-runs used for eventID, seeding from the durable log when
+// the map has no entry. Caller holds r.mu.
+func (r *retryLedger) count(eventID string) int {
+	if n, ok := r.counts[eventID]; ok {
+		return n
+	}
+	if r.log == nil {
+		return 0
+	}
+	return r.log.RetryCount(eventID, r.listenerID)
 }
 
 // take reserves one retry for eventID if fewer than max have been used,
@@ -71,14 +102,21 @@ type retryLedger struct {
 func (r *retryLedger) take(eventID string, max int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.counts[eventID] >= max {
+	n := r.count(eventID)
+	if n >= max {
 		delete(r.counts, eventID)
 		return false
 	}
 	if r.counts == nil {
 		r.counts = map[string]int{}
 	}
-	r.counts[eventID]++
+	r.counts[eventID] = n + 1
+	if r.log != nil {
+		if err := r.log.RecordRetry(eventID, r.listenerID, n+1); err != nil {
+			slog.Warn("orchestrator: retry count not persisted; a restart will not remember it",
+				"listener", r.listenerID, "event", eventID, "err", err)
+		}
+	}
 	return true
 }
 
@@ -86,7 +124,7 @@ func (r *retryLedger) take(eventID string, max int) bool {
 func (r *retryLedger) used(eventID string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.counts[eventID]
+	return r.count(eventID)
 }
 
 func (r *retryLedger) forget(eventID string) {

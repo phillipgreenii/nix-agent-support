@@ -187,9 +187,10 @@ type CompactionInfo struct {
 
 // foldEvent is one live event in a logFold.
 type foldEvent struct {
-	pos     int           // FIFO position: assigned at first insert, kept across a re-enqueue
-	enq     Record        // the latest enqueue record for the id
-	accepts []AcceptStamp // the accepts, in first-accept order (listener, settle and start instants)
+	pos     int            // FIFO position: assigned at first insert, kept across a re-enqueue
+	enq     Record         // the latest enqueue record for the id
+	accepts []AcceptStamp  // the accepts, in first-accept order (listener, settle and start instants)
+	retries map[string]int // scheduled re-run counts per listener (opRetry); dropped on accept
 }
 
 // logFold replays records into the minimal live state, mirroring Queue.replay's
@@ -236,6 +237,7 @@ func (f *logFold) apply(r Record) {
 			// accepts reset) but keeps its FIFO position and does not re-mark the type.
 			e.enq = r
 			e.accepts = nil
+			e.retries = nil
 			return
 		}
 		f.events[r.EventID] = &foldEvent{pos: f.nextPos, enq: r}
@@ -248,12 +250,20 @@ func (f *logFold) apply(r Record) {
 		if !ok {
 			return
 		}
+		delete(e.retries, r.ListenerID)
 		for _, a := range e.accepts {
 			if a.ListenerID == r.ListenerID {
 				return
 			}
 		}
 		e.accepts = append(e.accepts, AcceptStamp{ListenerID: r.ListenerID, At: r.At, StartedAt: r.StartedAt})
+	case opRetry:
+		if e, ok := f.events[r.EventID]; ok && r.RetryCount > 0 {
+			if e.retries == nil {
+				e.retries = map[string]int{}
+			}
+			e.retries[r.ListenerID] = r.RetryCount
+		}
 	case opEvict:
 		if e, ok := f.events[r.EventID]; ok {
 			f.dropped++
@@ -348,6 +358,14 @@ func (f *logFold) records() []Record {
 		out = append(out, e.enq)
 		for _, a := range e.accepts {
 			out = append(out, Record{Op: opAccept, EventID: e.enq.EventID, ListenerID: a.ListenerID, At: a.At, StartedAt: a.StartedAt})
+		}
+		lids := make([]string, 0, len(e.retries))
+		for lid := range e.retries {
+			lids = append(lids, lid)
+		}
+		sort.Strings(lids)
+		for _, lid := range lids {
+			out = append(out, Record{Op: opRetry, EventID: e.enq.EventID, ListenerID: lid, RetryCount: e.retries[lid]})
 		}
 	}
 	for _, it := range f.levels.items(f.now, true) {

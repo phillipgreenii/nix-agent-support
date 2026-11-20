@@ -343,6 +343,10 @@ type entry struct {
 	// before `expiresAt` records nothing at all, so it is simply re-offered
 	// (INV-FAIL-1). settled is a superset of accepted.
 	settled map[string]bool
+	// retries is the durable count of re-runs scheduled per listener for a
+	// transiently failed dispatch (opRetry records, ADR 0121). It exists only while
+	// the event is retained and a listener has not accepted it.
+	retries map[string]int
 }
 
 func newEntry(evt Event) *entry {
@@ -780,6 +784,14 @@ func (q *Queue) replay() error {
 			if e, ok := q.entries[r.EventID]; ok {
 				e.accepted[r.ListenerID] = true
 				e.settled[r.ListenerID] = true
+				delete(e.retries, r.ListenerID)
+			}
+		case opRetry:
+			if e, ok := q.entries[r.EventID]; ok && r.RetryCount > 0 {
+				if e.retries == nil {
+					e.retries = map[string]int{}
+				}
+				e.retries[r.ListenerID] = r.RetryCount
 			}
 		case opEvict:
 			if e, ok := q.entries[r.EventID]; ok {
@@ -1525,6 +1537,9 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 		} else {
 			startedAt = reported
 		}
+	}
+	if e, ok := q.entries[p.evt.ID]; ok {
+		delete(e.retries, lid)
 	}
 	if err := q.appendLocked(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid, At: settledAt, StartedAt: startedAt}); err != nil {
 		// The in-memory accept already happened and the listener has taken
@@ -2331,4 +2346,41 @@ func (q *Queue) RunUntilIdle(ctx context.Context, tick time.Duration) error {
 		case <-q.after(tick):
 		}
 	}
+}
+
+// RecordRetry durably records that listenerID has scheduled count re-runs of a
+// transiently failed dispatch of eventID (ADR 0121), so a restart does not start
+// the count over. A listener calls it only when it schedules a re-run: never for a
+// decline, a busy offer or a first attempt. It is a no-op for an event the queue
+// no longer retains or a non-positive count. The record is dropped with the event
+// (eviction, compaction) and when the listener accepts it.
+func (q *Queue) RecordRetry(eventID, listenerID string, count int) error {
+	if count <= 0 {
+		return nil
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e, ok := q.entries[eventID]
+	if !ok {
+		return nil
+	}
+	if err := q.appendLocked(Record{Op: opRetry, EventID: eventID, ListenerID: listenerID, At: q.now(), RetryCount: count}); err != nil {
+		return err
+	}
+	if e.retries == nil {
+		e.retries = map[string]int{}
+	}
+	e.retries[listenerID] = count
+	return nil
+}
+
+// RetryCount reports the re-runs recorded for (eventID, listenerID) by
+// RecordRetry, surviving a restart; 0 when none.
+func (q *Queue) RetryCount(eventID, listenerID string) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if e, ok := q.entries[eventID]; ok {
+		return e.retries[listenerID]
+	}
+	return 0
 }

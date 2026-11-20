@@ -20,6 +20,13 @@ const (
 	opEnqueue opKind = "enqueue"
 	opAccept  opKind = "accept"
 	opEvict   opKind = "evict"
+	// opRetry is written when a listener schedules a re-run of a transiently
+	// failed dispatch: it carries the new retry count for one (event, listener)
+	// in RetryCount, so a restart does not start the count over. It is written
+	// ONLY then (never for a decline, a busy offer or a first attempt) and it is
+	// dropped with the event on eviction and by compaction. An older binary
+	// ignores it.
+	opRetry opKind = "retry"
 	// The three legacy record kinds of the removed gate mechanism: a replay
 	// ignores them and compaction drops them (reporting an active gate once).
 	opGateSet     opKind = "gate_set"
@@ -55,9 +62,11 @@ const (
 // and this write re-offers the event on restart (at-most-one redelivery,
 // absorbed by idempotent handlers, INV-EVT-2).
 //
-// There are exactly THREE EVENT record kinds (plus the Gate Registry's three
-// gate_* kinds, gate.go) and none of them is an attempt log: the core keeps no
-// attempt history (INV-EVT-4, DEC-EVENT-1), so a pre-accept decline — even the
+// There are exactly FOUR EVENT record kinds (enqueue, accept, evict and retry; plus
+// the Gate Registry's three gate_* kinds, gate.go) and none of them is an attempt
+// log: the core keeps no per-offer or per-decline history (INV-EVT-4,
+// DEC-EVENT-1, ADR 0121; the retry record holds only the count of scheduled
+// re-runs), so a pre-accept decline — even the
 // final one past `expiresAt` — writes nothing. An event LEAVING the
 // queue is recorded (opEvict) rather than re-derived on replay, because a
 // past-expiry event is not necessarily finished: it is retained until every
@@ -88,6 +97,9 @@ type Record struct {
 	// Both are absent on a record written by an older binary.
 	ListenerID string    `json:"listenerId,omitempty"`
 	StartedAt  time.Time `json:"startedAt,omitzero"`
+	// Retry fields (opRetry only): the number of re-runs scheduled so far for
+	// (EventID, ListenerID).
+	RetryCount int `json:"retryCount,omitempty"`
 	// Evict fields. At is, on an evict record, the instant the event left the queue,
 	// and Reason why: EvictReason* (bead pg2-n7da9). Both absent on a record written
 	// by an older binary.

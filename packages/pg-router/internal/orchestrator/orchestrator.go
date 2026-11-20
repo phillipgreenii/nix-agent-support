@@ -148,6 +148,10 @@ type Orchestrator struct {
 	// notification; captured by NewListener like the observers above.
 	// cmd/pg-router's bootCore wires the metrics.Emitter in here.
 	DispatchRetryObserver DispatchRetryObserver
+	// RetryLog persists the retry count in the event queue's log (ADR 0121; see
+	// retry.go). nil keeps the count in memory only; captured by NewListener.
+	// cmd/pg-router's bootCore wires the queue in here.
+	RetryLog RetryLog
 	// DispatchFailedObserver is notified once per dispatch that ended failed
 	// (not for an attempt that is re-run; see retry.go). nil disables it;
 	// captured by NewListener like the observers above. cmd/pg-router's

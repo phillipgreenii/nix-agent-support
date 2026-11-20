@@ -533,6 +533,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// (a few lines down, same iteration) hasn't happened yet at the moment
 	// NewListener itself runs.
 	o.Registry = svc.Registry()
+	// The retry count lives in the queue log so a restart does not reset it (ADR 0121).
+	o.RetryLog = q
 	// Registration happens AFTER Listen (svc must exist) but is otherwise
 	// independent of Accept: an in-process participant never dials the
 	// socket, so there is no handshake to wait on. Task 2.1: register every

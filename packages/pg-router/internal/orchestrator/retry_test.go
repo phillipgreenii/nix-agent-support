@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -514,5 +515,56 @@ func TestOffer_DispatchFailedObserver_DeterministicCountedShutdownNot(t *testing
 	l2.Offer(eventqueue.Offering{ID: "dsp", Event: retryEvent("e2")})
 	if len(fobs2.calls) != 0 {
 		t.Fatalf("shutdown cut: failed-dispatch calls = %d, want 0", len(fobs2.calls))
+	}
+}
+
+// The retry count is persisted in a real file-backed queue: a restart mid-retry
+// keeps it, so a role with max_dispatch_retries 2 gets no further re-run after the
+// cap is reached, even across restarts (ADR 0121).
+func TestOffer_RetryCountSurvivesQueueRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "queue.jsonl")
+	open := func() (*eventqueue.Queue, *eventqueue.FileStore) {
+		fs, err := eventqueue.NewFileStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q, err := eventqueue.New(fs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return q, fs
+	}
+	listener := func(q *eventqueue.Queue, h wireclient.HandlerClient) eventqueue.Listener {
+		o := newOrch(fastCfg(t), testQuerySet(nil, nil))
+		o.Handler = h
+		o.RetryLog = q
+		return o.NewListener(context.Background(), roles.Role{Name: "desk-pr", Binds: []string{"pr.changed"}, MaxDispatchRetries: 2})
+	}
+	evt := retryEvent("e1")
+	retryDecline := eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailDispatchRetry}
+
+	q1, fs1 := open()
+	if _, err := q1.Enqueue(evt); err != nil {
+		t.Fatal(err)
+	}
+	h1 := &seqHandler{errs: []error{killedErr}}
+	if got := listener(q1, h1).Offer(eventqueue.Offering{ID: "d1", Event: evt}); got != retryDecline {
+		t.Fatalf("first attempt = %+v, want retry decline", got)
+	}
+	_ = fs1.Close() // restart mid-retry
+
+	q2, fs2 := open()
+	h2 := &seqHandler{errs: []error{killedErr, killedErr}}
+	l2 := listener(q2, h2)
+	if got := l2.Offer(eventqueue.Offering{ID: "d2", Event: evt}); got != retryDecline {
+		t.Fatalf("second attempt after restart = %+v, want retry decline (count 1 survived, one left)", got)
+	}
+	_ = fs2.Close() // restart again, now at the cap
+
+	q3, fs3 := open()
+	defer func() { _ = fs3.Close() }()
+	h3 := &seqHandler{errs: []error{killedErr, killedErr}}
+	if got := listener(q3, h3).Offer(eventqueue.Offering{ID: "d3", Event: evt}); !got.Accepted {
+		t.Fatalf("attempt at the cap after restart = %+v, want accept (no further retry)", got)
 	}
 }
