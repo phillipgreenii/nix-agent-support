@@ -37,19 +37,22 @@ The consequences the behavior docs now state, rather than leave to be discovered
   now counts a genuine miss (`INV-DISP-3`).
 
 **Why the check is stateless.** The rule is "if the event is already expired at the moment an attempt
-is made, that attempt is the last one for that handler". Phrased that way the core keeps **no attempt
-history**: one comparison at attempt time is the whole decision, and the delivery-opportunity
-guarantee still holds because a born-expired event's first attempt is also its last. An
-attempt-counting alternative would have had to persist per-handler counters across restarts to mean
-anything, which is durable state bought for no behavioral gain.
+is made, that attempt is the last one for that handler". Phrased that way the core keeps **no per-offer or
+per-decline history**: one comparison at attempt time is the whole decision, and the
+delivery-opportunity guarantee still holds because a born-expired event's first attempt is also its
+last. The core persists exactly two bounded values beyond that (`ADR 0121`): the **retry count**,
+written only when a retry is scheduled, and the **redrive generation** carried on the event. The
+earlier reasoning, that a per-handler counter was durable state bought for no behavioral gain, did not
+foresee the gain: a restart no longer resets the retry count of a transiently failed event.
 
 **Relation to `ADR 0031`.** `ADR 0031` decided the durable, ordered, de-duped queue and deliberately
 left the clock origin open. This entry closes that residue; the queue decision itself is unchanged.
 
-**Proposed amendment (not yet ratified).** `ADR 0121` proposes narrowing "no attempt history" to "no
-per-offer or per-decline history": the core would persist a retry count written only when a retry is
-scheduled, and a redrive generation carried on the event. Until the operator ratifies it, the decision
-above stands unchanged.
+**Amended by `ADR 0121` (ratified 2026-11-19).** The "no attempt history" wording narrows to "no
+per-offer or per-decline history": the retry count (written only when a retry is scheduled) and the
+redrive generation (carried on the event, with an optional absolute `notBefore` instant before which
+the queue offers the event to no handler) are the only durable attempt state. The decision itself, an
+absolute-instant expiry with a stateless attempt-time check, is unchanged.
 
 **Not decided here.** The wire encoding of the two fields and the schema artifact that carries them
 are the implementation's own; the conformance suite (`INV-INTF-2`) is where the two sides reconcile.

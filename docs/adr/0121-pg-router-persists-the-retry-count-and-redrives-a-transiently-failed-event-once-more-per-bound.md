@@ -1,8 +1,8 @@
 # pg-router persists the retry count and redrives a transiently failed event a bounded number of times
 
-**Status**: Proposed (agent-proposed design, pending operator ratification; the operator MAY overturn it before any code is written; amends `DEC-EVENT-1` and `DEC-RETRY-2` in `packages/pg-router/docs/decisions`)
+**Status**: Accepted (ratified 2026-11-19 by Phillip, interactive session, verbatim "1 a", choosing option A of the question "Ratify ADR 0121?": ratify, opting in only pr-change with `max_redrives` = 1 and keeping the 1 h delay and hard caps; amends `DEC-EVENT-1` and `DEC-RETRY-2` in `packages/pg-router/docs/decisions`)
 **Date**: 2026-11-05
-**Deciders**: Phillip Green II (review pending)
+**Deciders**: Phillip Green II
 
 ## Context
 
@@ -10,6 +10,11 @@ A pull source that emits one event per entity change (the `pr.changed` lane is t
 the event to a command role. The role MAY opt in to a bounded re-run of a transiently failed
 dispatch (`DEC-RETRY-2`: `max_dispatch_retries`, hard cap 3, never past `expiresAt`). Two gaps
 remain after the retry window was widened from 10 minutes to 6 hours on 2026-10-29.
+
+Under the ack-after-accept design (the delivery-correctness design of 2026-11-17) the source's cursor no
+longer moves when the adapter reads. A terminally failed dispatch still counts as accepted
+(`internal/orchestrator/listener.go`), so it settles and is never re-emitted. Gap 2 below, and so the
+redrive, stays valid under that design.
 
 **Gap 1: the retry count is in memory.** `retryLedger` (`internal/orchestrator/retry.go`) counts
 re-runs per event id in a map. `DEC-EVENT-1` keeps "no attempt history" on disk, so a restart
@@ -58,7 +63,8 @@ count of 3 or more in an hour) tells a person; it recovers nothing.
    `max_dispatch_retries`, itself capped at 3 by validation.
 2. **D2: The router redrives, not the source.** When an event of an opted-in role ends `failed`
    because its retries are spent or its window closed on a **transient class**
-   (`killed`, `deadline`, `unavailable`), the core MAY enqueue one **redrive**: a fresh copy of the
+   (the router's transient classifier in `internal/transient/transient.go`: `killed`, `deadline`,
+   `unavailable`, and the later `not-ingested`; any class added later is covered too), the core MAY enqueue one **redrive**: a fresh copy of the
    same event (Dead Letter Channel with a bounded Redelivery, owned by the component that already
    owns the retry clock). The source cannot do it: it neither sees the dispatch outcome nor holds
    a cursor it could rewind without replaying unrelated changes.
@@ -95,6 +101,10 @@ count of 3 or more in an hour) tells a person; it recovers nothing.
    that counts toward `pg_router_dispatch_failed_total` and the existing failed-dispatch alerts, so
    a recovered redrive is one event, not two pages (the same rule `DEC-RETRY-2` applies to a recovered
    retry). A redrive record that cannot be written is logged and counted as a normal terminal failure.
+   **Seam with the dead-letter record** (delivery-correctness design, S-9): the `failed` record MUST be
+   written only when no redrive is enqueued for the failure, or MUST carry the event's generation, so
+   that an original whose redrive is still pending does not appear in `dead-letters`. Only the last
+   generation's terminal failure counts.
 6. **D6: `retryWindow` is not raised.** The window the source stamps (6 hours in the shipping
    deployment) is unchanged by this decision; the redrive is how an outage longer than one window
    is covered, with a bound stated in D4.
@@ -103,8 +113,7 @@ count of 3 or more in an hour) tells a person; it recovers nothing.
 
 `DEC-EVENT-1` keeps its decision (expiry is an absolute instant; the attempt-time check is
 stateless) and its consequence that the default event is born expired. This ADR amends one
-sentence of its reasoning and one of `DEC-RETRY-2`'s bullets, recorded as proposed notes in both
-entries until ratified:
+sentence of its reasoning and one of `DEC-RETRY-2`'s bullets, now rewritten in both entries:
 
 - "No attempt history" narrows to: the core keeps **no per-offer or per-decline history**. It
   persists exactly two bounded values, the retry count written when a retry is scheduled and the
@@ -159,7 +168,18 @@ flowchart TD
 - The decision is reversible: with `max_redrives` at 0 the behavior is today's, plus the durable
   count, which only ever lowers the number of attempts.
 
+## Adopted settings
+
+Ratified 2026-11-19 (Phillip, interactive session, verbatim "1 a", option A of "Ratify ADR 0121?"):
+
+- Only the `pr-change` role opts in to redrive, with `max_redrives` = 1: at most
+  (1 + 1) x (1 + 2) = 6 attempts over 2 x 6 + 1 = 13 hours (D4's worked example).
+- `redrive_delay` stays 1 hour.
+- The hard caps stay: 3 retries (`max_dispatch_retries`) and 2 redrives (`max_redrives`).
+- Every other role keeps `max_redrives` = 0, so its behavior is unchanged.
+
 ## Operator ratification
 
-Pending. Until ratified no code changes, and the two decision entries carry only a pointer to this
-record.
+Ratified. Phillip, 2026-11-19, interactive session, verbatim "1 a", choosing option A of "Ratify
+ADR 0121?": ratify, opting in only pr-change with `max_redrives` = 1 and keeping the 1 h delay and
+hard caps. The behavior and decision docs now state the amended text; implementation is separate work.

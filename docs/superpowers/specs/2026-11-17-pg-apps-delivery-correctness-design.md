@@ -97,13 +97,15 @@ and Dead Letter Channel (RR-07), Fencing Token (RR-05), Correlation Identifier (
 
 ### 4.3 Persisted retry count and a dead-letter record (RR-07)
 
-- **D-5**: persisting the retry count is the decision of ADR 0121 (Proposed, awaiting ratification), already carried by an
+- **D-5**: persisting the retry count is the decision of ADR 0121 (Accepted 2026-11-19), already carried by an
   existing implementation bead. This design adds nothing to it and depends on its ratification.
 - **D-6**: when a dispatch ends terminally failed (deterministic failure, retries spent, or window closed), the core MUST
   append one durable `failed` record to the queue log (same Write-Ahead Log, replayed on start, dropped on eviction and
   compaction as the event is), and a read-only verb `pg-router dead-letters [--json]` MUST list the records still held.
   The record carries the event id, role, failure class, attempt count and failure time. It is not a redrive: ADR 0121's
-  redrive (D2/D3 there) stays its own decision.
+  redrive (D2/D3 there) stays its own decision. Seam with that redrive: with `max_redrives` = 1 on pr-change, the `failed`
+  record MUST be written only when no redrive is enqueued, or MUST carry the event's generation, so an original whose
+  redrive is pending does not appear in `dead-letters` (ADR 0121 D5: only the last generation counts).
 
 ### 4.4 Correlation identifier (XO-01)
 
@@ -151,8 +153,7 @@ and Dead Letter Channel (RR-07), Fencing Token (RR-05), Correlation Identifier (
 
 - Packet 2 and the pg-connector hop wait on operator approval of the ack-after-accept design; this design does not
   accelerate or change it.
-- Packet 4 waits on ADR 0121 ratification and its persisted-count implementation; if the operator overturns 0121, the
-  dead-letter record is re-specified against the replacement.
+- Packet 4 waits on the implementation of ADR 0121 (ratified 2026-11-19): its persisted count and generation.
 - Packet 3 may hit the nested-transaction limit named in D-4.
 - Not covered, already tracked elsewhere: the redelivery busy-guard and failed-ingest retry by error class.
 

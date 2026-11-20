@@ -96,6 +96,17 @@ metrics backend, …) define their own terms in their own behavior sets.
 - **`expiresAt`** — the **optional absolute instant** past which the core stops retrying an event.
   Absent, it defaults to `at`, so an event carrying neither field is **born expired**: it is offered
   once to every matching handler and then dropped (`INV-EVT-1`, `INV-EVT-4`).
+- **Retry count** — the durable number of bounded re-runs the core has scheduled for one transiently
+  failed `(event, handler)`, written to the queue log only when a retry is scheduled and rebuilt on
+  start (`INV-EVT-8`).
+- **Redrive** — a fresh copy of a transiently failed event, enqueued by the core when the original's
+  retries are spent or its window closed, for a role that opted in; it has a new id, a higher
+  generation, a new window and a `notBefore` (`INV-EVT-9`).
+- **Generation** — the number of redrives behind an event; the original is 0 and a redrive carries one
+  more, so a role's `max_redrives` bounds the chain durably (`INV-EVT-9`).
+- **`notBefore`** — an event's **optional absolute instant** before which the queue offers it to no
+  handler; set on a redrive so it does not land inside the outage that exhausted the original
+  (`INV-EVT-9`).
 - **Retention** — how long the core keeps an event: through `expiresAt` and the one final attempt
   each matching handler is still owed, and no longer. Retention bounds both the queue entry and the
   `id` the core de-duplicates on (`INV-EVT-3`, `INV-EVT-4`).

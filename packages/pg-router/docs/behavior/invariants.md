@@ -130,8 +130,9 @@ flowchart TD
   bound is evaluated at attempt time.** If the event is **already expired at the moment an attempt is
   made, that attempt is the last one for that handler**: accept or decline, the core does not offer
   that event to that handler again, and once no handler is still owed an attempt the event is dropped
-  **unconditionally** (**unconsumed-expired**, `INV-DISP-3`). No attempt history is kept — the expiry
-  check at attempt time is the whole decision. Before `expiresAt` the re-offer behavior of
+  **unconditionally** (**unconsumed-expired**, `INV-DISP-3`). No per-offer or per-decline history is kept — the expiry
+  check at attempt time is the whole decision (the only durable attempt state is the retry count and
+  redrive generation of `INV-EVT-8` and `INV-EVT-9`). Before `expiresAt` the re-offer behavior of
   `INV-FAIL-1` holds unchanged, so **`expiresAt` IS the retry window**: setting it in the future is
   how retries are requested, and absent it there is no retry. Because `expiresAt` defaults to `at` and
   `at` defaults to the core's ingest-now, the default event is **born expired**, and the default
@@ -170,6 +171,21 @@ flowchart TD
   again after expiry under `run-now`. _(The slot id, the expiry rule and the missed-slot ruling are
   recorded in
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-EVENT-6`.)_
+- **`INV-EVT-8`** <!-- uuid: 5b7e2c1a-93d4-4f60-8a1e-2c47d90b6e13 --> — **The retry count is durable.** When
+  the core takes a bounded re-run of a transiently failed dispatch for a role that opted in, it **MUST**
+  record the new count durably, in the queue log, and **MUST** rebuild the count from that log on start,
+  so a restart **MUST NOT** reset it. The core **MUST NOT** record anything for a decline, a busy offer,
+  a first attempt or a deterministic failure. The record **MUST** be dropped with its event. _(Recorded
+  in `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-RETRY-2`.)_
+- **`INV-EVT-9`** <!-- uuid: e0a96d3f-7c52-4b18-b4d9-1f8a35c27e64 --> — **A redrive is bounded and
+  delayed.** A role **MAY** opt in to a **redrive** (default off): when an event ends failed on a
+  transient class because its retries are spent or its window closed, the core **MAY** enqueue one fresh
+  copy with a new id, a **generation** one higher than the original's (original = 0), a new `expiresAt`
+  and a **`notBefore`** instant before which the queue **MUST NOT** offer it to any handler. The core
+  **MUST NOT** redrive an event whose generation equals the role's `max_redrives` (hard cap 2), a
+  deterministic failure, a shutdown hand-back or a success, and **MUST NOT** enqueue one while shutting
+  down. Only the last generation's terminal failure is counted and alerted. _(Recorded in
+  `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-RETRY-2`.)_
 
 ## Interfaces
 

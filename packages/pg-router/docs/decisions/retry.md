@@ -64,8 +64,15 @@ narrow, **opt-in** exception, in the same spirit as `DEC-OBS-3`'s:
   launchd's 60 s `ExitTimeOut` (20 s drain + 30 s session sweep + 5 s tail already fill it).
 - **Bounded.** At most `max_dispatch_retries` re-runs per event, hard-capped at 3 by config
   validation, and never past the event's `expiresAt` (`INV-EVT-4`: an attempt on an expired event
-  is its last). The count is in memory only (`DEC-EVENT-1`: no attempt history on disk), so a
-  restart starts it over, still bounded by `expiresAt`. _(Proposed, not ratified: `ADR 0121` would persist the count and add a bounded redrive.)_
+  is its last). The count is **durable** (`ADR 0121`, amending `DEC-EVENT-1`): one record is
+  appended to the queue log each time a retry is scheduled, the ledger is rebuilt from replay on
+  start, and the record is dropped with its event, so a restart does not reset the count. Beyond the
+  window, a role MAY also opt in to a **bounded redrive** (`max_redrives`, default 0, hard cap 2;
+  `redrive_delay`, default 1 hour): when retries are spent or the window closed on a transient class,
+  the core enqueues one fresh copy of the event with a new id, an incremented generation, a new
+  window and a `notBefore` of now plus `redrive_delay`. Only the last generation's terminal failure
+  counts toward `pg_router_dispatch_failed_total`. The `pr-change` role is the one role that opts in,
+  with `max_redrives` = 1 (ratified 2026-11-19).
 - **Mechanism: a pre-accept decline.** The failed attempt is reported to the queue as a decline, so
   the existing `INV-FAIL-2` cadence (exponential backoff with a cap) spaces the re-run and the
   per-handler serial FIFO is preserved. This is what stops a host-overload storm from amplifying:
