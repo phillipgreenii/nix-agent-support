@@ -177,3 +177,14 @@ func TestResultStillEmptyAfterTheRereadsIsReportedEmpty(t *testing.T) {
 		t.Fatalf("%q %v %v", text, st, err)
 	}
 }
+
+func TestStateAsksForJSONBeforeTheID(t *testing.T) {
+	log := fakeCLI(t, "")
+	st, err := CLI{}.State(bg, "7")
+	if err != nil || st != StateIdle {
+		t.Fatalf("%q %v", st, err)
+	}
+	if got := strings.Join(logLines(t, log+".args"), "\n"); !strings.Contains(got, "state --json 7") {
+		t.Fatalf("flag must precede the id (Go flag parsing stops at the first non-flag): %q", got)
+	}
+}

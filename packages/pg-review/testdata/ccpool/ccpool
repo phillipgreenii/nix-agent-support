@@ -29,7 +29,15 @@ result)
   fi
   echo "${result_text:-final message}"
   ;;
-state) echo "${state_json:-$default_state}" ;;
+state)
+  # Like the real ccpool (Go flag package), --json is honoured only BEFORE the
+  # positional id; after it the plain "name=.. state=.." line is printed.
+  if [ "$1" = "--json" ]; then
+    echo "${state_json:-$default_state}"
+  else
+    echo "name=$1 state=idle"
+  fi
+  ;;
 cancel | close) exit 0 ;;
 *) exit 1 ;;
 esac

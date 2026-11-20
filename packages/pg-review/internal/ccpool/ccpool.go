@@ -268,7 +268,7 @@ func (c CLI) Result(ctx context.Context, turnID string) (string, ResultStatus, e
 
 // State implements Client.
 func (c CLI) State(ctx context.Context, externalID string) (string, error) {
-	out, err := c.run(ctx, "state", externalID, "--json")
+	out, err := c.run(ctx, "state", "--json", externalID)
 	if err != nil {
 		return "", err
 	}
