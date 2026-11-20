@@ -1,7 +1,7 @@
 # pg-router-source-pg-connector — behavior docs
 
-`pg-router-source-pg-connector` is a small, standalone Go binary with three subcommands
-(`changes`, `sweep`, `list`) that lets a pg-router `[[query]]` command-type stanza consume
+`pg-router-source-pg-connector` is a small, standalone Go binary with four subcommands
+(`changes`, `sweep`, `list`, `settle`) that lets a pg-router `[[query]]` command-type stanza consume
 pg-connector without a shell/jq pipeline. It knows exactly two contracts — pg-connector's
 `changes`/`list` wire envelopes, and pg-router's command-query rawItem array shape — and holds
 NO state of its own: every fact it reports lives in pg-connector's own delta ledger (a sibling
@@ -25,7 +25,7 @@ flowchart LR
     ADAPTER -->|"execs, reads stdout+stderr, reads exit code"| CONNECTOR
 ```
 
-- **`changes <type> [<query>] --consumer <id> [--beads-dir <path>] [--retry-window <duration>]`** —
+- **`changes <type> [<query>] --consumer <id> [--beads-dir <path>] [--retry-window <duration>] [--deferred-ack]`** —
   runs `pg-connector <type> changes [--query <query>] --consumer <id> --output json`, and reprints
   its response as one rawItem per reported change.
 
@@ -61,15 +61,19 @@ flowchart LR
   `{backend: reason}` map — omitted entirely when no degraded backend on that call reported one
   (bead `pg2-wa5uk`).
 
-  **Cursor advance is at emit, not at accept (bead `pg2-cfml6k`, ruling).** This adapter never
-  passes `--no-ack`, so `pg-connector changes` acknowledges the consumer's cursor
-  (`changes_ack`) as soon as it has written its answer to this adapter, before pg-router has
-  accepted any item. The feed is at-least-once only up to that flush: a crash of `pg-connector`
-  before the flush is redelivered, but an event that this adapter printed and that then expires
-  unaccepted (past `expiresAt`, or never dispatched) is NOT re-emitted by any later `changes` call;
-  it is lost until that entity changes again, so `--retry-window` MUST be sized to cover the
-  longest expected outage of the dispatcher. Pinned by
-  `TestChanges_NeverPassesNoAck_CursorAdvancesAtEmitSoExpiredEventsAreNotReplayed`.
+  **Cursor advance is at settlement, not at emit (ruling), for a query that opts in.** With
+  `--deferred-ack` (which requires `--retry-window` and a backend that owns its changes) the adapter
+  passes `--no-ack`, so `pg-connector changes` flushes its answer and acknowledges nothing. Without
+  it the cursor still advances at emit, as before. Each printed item carries `ack` `{lane, token}`
+  (lane is the backend name, token the position to acknowledge, section "Settlement" below), and
+  pg-router acknowledges by running `settle`, which sends `changes-ack`, once every event up to that
+  token has been accepted by every handler that matches it (pg-router `INV-EVT-8`). Delivery is
+  at-least-once: a poll re-prints every row after the last acknowledged position, so an event that
+  expired un-accepted, or a batch the adapter failed to print, is offered again at the next poll.
+  A poll that returns no change acknowledges each succeeded source's `next_seq` itself. Pinned by
+  `TestChanges_DeferredAck_PassesNoAck_CursorAdvancesOnlyOnSettle`, and the unchanged default by the
+  renamed `TestChanges_WithoutDeferredAck_NeverPassesNoAck_CursorAdvancesAtEmit` (the existing
+  pinning test, kept).
 
   `--retry-window <duration>` (bead `pg2-1ldvy`; default `0` = off) gives the router a bounded
   retry window per change. With the default, the item `id` is the bare entity id and the output is
@@ -86,15 +90,16 @@ flowchart LR
     different source gets a new id and is queued as a separate event even while the first is in
     flight. One exception, so that an entity which leaves a query and later re-enters it is offered
     again: for a row whose change kind is `added` and whose entity carries neither `head_sha` nor
-    `version` (an entity with no revision marker, such as a bead), the digest input also carries the
-    adapter's emit time, at millisecond precision (`emitted_at`, one instant per invocation), as a
-    last key `emitted_at`. Such a row has nothing else that tells one entry into the query from the
+    `version` (an entity with no revision marker, such as a bead), the digest input also carries,
+    under `--deferred-ack`, the row's own `seq`, as a last key `seq`; otherwise the adapter's emit
+    time at millisecond precision as a last key `emitted_at`. Such a row has nothing else that tells one entry into the query from the
     next, and the router never forgets an id it has delivered while it is retained (INV-EVT-3), so
     without the emit time every re-entry would hash to the id of the first one and be dropped as a
     duplicate. Every other row, including every `changed` row, is unaffected, so content-only changes
     of an entity that stays in the query still coalesce into the earlier event. The invariant this
-    relies on: the cursor advances at emit (see above), so one `added` row is printed at most once
-    and a later `added` row for the same entity is always a new entry, never a re-report;
+    relies on: a re-printed row is the same log row, so it has the same `seq`, hence the same id,
+    and the router absorbs it (INV-EVT-3), while a later `added` row for the same entity is a new
+    log row with a new `seq`;
   - the item carries `at` (this invocation's emit time, UTC, whole seconds, one value for every
     item of the call) and `expiresAt` = `at` + window, so the router retries a failed dispatch of
     that event until `expiresAt` (INV-EVT-4) and dedupes the same id for as long as it is retained
@@ -107,7 +112,7 @@ flowchart LR
   `null` is printed as nothing, and a row that carries none of them (a row from a backend that does
   not own its changes) prints exactly as it always did. A `seq` that is not a number, a `kinds` that
   is not an array of strings, or a `fields` that is not an array makes the call fail and print
-  nothing on stdout. None of the three reaches the digest above. The event id stays stable because
+  nothing on stdout. Only `kinds` and `fields` stay out of the digest above (plus `seq` for an added row without a revision marker under `--deferred-ack`, as stated there). The event id stays stable because
   each row carries its own `version` and `head_sha`: a row that is redelivered keeps its id even
   after a newer change to the same entity, and two rows for one entity in one poll get two ids.
 
@@ -171,6 +176,56 @@ flowchart LR
   An empty `--exclude-title-prefix ""` is a usage error (it would match every title); with no
   `--exclude-title-prefix` the output is unchanged. Only `list` has this flag (not `changes` or
   `sweep`).
+
+- **`settle <type> [<query>] --consumer <id> --lane <backend> --through <token>`** — the
+  acknowledgement half of a deferred-ack query. Deferred acknowledgement is an opt-in of one query,
+  not a default of the adapter. The adapter's `changes` subcommand gains `--deferred-ack`, which the
+  operator sets on exactly the queries that declare `settle`. With it the adapter passes `--no-ack`
+  (INTF-WIRE-ACK-1) and the umbrella no longer acknowledges. Without it nothing changes, so the
+  deployed queries that read a backend that does not declare `owns_changes` (the beads feeds are the
+  live example) keep working: the umbrella marks such a row disabled under `--no-ack` and, when it is
+  the only backend, fails the call `invalid_argument`. The adapter MUST refuse `--deferred-ack` (exit
+  non-zero, a message that names the backend) for a backend that does not own its changes, and MUST
+  refuse it without `--retry-window`. The only caller of `pg-connector <type> changes-ack` is the
+  adapter's `settle` subcommand, which the core runs, never the core directly.
+
+  `settle` runs `pg-connector <type> changes-ack --consumer <id> [--query <query>] --next-seq <N>
+--backend <lane> --output json`, where `<N>` is derived from the token (section "Settlement"
+  below), prints nothing on stdout, and exits 0 on success. A non-zero exit (including a refused or
+  failed `changes_ack`) is the failure the core logs and retries. The `--backend <lane>` argument
+  pins the acknowledgement to the one backend whose cursor the lane names (`changes-ack` accepts
+  `--backend`, INTF-WIRE-ACK-2). `--beads-dir` is not offered on `settle`: it has no use for an
+  `owns_changes` backend. A consumer reset is an operator step and is not signalled by the adapter.
+
+  **Settlement.** For each source row of a `changes` answer, the adapter assigns the lane (the
+  backend name) and tokens as follows:
+  - Each item's token is its own `seq`, rendered as a decimal string.
+  - The **last** item of a lane in the call carries the source row's scanned `next_seq` instead of
+    its own `seq`, because `next_seq` is the position the umbrella acknowledges (INTF-WIRE-ACK-2:
+    "the scanned `next_seq` of a `sources[]` row, not the `seq` of the last change returned").
+    Acknowledging `next_seq` once the last item is settled also moves the cursor past scanned rows
+    that produced no change.
+
+  A mid-batch `seq` is a valid token: the feed's Ack treats `next_seq` as "received everything up to
+  here", a value at or below the stored position is a no-op, a value above the log head is refused,
+  and a poll returns the rows after the stored position in ascending `seq`. A row's own `seq` is
+  therefore an exact position. The adapter MUST emit each lane in the umbrella's order, ascending,
+  without coalescing or reordering rows (an entity changed twice in one poll is two items), because
+  the core's frontier is list order.
+
+  **Item ids under `--deferred-ack`.** A query that declares `settle` MUST use per-change ids. The
+  adapter refuses `--deferred-ack` without `--retry-window`, so every item id is
+  `<entity id>@<12 hex>` of a change digest. Without per-change ids, an entity id retained while its
+  lane's frontier is held would make a new change of that entity a duplicate (INV-EVT-3 lane
+  retention): the core would drop it and the source's cursor would pass it, a silent loss. The digest
+  already keys on `version` and `head_sha`, so two different changes of one entity differ, and a
+  redelivered row (same entity, same version) has the same id and is absorbed. For the rare row with
+  neither marker the digest input carries the row's own `seq` as its last key, in place of the emit
+  time, so a redelivered row is the same id and a re-entry (a new log row, new `seq`) is a new id; a
+  row without `seq` cannot occur under `--deferred-ack`. A query without `--deferred-ack` keeps
+  today's rule. Ids of such rows change on deploy for a query that opts in: anything retained under an
+  old id is not de-duplicated against the new id once, at the cutover (one duplicate per held row,
+  bounded by the poll in flight). An id is opaque to handlers, so a `seq`-dependent id is acceptable.
 
 ## Entity types
 

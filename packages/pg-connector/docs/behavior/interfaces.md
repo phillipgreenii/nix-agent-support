@@ -716,8 +716,8 @@ shapes gain the fields named below, and the `changes` result's `schemaVersion` i
   acknowledges is handed the same changes again on its next call. Everything a caller needs in order
   to acknowledge is in the answer: each `sources[]` row carries the `next_seq` that source scanned
   up to. A caller passes `--no-ack` when it can only acknowledge once it has finished what it does
-  with the changes (for example, once it has committed them to a store of its own); a caller content
-  with acknowledgement after flush, such as the pg-router adapter, does not pass it. The flag does
+  with the changes (for example, once it has committed them to a store of its own); the pg-router
+  adapter passes it only for a query that declares settlement (`--deferred-ack`). The flag does
   not change `--cached` or `--reset`, and `--reset` still moves the position on its own, because a
   reset is not an acknowledgement. It applies to a source forwarded to a backend that declares
   `owns_changes`, for whatever type that backend serves. For a source that is NOT forwarded, whose
