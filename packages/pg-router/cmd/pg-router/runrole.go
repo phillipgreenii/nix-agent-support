@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -140,6 +141,7 @@ func runRunRole(roleName, eventJSON string, asJSON bool) int {
 	}
 	if err := o.RunOne(ctx, role, evt); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
+		recordRunRoleFailure(cfg.LogDir, evt, role.Name, err)
 		return exitGeneric
 	}
 	// RunOne no longer closes the session it launched (Section 4's own
@@ -403,4 +405,15 @@ func renderRunQueryText(w io.Writer, source string, matches []runQueryMatch, cal
 // renderRunQueryJSON writes run-query's --json form: one JSON object.
 func renderRunQueryJSON(w io.Writer, source string, matches []runQueryMatch, cal *calendarSmoke) {
 	writeJSON(w, runQueryReport{Query: source, Total: len(matches), Matches: matches, Calendar: cal})
+}
+
+// recordRunRoleFailure writes the dead letter of a failed one-shot dispatch to the
+// queue log, so `pg-router dead-letters` lists it like one a daemon recorded. It
+// is best effort: with a daemon running (it owns the log lock) or an unwritable
+// log it only says why nothing was recorded, and the dispatch error stands.
+func recordRunRoleFailure(logDir string, evt eventqueue.Event, role string, dispatchErr error) {
+	dl := orchestrator.DeadLetterFor(evt.Resolve(time.Now()), role, dispatchErr, 1, time.Now())
+	if err := eventqueue.RecordSettledFailure(filepath.Join(logDir, "queue.jsonl"), evt, dl); err != nil {
+		fmt.Fprintln(os.Stderr, "run-role: failed record not written:", err)
+	}
 }

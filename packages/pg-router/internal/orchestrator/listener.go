@@ -252,6 +252,10 @@ type roleListener struct {
 	// retries tracks the re-runs already scheduled per event id. It is NOT a
 	// capacity count (INV-CONC-1): it bounds how often ONE event is re-run.
 	retries retryLedger
+	// failedLog and now record and time the dead letter of a dispatch that ended
+	// terminally failed, captured at construction; nil failedLog records nothing.
+	failedLog FailedLog
+	now       func() time.Time
 }
 
 // NewListener returns the eventqueue.Listener for role, run under ctx — the
@@ -279,6 +283,8 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 		reofferObs:        o.ReofferObserver,
 		supervisionObs:    o.SupervisionObserver,
 		maxRetries:        clampRetries(role.MaxDispatchRetries),
+		failedLog:         o.FailedLog,
+		now:               o.failedNow,
 	}
 }
 
@@ -290,6 +296,14 @@ func clampRetries(n int) int {
 		return roles.MaxDispatchRetriesCap
 	}
 	return n
+}
+
+// clock is the failure-instant clock: time.Now unless a test set one.
+func (l *roleListener) clock() time.Time {
+	if l.now != nil {
+		return l.now()
+	}
+	return time.Now()
 }
 
 func (l *roleListener) ID() string { return l.role.Name }
@@ -367,7 +381,7 @@ const DeclineDetailShutdown = "shutdown"
 // spent on this event. When it returns true it has consumed one retry and
 // notified retryObs.
 func (l *roleListener) shouldRetry(evt eventqueue.Event, err error) bool {
-	if l.maxRetries <= 0 || l.ctx.Err() != nil || (!evt.ExpiresAt.IsZero() && evt.Expired(time.Now())) {
+	if l.maxRetries <= 0 || l.ctx.Err() != nil || (!evt.ExpiresAt.IsZero() && evt.Expired(l.clock())) {
 		return false
 	}
 	class, ok := classifyTransient(err)
@@ -575,6 +589,13 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if err != nil && l.failedObs != nil {
 		// The dispatch ended failed: no re-run follows (shouldRetry said no above).
 		l.failedObs.OnDispatchFailed(evt.Type, l.role.Name)
+	}
+	if err != nil && l.failedLog != nil {
+		dl := DeadLetterFor(evt, l.role.Name, err, meta.Attempt, l.clock())
+		if rerr := l.failedLog.RecordFailed(dl); rerr != nil {
+			slog.Warn("orchestrator: failed record not persisted",
+				"role", l.role.Name, "event", evt.ID, "err", rerr)
+		}
 	}
 	if l.levelObs != nil && !skipped {
 		l.levelObs.OnDispatchAtLevel(l.role.Name, atLevels, ran, err != nil)

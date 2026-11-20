@@ -187,10 +187,11 @@ type CompactionInfo struct {
 
 // foldEvent is one live event in a logFold.
 type foldEvent struct {
-	pos     int            // FIFO position: assigned at first insert, kept across a re-enqueue
-	enq     Record         // the latest enqueue record for the id
-	accepts []AcceptStamp  // the accepts, in first-accept order (listener, settle and start instants)
-	retries map[string]int // scheduled re-run counts per listener (opRetry); dropped on accept
+	pos     int               // FIFO position: assigned at first insert, kept across a re-enqueue
+	enq     Record            // the latest enqueue record for the id
+	accepts []AcceptStamp     // the accepts, in first-accept order (listener, settle and start instants)
+	retries map[string]int    // scheduled re-run counts per listener (opRetry); dropped on accept
+	failed  map[string]Record // dead-letter records per role (opFailed); kept while the event is
 }
 
 // logFold replays records into the minimal live state, mirroring Queue.replay's
@@ -238,6 +239,7 @@ func (f *logFold) apply(r Record) {
 			e.enq = r
 			e.accepts = nil
 			e.retries = nil
+			e.failed = nil
 			return
 		}
 		f.events[r.EventID] = &foldEvent{pos: f.nextPos, enq: r}
@@ -263,6 +265,13 @@ func (f *logFold) apply(r Record) {
 				e.retries = map[string]int{}
 			}
 			e.retries[r.ListenerID] = r.RetryCount
+		}
+	case opFailed:
+		if e, ok := f.events[r.EventID]; ok {
+			if e.failed == nil {
+				e.failed = map[string]Record{}
+			}
+			e.failed[r.ListenerID] = r
 		}
 	case opEvict:
 		if e, ok := f.events[r.EventID]; ok {
@@ -366,6 +375,9 @@ func (f *logFold) records() []Record {
 		sort.Strings(lids)
 		for _, lid := range lids {
 			out = append(out, Record{Op: opRetry, EventID: e.enq.EventID, ListenerID: lid, RetryCount: e.retries[lid]})
+		}
+		for _, dl := range sortedDeadLetters(deadLettersOf(e.failed)) {
+			out = append(out, dl.record())
 		}
 	}
 	for _, it := range f.levels.items(f.now, true) {
@@ -785,3 +797,32 @@ func (q *Queue) maybeCompact() {
 
 // waitCompaction blocks until any background compaction has finished.
 func (q *Queue) waitCompaction() { q.compactWG.Wait() }
+
+// ReadDeadLettersFile lists the dead letters (failed records) of the events the
+// log at path still holds, in event order. It only reads: no lock, no file
+// created, a torn last line ignored, so it is safe beside a live daemon. A log
+// that does not exist holds none.
+func ReadDeadLettersFile(path string) ([]DeadLetter, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	fold := newLogFold()
+	if _, err := scanRecords(f, fold.apply); err != nil {
+		return nil, err
+	}
+	live := make([]*foldEvent, 0, len(fold.events))
+	for _, e := range fold.events {
+		live = append(live, e)
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].pos < live[j].pos })
+	var out []DeadLetter
+	for _, e := range live {
+		out = append(out, sortedDeadLetters(deadLettersOf(e.failed))...)
+	}
+	return out, nil
+}

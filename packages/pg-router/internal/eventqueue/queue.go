@@ -347,6 +347,9 @@ type entry struct {
 	// transiently failed dispatch (opRetry records, ADR 0121). It exists only while
 	// the event is retained and a listener has not accepted it.
 	retries map[string]int
+	// failed holds the dead-letter record per role for a dispatch that ended
+	// terminally failed (opFailed records); kept while the event is retained.
+	failed map[string]DeadLetter
 }
 
 func newEntry(evt Event) *entry {
@@ -792,6 +795,13 @@ func (q *Queue) replay() error {
 					e.retries = map[string]int{}
 				}
 				e.retries[r.ListenerID] = r.RetryCount
+			}
+		case opFailed:
+			if e, ok := q.entries[r.EventID]; ok {
+				if e.failed == nil {
+					e.failed = map[string]DeadLetter{}
+				}
+				e.failed[r.ListenerID] = deadLetterOf(r)
 			}
 		case opEvict:
 			if e, ok := q.entries[r.EventID]; ok {
@@ -2383,4 +2393,40 @@ func (q *Queue) RetryCount(eventID, listenerID string) int {
 		return e.retries[listenerID]
 	}
 	return 0
+}
+
+// RecordFailed durably records that a dispatch of dl.EventID to dl.Role ended
+// terminally failed (a dead letter). It is a no-op for an event the queue no
+// longer retains. The record is kept while the event is held and dropped with it
+// on eviction and by compaction.
+func (q *Queue) RecordFailed(dl DeadLetter) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e, ok := q.entries[dl.EventID]
+	if !ok {
+		return nil
+	}
+	dl.At = dl.At.UTC().Truncate(time.Second)
+	if err := q.appendLocked(dl.record()); err != nil {
+		return err
+	}
+	if e.failed == nil {
+		e.failed = map[string]DeadLetter{}
+	}
+	e.failed[dl.Role] = dl
+	return nil
+}
+
+// DeadLetters lists the failed records of the events the queue still holds,
+// ordered by event position then role.
+func (q *Queue) DeadLetters() []DeadLetter {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var out []DeadLetter
+	for _, id := range q.order {
+		if e, ok := q.entries[id]; ok {
+			out = append(out, sortedDeadLetters(e.failed)...)
+		}
+	}
+	return out
 }

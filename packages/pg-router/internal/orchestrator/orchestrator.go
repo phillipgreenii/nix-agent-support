@@ -152,6 +152,12 @@ type Orchestrator struct {
 	// retry.go). nil keeps the count in memory only; captured by NewListener.
 	// cmd/pg-router's bootCore wires the queue in here.
 	RetryLog RetryLog
+	// FailedLog persists a dead-letter record when a dispatch ends terminally
+	// failed (see retry.go). nil records nothing; captured by NewListener.
+	// cmd/pg-router's bootCore wires the queue in here.
+	FailedLog FailedLog
+	// failedNow is the failure-instant clock for tests (nil means time.Now).
+	failedNow func() time.Time
 	// DispatchFailedObserver is notified once per dispatch that ended failed
 	// (not for an attempt that is re-run; see retry.go). nil disables it;
 	// captured by NewListener like the observers above. cmd/pg-router's

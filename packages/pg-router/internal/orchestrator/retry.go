@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/transient"
 )
 
@@ -137,4 +138,30 @@ func (r *retryLedger) pending() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.counts)
+}
+
+// FailedLog is the durable home of the dead-letter record: when a dispatch ends
+// terminally failed, the listener appends one failed record to the event queue's
+// log. *eventqueue.Queue implements it. nil records nothing.
+type FailedLog interface {
+	RecordFailed(dl eventqueue.DeadLetter) error
+}
+
+// DeadLetterFor builds the failed record for a dispatch of evt to role that ended
+// failed with err at instant at, attempt being the 1-based attempt that ended it.
+// The class is the router's transient class, or deterministic for any other
+// failure; the reason is deterministic for a deterministic class, else
+// window-closed when the event had expired at the failure instant (the queue's own
+// Expired test, so equality counts), else retries-spent.
+func DeadLetterFor(evt eventqueue.Event, role string, err error, attempt int, at time.Time) eventqueue.DeadLetter {
+	class, transientFailure := classifyTransient(err)
+	reason := eventqueue.DeadReasonDeterministic
+	if !transientFailure {
+		class = eventqueue.ClassDeterministic
+	} else if !evt.ExpiresAt.IsZero() && evt.Expired(at) {
+		reason = eventqueue.DeadReasonWindowClosed
+	} else {
+		reason = eventqueue.DeadReasonRetriesSpent
+	}
+	return eventqueue.DeadLetter{EventID: evt.ID, Role: role, Class: class, Attempts: attempt, Reason: reason, At: at.UTC().Truncate(time.Second)}
 }

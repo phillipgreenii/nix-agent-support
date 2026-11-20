@@ -27,6 +27,11 @@ const (
 	// dropped with the event on eviction and by compaction. An older binary
 	// ignores it.
 	opRetry opKind = "retry"
+	// opFailed is written when a dispatch ends terminally failed with no re-run
+	// (deterministic failure, retries spent, or window closed): one dead-letter
+	// record per (event, role). It is kept while the event is held and dropped
+	// with it on eviction and by compaction. An older binary ignores it.
+	opFailed opKind = "failed"
 	// The three legacy record kinds of the removed gate mechanism: a replay
 	// ignores them and compaction drops them (reporting an active gate once).
 	opGateSet     opKind = "gate_set"
@@ -100,6 +105,11 @@ type Record struct {
 	// Retry fields (opRetry only): the number of re-runs scheduled so far for
 	// (EventID, ListenerID).
 	RetryCount int `json:"retryCount,omitempty"`
+	// Failed fields (opFailed only): the role is ListenerID, the failure instant is
+	// At and the reason is Reason (the field the evict record also uses); Class and
+	// Attempts are these.
+	Class    string `json:"class,omitempty"`
+	Attempts int    `json:"attempts,omitempty"`
 	// Evict fields. At is, on an evict record, the instant the event left the queue,
 	// and Reason why: EvictReason* (bead pg2-n7da9). Both absent on a record written
 	// by an older binary.

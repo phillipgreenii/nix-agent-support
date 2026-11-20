@@ -11,7 +11,7 @@ import (
 )
 
 // usageLine is the short synopsis printed to stderr on a usage error.
-const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] [--shutdown-deadline <dur>] | run-until-idle [--only <selector>]... [--disable <selector>]... [--shutdown-deadline <dur>] | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check [--offline]) | doctor [--socket <path>] [--token <tok>] | doctor --clauses | explain <role> [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
+const usageLine = "usage: pg-router [--version | --help] [run [--only <selector>]... [--disable <selector>]... [--metrics-addr <host:port>] [--shutdown-deadline <dur>] | run-until-idle [--only <selector>]... [--disable <selector>]... [--shutdown-deadline <dur>] | run-query [--json] query:<name> | run-role [--json] <role> <json> | config (--print-defaults | --show [--json] | check [--offline]) | doctor [--socket <path>] [--token <tok>] | doctor --clauses | explain <role> [--socket <path>] [--token <tok>] | push-inject [--json] [--socket <path>] [--token <tok>] <json> | pause [--for <dur>] [--owner <who>] [--socket <path>] [--token <tok>] | resume [--all] [--by <who>] [--socket <path>] [--token <tok>] | level (list [--json] | set <resource> <LEVEL> (--for <dur> | --until-cleared) [--owner <who>] [--json] | clear (<resource> | --all) [--by <who>] | refresh [<resource>...] [--json]) [--socket <path>] [--token <tok>] | log compact [--dry-run] [--json] [--socket <path>] [--token <tok>] | dead-letters [--json] | status [--json] [--socket <path>] [--token <tok>] | tui [--socket <path>] [--token <tok>] | ingest-event [--socket <path>] [--token <tok>] | self-status [--socket <path>] [--token <tok>]]"
 
 // helpText is the full help printed to stdout for --help/help.
 const helpText = usageLine + `
@@ -155,6 +155,12 @@ Subcommands:
                           real run on a log that is already live state only rewrites nothing. Human
                           summary by default, --json for the cli.log-compact-reply object. Exit 0 ok
                           (including "nothing to do"), 1 failure, 2 usage, 3 no running core, 9 refused (the log is locked).
+  dead-letters [--json]   list the failed records (dispatches that ended terminally failed with no
+                          re-run) still held in <LogDir>/queue.jsonl. Read-only: it takes no log lock and
+                          ignores a torn last line, so it works with the daemon running or not. One line
+                          per record by default; --json prints {"records":[{eventId, role, class,
+                          attempts, reason, at}]}, an empty array when none are held or the log does not
+                          exist. Exit 0 ok, 2 usage, 3 the log is unreadable.
   version                 print the version and exit
   help                    print this help and exit
 
@@ -268,6 +274,7 @@ const (
 	routeResume                        // operator: resume the router, or every operator override with --all (.rest)
 	routeExplain                       // operator: why a role is or is not paused by levels (.rest)
 	routeDoctor                        // operator: config check plus quick probes of the state dir, socket, gates, roles and handlers (.rest)
+	routeDeadLetters                   // operator: dead-letters [--json], the failed records the queue log holds (.rest)
 	routeLog                           // operator: log compact [--dry-run] on the queue log, via the running core or offline (.rest)
 )
 
@@ -396,6 +403,10 @@ func route(argv []string) routeResult {
 		// Its own --socket/--token flags, parsed in its own handler, with the same
 		// usage exit code every operator subcommand uses.
 		return routeResult{kind: routeDoctor, rest: args[1:]}
+	case "dead-letters":
+		// Reads the queue log file; parses its own flags in its own handler, with the
+		// same usage exit code every operator subcommand uses.
+		return routeResult{kind: routeDeadLetters, rest: args[1:]}
 	case "log":
 		// Bead pg2-maxn1: log compact parses its own flags in its own handler, with
 		// the same usage exit code every operator subcommand uses.
