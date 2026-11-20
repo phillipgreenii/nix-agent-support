@@ -11455,11 +11455,17 @@
                   darwinPprofOff.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables
                   == {
                     GOFLAGS = "-p=3";
+                    GOTOOLCHAIN = "local";
                   };
                 # Go build parallelism bound for the agent sessions the daemon starts.
                 assert
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables.GOFLAGS
                   == "-p=3";
+                # No downloaded toolchain for those sessions: a too-old `go` fails
+                # instead of adding another compiler to the shared GOCACHE.
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables.GOTOOLCHAIN
+                  == "local";
                 assert darwinWithoutDaemon.phillipgreenii.system.launchdServices.userAgents == { };
                 # alertRuleFiles (pg2-02n5o): registered whenever obs.enable,
                 # independent of daemonEnable -- both darwinWithDaemon and
@@ -14260,7 +14266,9 @@
 
               # test-go-env-eval: home/default.nix imports the go-env module and, run
               # against the real home-manager programs.go module, it renders
-              # GOFLAGS=-p=3 into the Go env file (tests/go-env-eval.nix).
+              # GOFLAGS=-p=3 and GOTOOLCHAIN=local into the Go env file; custom
+              # values render, toolchain = null and enable = false leave
+              # GOTOOLCHAIN out (tests/go-env-eval.nix).
               test-go-env-eval =
                 let
                   r = import ./tests/go-env-eval.nix {

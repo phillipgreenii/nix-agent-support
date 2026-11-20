@@ -158,10 +158,18 @@ assert lib.assertMsg (exitTimeOutSeconds <= 60)
           # for a session whose HOME or Go env file is not the usual one. An
           # environment GOFLAGS replaces the file value, so this stays the
           # same value as the file's.
+          #
+          # GOTOOLCHAIN=local is the same insurance for the go-env module's
+          # toolchain setting: a session's `go` older than a module's go
+          # directive fails instead of downloading another toolchain, whose
+          # compiler would keep its own copy of the shared GOCACHE. A
+          # non-empty environment value beats the file, so a tool that sets
+          # GOTOOLCHAIN in its own environment still overrides this.
           EnvironmentVariables =
             emitterEnv
             // {
               GOFLAGS = "-p=3";
+              GOTOOLCHAIN = "local";
             }
             // lib.optionalAttrs daemonCfg.pprof.enable {
               PG_ROUTER_PPROF_ADDR = "${stateHome}/pg-router/pprof.sock";

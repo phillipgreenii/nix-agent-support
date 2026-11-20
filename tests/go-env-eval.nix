@@ -1,6 +1,8 @@
 # Eval-level test of the go-env home-manager module against the REAL home-manager
 # `programs.go` module: home/default.nix must import it, and enabled it must render
-# GOFLAGS=-p=3 into the Go env file that `go env GOENV` names on the host platform.
+# GOFLAGS=-p=3 and GOTOOLCHAIN=local into the Go env file that `go env GOENV` names
+# on the host platform. A custom toolchain value renders as given; toolchain = null
+# and enable = false each leave GOTOOLCHAIN out (enable = false drops GOFLAGS too).
 # Consumed by checks.<system>.test-go-env-eval in flake.nix.
 #
 # Returns { failures; caseCount; }.
@@ -66,6 +68,8 @@ let
   on = evalWith { };
   three = evalWith { phillipgreenii.programs.go-env.parallelism = 5; };
   off = evalWith { phillipgreenii.programs.go-env.enable = false; };
+  customToolchain = evalWith { phillipgreenii.programs.go-env.toolchain = "go1.26.10"; };
+  noToolchain = evalWith { phillipgreenii.programs.go-env.toolchain = null; };
 
   cases = [
     {
@@ -83,6 +87,24 @@ let
     {
       name = "disabled: no GOFLAGS in the Go env file";
       ok = !(lib.hasInfix "GOFLAGS" (fileText off));
+    }
+    {
+      name = "enabled by default: the Go env file contains GOTOOLCHAIN=local";
+      ok = lib.hasInfix "GOTOOLCHAIN=local\n" (fileText on);
+    }
+    {
+      name = "toolchain option changes the value";
+      ok = lib.hasInfix "GOTOOLCHAIN=go1.26.10\n" (fileText customToolchain);
+    }
+    {
+      name = "toolchain = null: no GOTOOLCHAIN in the Go env file, GOFLAGS kept";
+      ok =
+        !(lib.hasInfix "GOTOOLCHAIN" (fileText noToolchain))
+        && lib.hasInfix "GOFLAGS=-p=3\n" (fileText noToolchain);
+    }
+    {
+      name = "disabled: no GOTOOLCHAIN in the Go env file";
+      ok = !(lib.hasInfix "GOTOOLCHAIN" (fileText off));
     }
   ];
 in
