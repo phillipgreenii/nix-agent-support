@@ -7200,7 +7200,6 @@
                     ccpool = roleBase // extra;
                     spec = {
                       inherit (baseline) wrap keep;
-                      strictEnv = true;
                       exec = [ "${pkgs.coreutils}/bin/true" ];
                     };
                   };
@@ -12475,7 +12474,7 @@
 
                   # `wrapped` (own pool, default exec, strict, a sessionEnv extra and
                   # a duplicated keep name), `plain` (own pool, no spec) and a command
-                  # role with strictBaseEnv: no assertion may fire.
+                  # command role: no assertion may fire.
                   wrapOwnPool = evalHM {
                     enable = true;
                     roles = {
@@ -12490,7 +12489,6 @@
                         };
                         sessionEnv.EXTRA_VAR = "extra";
                         spec = {
-                          strictEnv = true;
                           keep = [
                             "MY_KEEP"
                             "BEADS_ACTOR"
@@ -12510,7 +12508,6 @@
                       cmd = {
                         handler = commandHandler;
                         command.argv = [ "cmd-bin" ];
-                        strictBaseEnv = true;
                       };
                       # A command role with a pg-wrap spec (bead pg2-8puhw).
                       cmd-wrapped = {
@@ -12594,7 +12591,6 @@
                       ccpool = wrapRoleBase;
                       spec = {
                         inherit (k31Baseline) wrap keep;
-                        strictEnv = true;
                         exec = [ "${pkgs.coreutils}/bin/true" ];
                       };
                     };
@@ -12778,7 +12774,6 @@
                     np-cmd = {
                       handler = npCommandAdapter;
                       command = npCommandSettings;
-                      strictBaseEnv = true;
                     };
                   };
                   npBinds = {
@@ -13243,8 +13238,9 @@
                         [ "$(jq -r .sessionEnv.EXTRA_VAR "$wrapOwnPoolJson/wrapped.json")" = extra ]
                         jq -e 'has("strictBaseEnv") | not' "$wrapOwnPoolJson/wrapped.json" >/dev/null
                         [ "$(jq -c .sessionEnv "$wrapOwnPoolJson/plain.json")" = '{}' ]
-                        # A command role: strictBaseEnv renders, sessionEnv and spec never do.
-                        [ "$(jq -r .strictBaseEnv "$wrapOwnPoolJson/cmd.json")" = true ]
+                        # A command role: no strictBaseEnv (the base env is the only mode),
+                        # and sessionEnv and spec never render.
+                        jq -e 'has("strictBaseEnv") | not' "$wrapOwnPoolJson/cmd.json" >/dev/null
                         jq -e 'has("sessionEnv") | not' "$wrapOwnPoolJson/cmd.json" >/dev/null
                         jq -e 'has("spec") | not' "$wrapOwnPoolJson/cmd.json" >/dev/null
                         # A command role WITHOUT command.spec keeps its argv verbatim.
@@ -13252,12 +13248,12 @@
                         # A command role WITH command.spec (bead pg2-8puhw): the argv is
                         # pg-wrap run --spec <commandSpecFiles entry> -- <argv>, the role
                         # file carries no spec or sessionEnv key, and the spec has an empty
-                        # exec, the wrap entry, the keep names and strict_env = false.
+                        # exec, the wrap entry, the keep names and strict_env = true.
                         [ "$(jq -c .command.argv "$wrapOwnPoolJson/cmd-wrapped.json")" = "$(jq -cn --arg b "$wrapPgWrapBin" --arg s "$wrapOwnPoolCmdSpec" '[$b,"run","--spec",$s,"--","cmd-bin","--flag"]')" ]
                         jq -e 'has("sessionEnv") or has("spec") | not' "$wrapOwnPoolJson/cmd-wrapped.json" >/dev/null
                         cmd_spec_json="$(toml2json "$wrapOwnPoolCmdSpec")"
                         [ "$(jq -c .exec <<<"$cmd_spec_json")" = '[]' ]
-                        [ "$(jq -r .strict_env <<<"$cmd_spec_json")" = false ]
+                        [ "$(jq -r .strict_env <<<"$cmd_spec_json")" = true ]
                         [ "$(jq -c .wrap <<<"$cmd_spec_json")" = "[[\"$wrapFakePrefix\",\"CMD_VAR=cmd-value\"]]" ]
                         jq -e '.keep | index("CMD_KEEP") != null and index("BEADS_ACTOR") != null' <<<"$cmd_spec_json" >/dev/null
                         # The rendered spec: version, strict_env, default exec = claude,
@@ -13277,10 +13273,10 @@
                         jq -e '.keep | index("CLAUDECODE") == null and index("CLAUDE_CODE_CHILD_SESSION") == null' \
                           <<<"$spec_json" >/dev/null
                         # A mixed string/list wrap survives rendering and strict_env
-                        # defaults to false.
+                        # is true (the only mode).
                         spec_a_json="$(toml2json "$wrapHandlerPoolSpecA")"
                         [ "$(jq -c .wrap <<<"$spec_a_json")" = "[\"$wrapFakePrefix --flag\",[\"$wrapFakeOther\",\"arg one\"]]" ]
-                        [ "$(jq -r .strict_env <<<"$spec_a_json")" = false ]
+                        [ "$(jq -r .strict_env <<<"$spec_a_json")" = true ]
                         [ "$(jq -r .sessionEnv.PG_WRAP_SPEC "$wrapHandlerPoolJson/triage-a.json")" = "$wrapHandlerPoolSpecA" ]
                         # Pools: claude.bin = pg-wrap-exec exactly where a spec role runs
                         # (own pool, handler-wide pool); the user's other settings still
@@ -13642,7 +13638,6 @@
                         "K20_SPEC=${tag}"
                       ]
                     ];
-                    strictEnv = true;
                     exec = [ "${k20Probe}" ];
                   };
                   fixture = evalHM {
@@ -13670,7 +13665,6 @@
                       k20-real = k20Role "real" // {
                         spec = {
                           inherit (claudeBaseline) wrap keep;
-                          strictEnv = true;
                         };
                       };
                       k17-live = {
@@ -13697,7 +13691,6 @@
                           };
                         };
                         spec = {
-                          strictEnv = false;
                           wrap = [ ];
                           keep = [ ];
                           exec = [ "${probe}" ];

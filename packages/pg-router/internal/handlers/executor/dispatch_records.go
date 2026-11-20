@@ -160,8 +160,8 @@ func sessionEnvField(env map[string]string) map[string]string {
 
 // emitCommandStart writes the dispatch_start record of an accepted command-role
 // dispatch, BEFORE its payload starts (so a payload that hangs or is killed
-// still has one): the rendered argv, whether the strict switch is on and the base-env
-// variable NAMES (nil when the switch is off). It never writes an env value.
+// still has one): the rendered argv and the base-env
+// variable NAMES. It never writes an env value.
 func (r *commandRun) emitCommandStart(d DispatchContext, argv, baseNames []string) {
 	if r.deps.Log == nil {
 		return
@@ -170,7 +170,7 @@ func (r *commandRun) emitCommandStart(d DispatchContext, argv, baseNames []strin
 	sort.Strings(names)
 	fields := map[string]any{
 		"role": d.Role.Name, "item_id": d.Item.ID, "item_type": d.Item.Type,
-		"argv": argv, "strict_base_env": d.Role.StrictBaseEnv, "base_env_names": names,
+		"argv": argv, "base_env_names": names,
 	}
 	AddCorrelationIDs(fields, d.EventID, d.DispatchID)
 	_ = r.deps.Log.Emit("info", DispatchStartKind, "dispatch accepted: command payload starting", fields)

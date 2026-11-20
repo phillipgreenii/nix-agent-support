@@ -1146,10 +1146,10 @@ changes a core gate or `INV-LIFE-2`.
     decision. A prefix match (every `BEADS_` variable) is forbidden: it would keep names that are not
     markers. A payload that needs more names it in its own command, or in the spec of the prefix tool
     its command starts with.
-  - **The switch.** A command-backed role's `strictBaseEnv` (a boolean, **off by default**, the
-    strict-env switch of `INV-ENV-2`) is carried in the role's own `[role.config]` table. While it is off the
-    payload keeps the ambient environment it has, with the item context added; once on, it sees only
-    the keep-list. The handler's own work (the origin probe, the review prefetch) keeps its ambient
+  - **No switch.** The base environment is the only mode for a command-backed role: there is no
+    `strictBaseEnv` setting (the key is an unknown key in the role's `[role.config]` table), and the
+    payload sees only the keep-list plus the item context, so a variable that exists only in the
+    handler's environment never reaches it. The handler's own work (the origin probe, the review prefetch) keeps its ambient
     environment, because that work still needs it.
   - **A ccpool-backed session is not started by this module.** The terminal multiplexer starts the
     agent with its own environment plus what `ccpool new` passes, so the handler cannot narrow it. A
@@ -1162,8 +1162,8 @@ changes a core gate or `INV-LIFE-2`.
     cancelling only the direct child would orphan a payload behind a prefix tool that does not
     replace itself (`INV-ENV-4`).
   - **A caveat for operators.** The core's `run-role` smoke command runs under the operator's own
-    shell environment, not the daemon's, so while a role's `strictBaseEnv` is off a `run-role` is not
-    representative of the payload's environment.
+    shell environment, not the daemon's; the payload's environment is the base environment either
+    way, so a `run-role` is representative of it.
 
 - **`INV-CCH-33`** <!-- uuid: e2cb7026-8b23-4812-858d-76969c96cbc5 --> — a ccpool-backed role MAY
   carry `sessionEnv`, and the handler MUST pass it through to the session without interpreting it.
@@ -1222,7 +1222,7 @@ changes a core gate or `INV-LIFE-2`.
   based upon the result"): `dispatch_start` when the payload starts, then exactly one outcome record.
   - **`dispatch_start`.** For every accepted dispatch the handler MUST write one `dispatch_start`
     event-log record carrying the role, the item's id and type, and, for a command-backed role, the
-    argv as rendered, whether `strictBaseEnv` is on, and the **names** of the base-environment
+    argv as rendered, and the **names** of the base-environment
     variables the payload received (never their values, and never the item-context values); for a
     ccpool-backed role, the route the session was launched by, the model and effort a launched
     session started with (`INV-CCH-40`) and the `sessionEnv` entries, values included, since they
@@ -1256,8 +1256,7 @@ changes a core gate or `INV-LIFE-2`.
   - **The fields as implemented.** All go to the handler's event log, `events.jsonl` in the handler
     state directory, as one JSON object per line with the log's own `time`, `level`, `kind` and `msg`.
     `dispatch_start` adds `role`, `item_id` and `item_type`, then for a command-backed role `argv`
-    (as rendered), `strict_base_env` (boolean) and `base_env_names` (sorted; empty when the switch is
-    off), and for a ccpool-backed role `route`, `session` (the session's external id) and
+    (as rendered) and `base_env_names` (sorted), and for a ccpool-backed role `route`, `session` (the session's external id) and
     `session_env` (the role's entries, values included). `route` is `launched` when this dispatch
     launched a fresh session through `ccpool new` and it returned ready, and `adopted` when it took
     over a live session of the same event's turn (`INV-CCH-30`): ccpool does not report its own

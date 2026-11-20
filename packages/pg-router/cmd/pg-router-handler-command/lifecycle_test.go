@@ -14,7 +14,7 @@ func TestLifecycle_AreNoOpOkReplies(t *testing.T) {
 	for _, name := range []string{"postStartup", "preShutdown"} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			req := request(t, nil, "cmdrole", cmdConfig(false, "/bin/sh", "-c", ":"), true)
+			req := request(t, nil, "cmdrole", cmdConfig("/bin/sh", "-c", ":"), true)
 			if exit := serveLifecycle(name, strings.NewReader(req), &out); exit != conformance.ExitOK {
 				t.Fatalf("exit = %d; %s", exit, out.String())
 			}

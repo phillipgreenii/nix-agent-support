@@ -15,8 +15,8 @@ import (
 const roleConfigPath = "role.config"
 
 // configKeys are the only top-level keys of a ccpool role's [role.config]: the
-// ccpool-role fields, names unchanged. name, type, survivesShutdown,
-// strictBaseEnv and command are not config (the role's name is the request's
+// ccpool-role fields, names unchanged. name, type, survivesShutdown
+// and command are not config (the role's name is the request's
 // role.name, survives_shutdown is a core key, and the others belong to the
 // command adapter or to no adapter); each is an unknown key here. The match is
 // case-insensitive, as encoding/json's is.

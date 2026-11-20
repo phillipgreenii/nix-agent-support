@@ -66,7 +66,7 @@ and `run-role` reach a role's handler through the one per-role resolution that t
 - `config --show` (text and `--json`) lists, for each role, which path it is on and the command it
   resolves to (its `handler`, or the shared command on the earlier path), its
   `survives_shutdown`, and the `config` table exactly as it would be sent on stdin. It also prints
-  each `[[query]]`'s command and its strict switch (`strict_base_env`); each ROLE's command follows
+  each `[[query]]`'s command; each ROLE's command follows
   with the handler split (S1).
 - `config --print-defaults` prints the schema with the three keys documented and an example role that
   names a `handler`, and prints no per-kind configuration block.

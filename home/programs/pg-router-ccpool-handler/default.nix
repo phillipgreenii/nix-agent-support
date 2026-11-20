@@ -74,7 +74,7 @@ let
   # claudeBaseline (design ruling 20, INTERIM until flox environments exist for
   # the claude roles; bead pg2-12gr4.8.31): the pg-wrap spec `wrap` entries and
   # `keep` names covering everything claude needs to RUN in a pool session, for
-  # `roles.<name>.spec = { inherit (cfg.claudeBaseline) wrap keep; strictEnv = ..; }`.
+  # `roles.<name>.spec = { inherit (cfg.claudeBaseline) wrap keep; }`.
   # `wrap` is ONE entry (an argv array: env, then PATH=<pathDirs>, then one
   # NAME=value per OTel variable), so a consumer may append its own entries after
   # it. Its PATH holds claude, every bare command the enabled plugins' hooks
@@ -209,8 +209,11 @@ let
     };
   claudeBaseline = mkClaudeBaseline { };
 
-  # renderWrapSpec: `{ wrap, keep, strictEnv, exec } -> <spec file derivation>`,
-  # the pg-wrap spec as TOML (`schema_version = 1` plus the four keys). `keep`
+  # renderWrapSpec: `{ wrap, keep, exec } -> <spec file derivation>`, the
+  # pg-wrap spec as TOML (`schema_version = 1` plus the four keys). Strict base
+  # env is the only mode, so the spec ALWAYS carries `strict_env = true`: pg-wrap
+  # defaults the key to false, so omitting it would run the chain on the
+  # inherited env. `keep`
   # is the caller's own extra names; the ten module-owned names are always
   # added and the result is de-duplicated, so a caller (a `claudeBaseline`
   # helper, a command role) may list some of them again harmlessly. Exposed as
@@ -219,13 +222,12 @@ let
     {
       wrap ? [ ],
       keep ? [ ],
-      strictEnv ? false,
       exec,
     }:
     tomlFormat.generate "pg-wrap-spec.toml" {
       schema_version = 1;
       inherit wrap exec;
-      strict_env = strictEnv;
+      strict_env = true;
       keep = lib.unique (wrapSpecOwnedKeep ++ keep);
     };
 
@@ -267,7 +269,7 @@ let
   specFiles = lib.mapAttrs (
     _name: roleCfg:
     renderWrapSpec {
-      inherit (roleCfg.spec) wrap strictEnv exec;
+      inherit (roleCfg.spec) wrap exec;
       keep = roleCfg.spec.keep ++ lib.attrNames (removeAttrs roleCfg.sessionEnv [ "PG_WRAP_SPEC" ]);
     }
   ) specRoles;
@@ -285,7 +287,7 @@ let
   commandSpecFiles = lib.mapAttrs (
     _name: roleCfg:
     renderWrapSpec {
-      inherit (roleCfg.command.spec) wrap keep strictEnv;
+      inherit (roleCfg.command.spec) wrap keep;
       exec = [ ];
     }
   ) commandSpecRoles;
@@ -777,9 +779,9 @@ let
       command = {
         argv = commandArgvFor name roleCfg;
       };
-      # strictBaseEnv (design ruling 30): command roles only; a ccpool
-      # role's minimal env comes from its spec's `strict_env`.
-      inherit (roleCfg) strictBaseEnv;
+      # A command role's payload always runs under the minimal base env (the
+      # handler's), and a ccpool role's minimal env comes from its spec's
+      # `strict_env`: there is no per-role switch.
     };
 
   # checkAdapterRolesScript (pg2-12gr4.10.10): `check-adapter-roles <adapter>
@@ -1585,17 +1587,9 @@ let
                       type = lib.types.listOf lib.types.str;
                       default = [ ];
                       description = ''
-                        Extra variable names `strictEnv` keeps, on top of the ten this
-                        module always adds.
-                      '';
-                    };
-                    strictEnv = lib.mkOption {
-                      type = lib.types.bool;
-                      default = false;
-                      description = ''
-                        The spec's `strict_env`: start the wrap chain from pg-wrap's minimal
-                        environment. Independent of the role's `strictBaseEnv`, which the
-                        handler applies before pg-wrap starts; a family's rollout flips both.
+                        Extra variable names the minimal environment keeps, on top of
+                        the ten this module always adds. The rendered spec always
+                        starts the wrap chain from pg-wrap's minimal environment.
                       '';
                     };
                   };
@@ -1619,17 +1613,6 @@ let
           `handler` names the command adapter (`roleFile.Command`).
         '';
       };
-      strictBaseEnv = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = ''
-          Rendered as the `strictBaseEnv` key of the role's `[role.config]`
-          (`roleFile.StrictBaseEnv`): start a COMMAND role's argv under the minimal
-          base environment. Rendered only into a command role's config; the handler
-          ignores the key on a ccpool role, whose minimal environment comes from its
-          `spec` (`strictEnv`) instead, so a ccpool role's config never carries it.
-        '';
-      };
       sessionEnv = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
         default = { };
@@ -1644,7 +1627,7 @@ let
           by this module. Setting `sessionEnv.PG_WRAP_SPEC` yourself on a role that has
           a `spec` fails evaluation (the module owns that value).
 
-          Choice (the design is silent): under a spec's `strict_env`, every other
+          Choice (the design is silent): under a spec's `strict_env = true`, every other
           `sessionEnv` key is added to that spec's `keep`, because an operator who
           injects a variable into the role's session means it to reach claude;
           dropping it silently would defeat the option.
@@ -1672,15 +1655,6 @@ let
                   Extra variable names the minimal environment keeps, on top of the
                   ten this module always adds (the participant markers, the item
                   context and ccpool's four injected markers).
-                '';
-              };
-              strictEnv = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = ''
-                  The spec's `strict_env`: start the wrap chain from the minimal
-                  environment instead of the inherited one. A rollback switch,
-                  flipped per family by a later change.
                 '';
               };
               exec = lib.mkOption {
@@ -1845,7 +1819,7 @@ in
         type = lib.types.raw;
         readOnly = true;
         description = ''
-          Read-only function `{ wrap, keep, strictEnv, exec } -> <spec file
+          Read-only function `{ wrap, keep, exec } -> <spec file
           derivation>`: renders a pg-wrap spec (`schema_version = 1` plus the four
           keys) as TOML. The ten module-owned `keep` names are always added and the
           result is de-duplicated. Command-role specs reuse it.
@@ -1893,7 +1867,7 @@ in
         when that module is enabled, so its CETA_* settings reach the session's
         hooks; the prompts' tools including git and nix, the system directories, the OTel endpoint
         and protocol without OTEL_SERVICE_NAME). Use as `roles.<name>.spec = {
-        inherit (cfg.claudeBaseline) wrap keep; strictEnv = ...; }`. `wrap` is a
+        inherit (cfg.claudeBaseline) wrap keep; }`. `wrap` is a
         single env PATH=... entry (store directories, then the system directories
         /usr/bin:/bin:/usr/sbin:/sbin; it also pins BEADS_DOLT_AUTO_START=0 and
         BD_BACKUP_ENABLED=0), so a consumer may append its own entries after it;

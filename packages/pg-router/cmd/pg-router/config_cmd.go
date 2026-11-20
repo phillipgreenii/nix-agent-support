@@ -133,12 +133,11 @@ func renderConfigShow(w io.Writer, cfg config.Config) {
 			emits = s.Query.Emits()
 		}
 		_, _ = fmt.Fprintf(w, "  - %-14s emits=%v%s\n", s.Name, emits, stub)
-		// A command query shows its command and its strict switch. A role's
+		// A command query shows its command. A role's
 		// command is shown with the role, in the roles block above.
 		if s.Query != nil {
-			if cmdline, strict, ok := queryCommand(s.Query); ok {
+			if cmdline, ok := queryCommand(s.Query); ok {
 				_, _ = fmt.Fprintf(w, "      command: %s\n", cmdline)
-				_, _ = fmt.Fprintf(w, "      strict_base_env: %t\n", strict)
 			}
 		}
 	}
@@ -271,8 +270,8 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		}
 		cq := configShowQuery{Name: s.Name, Emits: emits, Stub: stub}
 		if s.Query != nil {
-			if cmdline, strict, ok := queryCommand(s.Query); ok {
-				cq.Command, cq.StrictBaseEnv = cmdline, &strict
+			if cmdline, ok := queryCommand(s.Query); ok {
+				cq.Command = cmdline
 			}
 		}
 		out.Queries = append(out.Queries, cq)
@@ -382,19 +381,16 @@ type configShowQuery struct {
 	// Command is a command query's command line (its argv, shell-quoted, as
 	// config --show prints it); omitted for a query with no command (the timer).
 	Command string `json:"command,omitempty"`
-	// StrictBaseEnv is a command query's strict_base_env switch (present, true
-	// or false, for every command query); omitted for a query with no command.
-	StrictBaseEnv *bool `json:"strictBaseEnv,omitempty"`
 }
 
 // queryCommand renders a command query's command line, shell-quoted for
 // display. ok is false for a query with no command.
-func queryCommand(q query.Query) (line string, strict bool, ok bool) {
-	argv, strict, ok := query.CommandOf(q)
+func queryCommand(q query.Query) (line string, ok bool) {
+	argv, ok := query.CommandOf(q)
 	if !ok {
-		return "", false, false
+		return "", false
 	}
-	return displayArgv(argv), strict, true
+	return displayArgv(argv), true
 }
 
 // displayArgv renders argv as one shell-quoted, human-readable line. Words made

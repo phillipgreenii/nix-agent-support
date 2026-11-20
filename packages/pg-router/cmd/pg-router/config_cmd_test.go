@@ -136,16 +136,15 @@ func TestRenderConfigShow_pointsAtStatusInsteadOfGateFiles(t *testing.T) {
 	}
 }
 
-// config --show and --show --json print each [[query]]'s command and strict
-// switch, and nothing of the kind for a role.
-func TestRenderConfigShow_printsEachQuerysCommandAndStrictSwitch(t *testing.T) {
+// config --show and --show --json print each [[query]]'s command, and nothing of
+// the kind for a role. No strict switch is shown: the base env is the only mode.
+func TestRenderConfigShow_printsEachQuerysCommand(t *testing.T) {
 	cfg := config.Default()
 	cfg.Queries = query.SourceSet{
 		{Name: "strict", Query: query.CommandQuery{
-			Meta:          query.Meta{EmitTypes: []string{"e"}},
-			Argv:          []string{"/opt/producer", "--flag", "two words"},
-			Format:        query.FormatJSONL,
-			StrictBaseEnv: true,
+			Meta:   query.Meta{EmitTypes: []string{"e"}},
+			Argv:   []string{"/opt/producer", "--flag", "two words"},
+			Format: query.FormatJSONL,
 		}},
 		{Name: "plain", Query: query.CommandQuery{Meta: query.Meta{EmitTypes: []string{"e"}}, Argv: []string{"/opt/plain"}, Format: query.FormatJSONL}},
 		{Name: "tick", Query: query.TimerQuery{Meta: query.Meta{EmitTypes: []string{"t"}}}},
@@ -158,8 +157,8 @@ func TestRenderConfigShow_printsEachQuerysCommandAndStrictSwitch(t *testing.T) {
 	if !strings.Contains(out, "command: "+wantLine) {
 		t.Errorf("text form lacks the command %q:\n%s", wantLine, out)
 	}
-	if !strings.Contains(out, "strict_base_env: true") || !strings.Contains(out, "strict_base_env: false") {
-		t.Errorf("text form lacks the strict_base_env switch for both command queries:\n%s", out)
+	if strings.Contains(out, "strict_base_env") {
+		t.Errorf("text form still shows the removed strict_base_env switch:\n%s", out)
 	}
 	if !strings.Contains(out, "command: /opt/plain") {
 		t.Errorf("a plain command query still prints its command:\n%s", out)
@@ -177,13 +176,13 @@ func TestRenderConfigShow_printsEachQuerysCommandAndStrictSwitch(t *testing.T) {
 	if len(got.Queries) != 3 {
 		t.Fatalf("queries = %d, want 3", len(got.Queries))
 	}
-	if got.Queries[0].Command != wantLine || got.Queries[0].StrictBaseEnv == nil || !*got.Queries[0].StrictBaseEnv {
-		t.Errorf("strict query json = %+v, want command %q and strictBaseEnv true", got.Queries[0], wantLine)
+	if got.Queries[0].Command != wantLine {
+		t.Errorf("first query json = %+v, want command %q", got.Queries[0], wantLine)
 	}
-	if got.Queries[1].Command != "/opt/plain" || got.Queries[1].StrictBaseEnv == nil || *got.Queries[1].StrictBaseEnv {
-		t.Errorf("plain query json = %+v, want strictBaseEnv false", got.Queries[1])
+	if got.Queries[1].Command != "/opt/plain" {
+		t.Errorf("plain query json = %+v, want command /opt/plain", got.Queries[1])
 	}
-	if got.Queries[2].Command != "" || got.Queries[2].StrictBaseEnv != nil {
+	if got.Queries[2].Command != "" {
 		t.Errorf("timer query json carries a command: %+v", got.Queries[2])
 	}
 	var raw map[string]any

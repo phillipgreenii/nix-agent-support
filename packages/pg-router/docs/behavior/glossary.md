@@ -153,8 +153,7 @@ metrics backend, …) define their own terms in their own behavior sets.
   role's adapter in the payload of every request and never reads (`INV-ROLE-2`).
 - **Base environment** — the minimal, documented set of environment variables (system variables,
   terminal variables and the markers the participant injects) that the processes pg-router starts
-  itself, a query's producer and a command role's payload, start from while their strict-env switch
-  is on; the concrete names live in each adapter's own docs (`INV-ENV-2`).
+  itself, a query's producer and a command role's payload, always start from; the concrete names live in each adapter's own docs (`INV-ENV-2`).
 - **Item context** — the data of the item a role is dispatched, which the participant gives the
   payload through the templated elements of its argv and the markers it injects (`INV-ENV-2`).
 - **Monitoring sink** — pulls or pushes a declared subset of the metric catalog.

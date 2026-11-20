@@ -87,12 +87,12 @@ echo "$LOG"
 
 Every record has `time`, `level`, `kind` and `msg`. The kinds that matter here:
 
-| `kind`             | Written                                                     | What it tells you                                                                                                                                                                                                                      |
-| ------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dispatch_start`   | when the payload STARTS, for command and ccpool roles alike | ccpool role: `route` (`launched` or `adopted`), `session`, `session_env`, and for a `launched` route the `model` and `effort` it started with. Command role: the rendered `argv`, `strict_base_env` and `base_env_names` (names only). |
-| `dispatch_decline` | per pre-accept decline                                      | `role`, `item_id`, `reason`, `decline_kind` (`busy`, `fault` or `neutral`), `session_env`, the redacted `evidence` tail and `failure_signature`.                                                                                       |
-| `dispatch_result`  | when an accepted dispatch FAILED                            | `failure_signature` and `signature_evidence`; see `docs/runbooks/dispatched-session-failure-signatures.md`.                                                                                                                            |
-| `dispatch_end`     | when an accepted dispatch ended without failing             | `outcome`: `completed`, `unclaimed-end`, `peer-held`, `needs-input-stalled` or `interrupted`.                                                                                                                                          |
+| `kind`             | Written                                                     | What it tells you                                                                                                                                                                                                   |
+| ------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dispatch_start`   | when the payload STARTS, for command and ccpool roles alike | ccpool role: `route` (`launched` or `adopted`), `session`, `session_env`, and for a `launched` route the `model` and `effort` it started with. Command role: the rendered `argv` and `base_env_names` (names only). |
+| `dispatch_decline` | per pre-accept decline                                      | `role`, `item_id`, `reason`, `decline_kind` (`busy`, `fault` or `neutral`), `session_env`, the redacted `evidence` tail and `failure_signature`.                                                                    |
+| `dispatch_result`  | when an accepted dispatch FAILED                            | `failure_signature` and `signature_evidence`; see `docs/runbooks/dispatched-session-failure-signatures.md`.                                                                                                         |
+| `dispatch_end`     | when an accepted dispatch ended without failing             | `outcome`: `completed`, `unclaimed-end`, `peer-held`, `needs-input-stalled` or `interrupted`.                                                                                                                       |
 
 A command role's `dispatch_start` is written before its payload runs, so a payload that hangs or is
 killed still has one. A command role that exits `9` leaves a `dispatch_start` and then a
@@ -222,9 +222,9 @@ can still fail under the daemon (or the reverse). Judge a stalled role from the 
 
 Both rollbacks are nix changes: edit the module options and apply.
 
-- **Base env.** Revert the per-role and per-query strict switches, and each spec's `strict_env`. The
-  switches are `strict_base_env` on a `[[query]]`, `strictBaseEnv` on a handler role
-  (`roles.<name>.strictBaseEnv` in nix) and `strictEnv` on a role's spec (rendered as `strict_env`).
+- **Base env.** There is no switch to revert: strict base env is the only mode. A role or query that
+  needs a variable the base env lacks names it in its wrap/spec (`keep`) or, for a query, in
+  `env_allow`. To undo the removal itself, revert the change that deleted the switches.
 - **pg-wrap.** A role or query reverts by dropping its pg-wrap run prefix or its `PG_WRAP_SPEC`,
   together with its pool's `claude.bin` (back to `claude`). The two-way nix check keeps the pair
   consistent: a pool with `claude.bin` = `pg-wrap-exec` needs a spec, and a spec needs that pool, so

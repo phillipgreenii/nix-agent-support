@@ -27,10 +27,6 @@ type Role struct {
 	Name    string
 	CCPool  *CCPoolConfig  // set for a ccpool-adapter role
 	Command *CommandConfig // set for a command-adapter role
-	// StrictBaseEnv is the command-role strict switch ([role.config] key
-	// "strictBaseEnv", absent = false). Only the command executor reads it; a
-	// ccpool role ignores it at dispatch (its env comes from its spec).
-	StrictBaseEnv bool
 	// SessionEnv is a generic string-to-string map ([role.config] key
 	// "sessionEnv", absent = empty) the ccpool adapter passes through
 	// `ccpool new --env`, uninterpreted. A command role ignores it at dispatch.

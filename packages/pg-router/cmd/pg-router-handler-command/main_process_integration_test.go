@@ -39,9 +39,9 @@ func TestProcess_DispatchAndValidateOverTheRealWire(t *testing.T) {
 		req       string
 		wantExit  int
 	}{
-		{"dispatch ok", "dispatch", request(t, ev, "r", cmdConfig(false, "/bin/sh", "-c", ":"), true), conformance.ExitOK},
-		{"dispatch busy", "dispatch", request(t, ev, "r", cmdConfig(false, "/bin/sh", "-c", "exit 9"), true), conformance.ExitBusy},
-		{"validate", "validate", request(t, nil, "r", cmdConfig(false, "/bin/sh", "-c", ":"), true), conformance.ExitOK},
+		{"dispatch ok", "dispatch", request(t, ev, "r", cmdConfig("/bin/sh", "-c", ":"), true), conformance.ExitOK},
+		{"dispatch busy", "dispatch", request(t, ev, "r", cmdConfig("/bin/sh", "-c", "exit 9"), true), conformance.ExitBusy},
+		{"validate", "validate", request(t, nil, "r", cmdConfig("/bin/sh", "-c", ":"), true), conformance.ExitOK},
 		{"postStartup", "postStartup", request(t, nil, "r", nil, true), conformance.ExitOK},
 	}
 	for _, c := range cases {
@@ -69,7 +69,7 @@ func TestProcess_DispatchAndValidateOverTheRealWire(t *testing.T) {
 // orphan is left behind.
 func TestProcess_TermKillsThePayloadGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "sleep.pid")
-	cfg := cmdConfig(false, "/bin/sh", "-c", `sleep 600 & echo $! > "`+pidFile+`"; wait`)
+	cfg := cmdConfig("/bin/sh", "-c", `sleep 600 & echo $! > "`+pidFile+`"; wait`)
 	req := request(t, eventWith(map[string]any{"id": "b-1"}), "r", cfg, true)
 	cmd, out := adapter(t, []string{"dispatch"}, req)
 	if err := cmd.Start(); err != nil {

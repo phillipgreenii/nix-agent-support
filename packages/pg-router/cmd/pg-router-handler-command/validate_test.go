@@ -30,7 +30,7 @@ func problemsOf(t *testing.T, m map[string]any) []string {
 }
 
 func TestValidate_ValidConfigHasNoProblems(t *testing.T) {
-	exit, m := validate(t, request(t, nil, "cmdrole", cmdConfig(true, "/usr/bin/true", "{{.BeadID}}"), true))
+	exit, m := validate(t, request(t, nil, "cmdrole", cmdConfig("/usr/bin/true", "{{.BeadID}}"), true))
 	if exit != conformance.ExitOK {
 		t.Fatalf("exit = %d", exit)
 	}
@@ -46,23 +46,23 @@ func TestValidate_ValidConfigHasNoProblems(t *testing.T) {
 // in the one reply, exit 0, in a stable order (shape first, keys sorted).
 func TestValidate_ReportsEveryProblemInOneReply(t *testing.T) {
 	cfg := map[string]any{
-		"zeta":          1,
-		"alpha":         true,
-		"strictBaseEnv": "yes",
-		"command":       map[string]any{"argv": []any{"/usr/bin/true", 7}, "cwd": "/"},
+		"zeta":    1,
+		"alpha":   true,
+		"beta":    "yes",
+		"command": map[string]any{"argv": []any{"/usr/bin/true", 7}, "cwd": "/"},
 	}
 	exit, m := validate(t, request(t, nil, "cmdrole", cfg, true))
 	if exit != conformance.ExitOK {
 		t.Fatalf("a validate that finds problems must still exit 0, got %d", exit)
 	}
 	got := problemsOf(t, m)
-	// The walk visits keys in sorted order (alpha, command, strictBaseEnv,
-	// zeta), and inside command argv before cwd.
+	// The walk visits keys in sorted order (alpha, beta, command, zeta), and
+	// inside command argv before cwd.
 	want := []string{
 		`role.config: unknown key "alpha"`,
+		`role.config: unknown key "beta"`,
 		"role.config.command.argv[1]: want a string, got a number",
 		`role.config.command: unknown key "cwd"`,
-		"role.config.strictBaseEnv: want a boolean, got a string",
 		`role.config: unknown key "zeta"`,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -80,8 +80,8 @@ func TestValidate_LoadRulesAreReportedTogether(t *testing.T) {
 	}{
 		"no command":  {map[string]any{}, []string{"role.config.command: required"}},
 		"empty argv":  {map[string]any{"command": map[string]any{"argv": []any{}}}, []string{"role.config.command.argv: must hold at least one element"}},
-		"empty prog":  {cmdConfig(false, ""), []string{"role.config.command.argv[0]: the program to run is empty"}},
-		"two bad tpl": {cmdConfig(false, "/bin/echo", "{{.BeadID", "{{end}}"), []string{"role.config.command.argv[1]: template:", "role.config.command.argv[2]: template:"}},
+		"empty prog":  {cmdConfig(""), []string{"role.config.command.argv[0]: the program to run is empty"}},
+		"two bad tpl": {cmdConfig("/bin/echo", "{{.BeadID", "{{end}}"), []string{"role.config.command.argv[1]: template:", "role.config.command.argv[2]: template:"}},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

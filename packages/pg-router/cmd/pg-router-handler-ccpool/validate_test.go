@@ -76,7 +76,7 @@ func TestValidate_strictShape(t *testing.T) {
 		{"survivesShutdown is core's key, not config", ccpoolConfig(t, pool, `"survivesShutdown":true,`, ""), `unknown key "survivesShutdown"`},
 		{"name is the request's role.name", ccpoolConfig(t, pool, `"name":"r",`, ""), `unknown key "name"`},
 		{"type is not config", ccpoolConfig(t, pool, `"type":"ccpool",`, ""), `unknown key "type"`},
-		{"strictBaseEnv is a command-role key", ccpoolConfig(t, pool, `"strictBaseEnv":true,`, ""), `unknown key "strictBaseEnv"`},
+		{"strictBaseEnv is a removed key", ccpoolConfig(t, pool, `"strictBaseEnv":true,`, ""), `unknown key "strictBaseEnv"`},
 		{"command is the other adapter's key", ccpoolConfig(t, pool, `"command":{"argv":["x"]},`, ""), `unknown key "command"`},
 		{"unknown key inside ccpool", ccpoolConfig(t, pool, "", `,"actr":"x"`), `ccpool: unknown key "actr"`},
 		{"unknown key inside isolation", configFrom(t, strings.Replace(`{"ccpool":{"actor":"r","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p","isolation":{"Type":"none"}}}`, `{"Type":"none"}`, `{"Type":"none","Bogus":1}`, 1)), `ccpool.isolation: unknown key "Bogus"`},

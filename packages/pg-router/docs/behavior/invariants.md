@@ -395,13 +395,12 @@ here changes a level or `INV-LIFE-2`.
   itself, in its own command; pg-router adds nothing. The base applies to the processes pg-router
   starts itself, meaning **query producers (the core)** and **command-role payloads (the command
   adapter)**; the participant's **own** process, as distinct from the payload it starts, keeps its
-  ambient environment, because its own work still needs it. It is applied through a **strict-env
-  switch**, **off by default**; **while a switch is off the process inherits its parent's
-  environment**, as it does today.
+  ambient environment, because its own work still needs it. It is the **only mode**: there is no
+  switch, and a process pg-router starts never inherits its parent's environment.
 - **`INV-ENV-4`** <!-- uuid: 9b643f31-384c-41a5-a6c9-95382b0fa936 --> — **The processes pg-router
-  starts itself get the base environment when their switch is on, run in their own process group,
-  and exit 9 stays "busy".** A `[[query]]` carries **`strict_base_env`** (a boolean, **default
-  off**, the strict-env switch of `INV-ENV-2`); the **adapter owns a role's** switch. **The core
+  starts itself always get the base environment, run in their own process group, and exit 9 stays
+  "busy".** A `[[query]]` has no environment switch (the base environment of `INV-ENV-2` is the only
+  mode; a `strict_base_env` key is an unknown key and refuses to load). **The core
   (for queries) and the command adapter MUST start every payload in its own process group, and
   cancel by `SIGTERM` to the group before escalating to `SIGKILL`.** Otherwise a child that does not
   replace itself (a time-limit layer, a shell script) orphans its payload when only the direct child
@@ -516,8 +515,8 @@ that realize them are `DEC-ROLE-1`; the wire shape of the role object is `DEC-WI
   run.** The command is opaque to the core, which invokes it and never reads inside it, so whatever
   a command begins with is part of the command and neither a role nor a query declares a separate
   list of prefixes. The payload starts from the minimal, documented base environment (`INV-ENV-2`),
-  which is a short list and is revisable by decision, so no payload silently inherits the daemon's
-  own environment once the strict-env switch is on. The adapter starts a role's payload (so the
+  which is a short list and is revisable by decision, so no payload ever inherits the daemon's
+  own environment. The adapter starts a role's payload (so the
   environment reaches the payload itself, not the adapter); the core starts a query's producer.
 - **`INV-ROLE-5`** <!-- uuid: 3c8e5f2a-91b4-4d07-b6a3-5e12f0c7d894 --> — **A role whose validation
   fails stays registered and is unavailable.** The core asks each enabled role's adapter to validate

@@ -51,18 +51,17 @@ and to the deployment. Each is fully defined by the invariant cited; none is dec
 - **`validate`** — the optional generic subcommand of `DEC-WIRE-1`: a role object in, a list of
   problems out. It checks a role's `[role.config]` table strictly, its `sessionEnv` keys and that each
   referenced pool directory exists, and it runs no payload (`INV-CCH-36`).
-- **The role table's `sessionEnv` and `strictBaseEnv`** — two settings a role's own `[role.config]`
-  table carries: `sessionEnv` is a string-to-string map the
-  handler passes to a ccpool-backed session uninterpreted (`INV-CCH-33`), and `strictBaseEnv` is a
-  boolean, off by default, for a command-backed role (`INV-CCH-32`). `validate` checks the table
-  strictly.
+- **The role table's `sessionEnv`** — a setting a ccpool-backed role's own `[role.config]`
+  table carries: a string-to-string map the handler passes to a ccpool-backed session uninterpreted
+  (`INV-CCH-33`). A command-backed role has no environment setting: its payload always starts from
+  the base environment (`INV-CCH-32`). `validate` checks the table strictly.
 - **The decline reasons and kinds** — the fixed, bounded reasons of the pre-accept busy declines
   (`at-capacity`, `capacity-unknown`, `pool-unreadable`, `low-disk`, `session-in-flight`,
   `command-busy`, `connector-unavailable`, `origin-unavailable`, `launch-failed` and the `skipped-*` reasons), each mapped to
   a kind (`INV-CCH-37`).
 - **The `dispatch_start`, outcome and `dispatch_decline` event-log records** — what an accepted
   dispatch ran, written when its payload starts (`role`, `item_id`, `item_type`, then `argv`,
-  `strict_base_env` and `base_env_names` for a command-backed role, or `route` (`launched` or
+  `base_env_names` for a command-backed role, or `route` (`launched` or
   `adopted`), `session` and `session_env` for a ccpool-backed one, plus `model` and `effort` when
   the route is `launched`); how it ended, as exactly one
   outcome record after it, which is `dispatch_result` for a failure (`role`, `pool`, `bead`,

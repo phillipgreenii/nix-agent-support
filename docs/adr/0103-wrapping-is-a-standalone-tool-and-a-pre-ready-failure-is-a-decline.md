@@ -47,7 +47,8 @@ on 2026-10-21 and 2026-10-22), cited in the form the behavior sets use: phillipg
    (phillipgreenii-nix-agent-support · bead `pg2-12gr4` · "pg-router's side: commands, base env and item
    context").
 4. **pg-router keeps the minimal base environment, the item context and argv templating.** The base
-   environment keeps its strict switches. A role or query is a command plus that base environment and the
+   environment is the only mode: the per-role and per-query strict switches were removed (see the
+   Amendment below). A role or query is a command plus that base environment and the
    item context, and command roles keep rendering their argv through the per-element template engine. The
    `PG_ROUTER_ROLE`, `PG_ROUTER_ITEM_ID` and `PG_ROUTER_ITEM_TYPE` variables carry the item context
    (phillipgreenii-nix-agent-support · bead `pg2-12gr4` · "pg-router's side: commands, base env and item
@@ -69,7 +70,7 @@ on 2026-10-21 and 2026-10-22), cited in the form the behavior sets use: phillipg
    the handler-side role gate, the interim `claudeBaseline` fragment, the carrier before the split and the
    `dispatch_start` wrap fields no longer describe pg-router. The wrapper contract itself survives in
    pg-wrap's own behavior-docs set, where it names no caller. 0101's base-environment decision (its
-   Decision item 1, the base list and the strict switches) survives in pg-router, minus the wrap
+   Decision item 1 and the base list) survives in pg-router, minus the wrap
    expansion.
 8. **ADR 0065 and ADR 0080 are amended in place.** ADR 0065's Addendum of 2026-10-20 no longer gives a
    role a wrap: the role keeps its handler and configuration, the "identical wraps" assertion on shared
@@ -96,3 +97,18 @@ on 2026-10-21 and 2026-10-22), cited in the form the behavior sets use: phillipg
   supersedes their reading of the wrap, not their text.
 - The ready-marker mechanics and the role gate in ADR 0101 are kept there as history and are not to be
   implemented.
+
+## Amendment (2026-11-20): strict base env is the only mode
+
+The rollout this ADR and ADR 0101 describe is finished: every role family and every `[[query]]` runs
+from the documented base environment plus its wrap, so the per-role switch (`strictBaseEnv` in a command
+role's config, `roles.<name>.strictBaseEnv` in nix), the per-query switch (`strict_base_env` in a
+`[[query]]`, `strictBaseEnv` on a level query in nix) and the nix `strictEnv` option on a role's spec are
+removed. The nix helper renders every spec with `strict_env = true`. A configuration that still sets
+`strictBaseEnv` or `strict_base_env` is refused as an unknown key. The pg-router daemon's launchd script
+no longer prepends the per-user profile bin directory to `PATH`, because no payload or producer inherits
+the daemon's environment any more. There is no fallback to the ambient environment: a variable that
+exists only in the daemon's environment does not reach a payload, and tests in the command executor,
+the command handler and the command query pin that. `pg-wrap`'s own `strict_env` key is unchanged:
+it is that tool's generic setting, and the nix helper always sets it. To undo this, revert the change
+that removed the switches; there is no longer a per-role setting to flip.

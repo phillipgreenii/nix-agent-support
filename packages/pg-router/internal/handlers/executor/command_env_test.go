@@ -49,11 +49,11 @@ func envNames(t *testing.T, path string) (names []string, kv map[string]string) 
 
 // runEnvProbe dispatches a real command role whose payload dumps `env | sort`
 // to a temp file, and returns the variables it saw.
-func runEnvProbe(t *testing.T, strict bool) (names []string, kv map[string]string) {
+func runEnvProbe(t *testing.T) (names []string, kv map[string]string) {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "env.txt")
 	role := roles.Role{
-		Name: "cmdrole", StrictBaseEnv: strict,
+		Name:    "cmdrole",
 		Command: &roles.CommandConfig{Argv: []string{"/bin/sh", "-c", `env | sort > "$1"`, "probe", out}},
 	}
 	d := DispatchContext{Role: role, Item: item.Item{ID: "b-1", Type: "task", Title: "a title"}}
@@ -61,19 +61,6 @@ func runEnvProbe(t *testing.T, strict bool) (names []string, kv map[string]strin
 		t.Fatalf("dispatch: %v", err)
 	}
 	return envNames(t, out)
-}
-
-// clearAmbientEnv removes every variable from the test process's environment
-// (restored at cleanup). A probe that dumps `env | sort` sees one line per
-// variable only when no value spans lines; the nix build sandbox exports
-// multi-line ones (buildPhase, preBuild, ...) that would read as phantom names.
-func clearAmbientEnv(t *testing.T) {
-	t.Helper()
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		t.Setenv(k, "") // registers the restore
-		_ = os.Unsetenv(k)
-	}
 }
 
 func setHandlerEnv(t *testing.T) {
@@ -88,12 +75,14 @@ func setHandlerEnv(t *testing.T) {
 	t.Setenv("PATH", "/custom/bin:/usr/bin:/bin")
 }
 
-// TestCommandPayloadEnv_StrictGolden pins the strict payload env by exact name:
-// the minimal base env, the participant markers, and the three item-context
-// variables, and nothing else.
+// TestCommandPayloadEnv_StrictGolden pins the payload env by exact name: the
+// minimal base env, the participant markers, and the three item-context
+// variables, and nothing else. SECRET_TOKEN and PATH_EXTRA exist only in the
+// handler's own env, so their absence proves an ambient variable never reaches
+// a payload.
 func TestCommandPayloadEnv_StrictGolden(t *testing.T) {
 	setHandlerEnv(t)
-	names, kv := runEnvProbe(t, true)
+	names, kv := runEnvProbe(t)
 	want := []string{
 		"BEADS_ACTOR", "BEADS_DIR", "COLORTERM", "HOME", "LANG", "LOGNAME", "PATH",
 		"PG_ROUTER_ITEM_ID", "PG_ROUTER_ITEM_TYPE", "PG_ROUTER_ROLE", "PG_ROUTER_TEST_MODE",
@@ -110,33 +99,10 @@ func TestCommandPayloadEnv_StrictGolden(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, kv[k], v)
 		}
 	}
-}
-
-// TestCommandPayloadEnv_NotStrictInherits: with strictBaseEnv off the payload
-// inherits the handler's env plus the three PG_ROUTER_* variables.
-func TestCommandPayloadEnv_NotStrictInherits(t *testing.T) {
-	clearAmbientEnv(t)
-	setHandlerEnv(t)
-	names, kv := runEnvProbe(t, false)
-	want := map[string]bool{"PG_ROUTER_ROLE": true, "PG_ROUTER_ITEM_ID": true, "PG_ROUTER_ITEM_TYPE": true}
-	for _, kvs := range os.Environ() {
-		if n, _, _ := strings.Cut(kvs, "="); !shAdds[n] {
-			want[n] = true
+	for _, only := range []string{"SECRET_TOKEN", "PATH_EXTRA"} {
+		if _, leaked := kv[only]; leaked {
+			t.Errorf("a variable present only in the handler's env reached the payload: %s", only)
 		}
-	}
-	var wantNames []string
-	for n := range want {
-		wantNames = append(wantNames, n)
-	}
-	sort.Strings(wantNames)
-	if !reflect.DeepEqual(names, wantNames) {
-		t.Fatalf("non-strict env names = %v\nwant %v", names, wantNames)
-	}
-	if kv["SECRET_TOKEN"] != "s3cret" || kv["PATH"] != "/custom/bin:/usr/bin:/bin" {
-		t.Errorf("inherited values lost: SECRET_TOKEN=%q PATH=%q", kv["SECRET_TOKEN"], kv["PATH"])
-	}
-	if kv["PG_ROUTER_ROLE"] != "cmdrole" || kv["PG_ROUTER_ITEM_ID"] != "b-1" || kv["PG_ROUTER_ITEM_TYPE"] != "task" {
-		t.Errorf("item context wrong: %v", kv)
 	}
 }
 
@@ -145,7 +111,7 @@ func TestCommandPayloadEnv_Contract(t *testing.T) {
 	setHandlerEnv(t)
 	it := item.Item{ID: "b-1", Type: "task", Title: "untrusted"}
 
-	env, base := commandPayloadEnv(roles.Role{Name: "r", StrictBaseEnv: true}, it, "", "")
+	env, base := commandPayloadEnv(roles.Role{Name: "r"}, it, "", "")
 	if !sort.StringsAreSorted(base) || len(base) != len(env) {
 		t.Fatalf("strict baseNames must be the sorted names of env; base=%v env=%v", base, env)
 	}
@@ -153,14 +119,6 @@ func TestCommandPayloadEnv_Contract(t *testing.T) {
 		if strings.Contains(kv, "untrusted") || strings.HasPrefix(kv, "SECRET_TOKEN=") {
 			t.Errorf("strict env leaked %q", kv)
 		}
-	}
-
-	env, base = commandPayloadEnv(roles.Role{Name: "r"}, it, "", "")
-	if base != nil {
-		t.Errorf("non-strict baseNames = %v, want nil", base)
-	}
-	if !reflect.DeepEqual(env[len(env)-3:], []string{"PG_ROUTER_ITEM_ID=b-1", "PG_ROUTER_ITEM_TYPE=task", "PG_ROUTER_ROLE=r"}) {
-		t.Errorf("non-strict env must end with the item context; tail = %v", env[len(env)-3:])
 	}
 }
 

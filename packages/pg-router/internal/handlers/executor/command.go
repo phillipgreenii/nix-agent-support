@@ -100,12 +100,10 @@ type commandRun struct{ deps Deps }
 var baseEnvExtras = []string{"BEADS_ACTOR", "BEADS_DIR", "WORKSPACE_ROOT", "PG_ROUTER_TEST_MODE"}
 
 // commandPayloadEnv builds the environment a command role's payload starts
-// with. With r.StrictBaseEnv on, env is procenv.BaseEnv over the handler's
-// environment (the minimal base env plus baseEnvExtras where set) plus the
-// three PG_ROUTER_* item-context entries, and baseNames is the sorted list of
-// the variable names in env. With it off, env is os.Environ() plus the three
-// PG_ROUTER_* entries (they come last, so they win a duplicate) and baseNames
-// is nil.
+// with: procenv.BaseEnv over the handler's environment (the minimal base env
+// plus baseEnvExtras where set) plus the three PG_ROUTER_* item-context
+// entries, and baseNames is the sorted list of the variable names in env. The
+// handler's ambient environment never reaches the payload.
 func commandPayloadEnv(r roles.Role, it item.Item, eventID, dispatchID string) (env []string, baseNames []string) {
 	itemCtx := itemContextEnv(r.Name, it, eventID, dispatchID)
 	keys := make([]string, 0, len(itemCtx))
@@ -116,9 +114,6 @@ func commandPayloadEnv(r roles.Role, it item.Item, eventID, dispatchID string) (
 	var itemEnv []string
 	for _, k := range keys {
 		itemEnv = append(itemEnv, k+"="+itemCtx[k])
-	}
-	if !r.StrictBaseEnv {
-		return append(os.Environ(), itemEnv...), nil
 	}
 	env = append(procenv.BaseEnv(os.Environ(), baseEnvExtras), itemEnv...)
 	baseNames = make([]string, 0, len(env))
@@ -138,8 +133,8 @@ func (r *commandRun) run(ctx context.Context, d DispatchContext) ([]byte, error)
 	if err != nil {
 		return nil, fmt.Errorf("command role %q: render argv: %w", d.Role.Name, err)
 	}
-	// env is the payload env, baseNames the strict env's variable names (nil when
-	// the strict switch is off); dispatch_start records the argv and the names,
+	// env is the payload env, baseNames the base env's variable names;
+	// dispatch_start records the argv and the names,
 	// never an env value.
 	env, baseNames := commandPayloadEnv(d.Role, d.Item, d.EventID, d.DispatchID)
 	// dispatch_start is per ACCEPTED dispatch and is written BEFORE the payload

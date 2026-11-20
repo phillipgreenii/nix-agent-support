@@ -4,8 +4,8 @@
 // command.go) behind the new request shape: pg-router core starts it per
 // call, it reads the role's name and [role.config] from the `role` object of
 // the JSON request on stdin, decodes that config strictly on every call, and
-// runs the role's argv in its own process group, under the minimal base env
-// when the role sets strictBaseEnv.
+// runs the role's argv in its own process group, always under the minimal base
+// env (never the handler's ambient env).
 //
 // Subcommands (INTF-HANDLER, DEC-WIRE-1: JSON on stdin, JSON on stdout, a
 // coarse exit code): dispatch, postStartup, preShutdown, validate, version and
@@ -13,8 +13,8 @@
 // are not part of this binary.
 //
 // The shape of [role.config] is this adapter's own, defined by the decoder in
-// roleconfig.go: `command.argv` (array of strings, each templated) and the
-// optional `strictBaseEnv` (boolean) beside it. Nothing else is accepted.
+// roleconfig.go: `command.argv` (array of strings, each templated).
+// Nothing else is accepted.
 //
 // Built from the same Go module as pg-router-ccpool-handler (bead
 // pg2-12gr4.10.4); both import the shared internal library.

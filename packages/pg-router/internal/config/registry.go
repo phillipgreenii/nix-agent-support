@@ -229,14 +229,10 @@ type queryTOML struct {
 	// Deadline is the per-pull timeout of this query (default
 	// query.DefaultDeadline, 20s).
 	Deadline *duration `toml:"deadline"`
-	// StrictBaseEnv switches a command query's process onto the minimal base
-	// environment (default off). A pointer so a timer query that sets it can be
-	// told apart from one that does not.
-	StrictBaseEnv *bool `toml:"strict_base_env"`
 	// EnvAllow lists the environment variable names a command query's process
 	// receives besides the minimal base environment (for example SSH_AUTH_SOCK
-	// for a git-credential sensor). Absent: the process inherits the router's
-	// environment, unless strict_base_env is on.
+	// for a git-credential sensor). Absent: the process gets the base
+	// environment only, never the router's own.
 	EnvAllow []string `toml:"env_allow"`
 	// Metadata is a timer query's static metadata, copied unchanged into every
 	// tick's item. Decoded as any so a non-string value is reported by our own
@@ -610,8 +606,8 @@ func knownQueryKeys() []string {
 
 // unknownQueryKeys returns the keys of one [[query]] table that queryTOML does
 // not consume, sorted. Core's TOML decode is lenient elsewhere, but a [[query]]
-// key is strict because a misspelled strict_base_env
-// (strictBaseEnv) would silently run a producer on the ambient environment.
+// key is strict because a misspelled key (env_allow, say)
+// would silently drop a setting the query meant to carry.
 func unknownQueryKeys(keys []string) []string {
 	known := map[string]bool{}
 	for _, k := range knownQueryKeys() {
@@ -835,9 +831,6 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	if qt.LevelSource != "" && qt.Type != "command" {
 		return nil, fmt.Errorf("level_source applies only to a command query; a %q query cannot answer with level records", qt.Type)
 	}
-	if qt.Type != "command" && qt.StrictBaseEnv != nil {
-		return nil, fmt.Errorf("strict_base_env applies only to a command query; a %q query has no command to run", qt.Type)
-	}
 	tmeta, err := buildTimerMetadata(qt)
 	if err != nil {
 		return nil, err
@@ -851,7 +844,6 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 		return tq, nil
 	}
 	if cq, ok := q.(query.CommandQuery); ok {
-		cq.StrictBaseEnv = qt.StrictBaseEnv != nil && *qt.StrictBaseEnv
 		cq.EnvAllow = append([]string(nil), qt.EnvAllow...)
 		return cq, nil
 	}

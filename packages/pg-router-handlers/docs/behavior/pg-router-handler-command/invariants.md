@@ -59,12 +59,11 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   the terminal variables (`TERM`, and `COLORTERM` where set), the markers the adapter's participants
   inject by explicit name, never by prefix (`BEADS_ACTOR`, `BEADS_DIR`, `WORKSPACE_ROOT` and
   `PG_ROUTER_TEST_MODE`, the last set by the core's smoke-test command), and the item context. The
-  list is revisable by decision. A role's `strictBaseEnv` (a boolean, **off by default**, the
-  strict-env switch of `INV-ENV-2`) selects it: while off, the payload keeps the ambient environment
-  it has, with the item context added. A payload that needs more names it in its own argv, or in the
-  spec of the prefix tool its argv starts with. The core's `run-role` smoke command runs under the
-  operator's shell, not the daemon's, so while the switch is off it is not representative of the
-  payload's environment.
+  list is revisable by decision. It is the only mode: a role has no switch (a `strictBaseEnv` key in
+  `[role.config]` is an unknown key), and the payload never keeps the ambient environment; only the
+  item context is added. A payload that needs more names it in its own argv, or in the spec of the
+  prefix tool its argv starts with. A variable that exists only in the handler's own environment
+  does not reach the payload.
 - **`INV-CMA-9`** <!-- uuid: 5e4ce5f8-e5fb-485c-a4b7-983334acccce --> — **A failing command, a failing prefix tool included, is an accepted dispatch that ends in a handler error.**
   The adapter never declines a failed command: the dispatch is accepted, ends with a handler error
   (exit `1`), and is re-offered only if the role opted into dispatch retries with a transient class.
@@ -74,11 +73,11 @@ See the [glossary](glossary.md), [interfaces](interfaces.md), [actors](actors.md
   element is part of the command (`INV-ROLE-4`).
 - **`INV-CMA-10`** <!-- uuid: 56b4b7b4-89ba-4916-9195-d9f9484bdbfb --> — **Each accepted dispatch records what it ran and how it ended.**
   The adapter **MUST** write one `dispatch_start` event-log record per accepted dispatch carrying the
-  role, the item's id and type, the rendered argv, whether `strictBaseEnv` is on, and the **names** of
+  role, the item's id and type, the rendered argv, and the **names** of
   the base-environment variables the payload received, never their values and never the item-context
   values. A decline writes a `dispatch_decline` record with the role, the item id, the reason, the
   kind and the evidence it has. The `dispatch_start` fields are `role`, `item_id`, `item_type`,
-  `argv`, `strict_base_env` and `base_env_names`; it is written BEFORE the payload starts, so a
+  `argv` and `base_env_names`; it is written BEFORE the payload starts, so a
   payload that hangs, is killed or cannot start still has one. Exit `9` is a decline that is only
   known after the command ran, so it leaves a `dispatch_start` and then a `dispatch_decline`. The
   `dispatch_decline` fields are `role`, `item_id`, `reason`, `decline_kind`,

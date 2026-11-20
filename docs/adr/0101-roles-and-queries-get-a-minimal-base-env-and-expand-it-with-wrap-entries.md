@@ -171,3 +171,9 @@ activate -d ... --`, a `nix develop ... -c`, an `env K=V`, a `timeout --foregrou
 - ADR 0065, ADR 0085 and DEC-WIRE-3 are amended for the split by pg2-12gr4.5; ADR 0089 is unchanged. The
   behavior docs for pg-router and pg-router-ccpool-handler follow as separate changes and land after
   this ADR.
+
+## Addendum (2026-11-20)
+
+The per-role and per-query strict switches mentioned in Decision items 1 and 13 and in the
+Consequences were removed once every family was on: strict base env is the only mode. See the
+Amendment in ADR 0103.

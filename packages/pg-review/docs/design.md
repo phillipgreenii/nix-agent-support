@@ -997,7 +997,7 @@ scope with no prefix. Router-side checks belong to the router (5.14).
   schedule entries (no Go template to keep in sync, and no `router-config` command: the precedent
   of a byte-identical Go copy is a drift trap and is not followed).
 - Roles are declared once through the pg-router module's `roles.<name>` (`binds`, `enabled`) and
-  the command adapter's settings (`handler`, `command.argv`, `strictBaseEnv`). Defaults are not
+  the command adapter's settings (`handler`, `command.argv`). Defaults are not
   assumed: the module sets each role's retry key explicitly and writes `requires` only when the deployment supplies clauses.
 - Two traps the builder tests for: a configuration with no `[[role]]` runs zero roles AND zero
   queries, logging only "defines no [[role]]; running with zero roles and zero queries"

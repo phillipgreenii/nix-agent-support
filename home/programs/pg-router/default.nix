@@ -182,12 +182,7 @@ let
       envAllow = lib.mkOption {
         type = lib.types.nullOr (lib.types.listOf lib.types.str);
         default = null;
-        description = "Environment variable names the sensor process receives besides the minimal base environment (TOML `env_allow`); null inherits the router environment.";
-      };
-      strictBaseEnv = lib.mkOption {
-        type = lib.types.nullOr lib.types.bool;
-        default = null;
-        description = "TOML `strict_base_env`; null leaves the router default.";
+        description = "Environment variable names the sensor process receives besides the minimal base environment (TOML `env_allow`); null passes the base environment only.";
       };
     };
   };
@@ -208,8 +203,7 @@ let
       };
     }
     // lib.optionalAttrs (q.deadline != null) { inherit (q) deadline; }
-    // lib.optionalAttrs (q.envAllow != null) { env_allow = q.envAllow; }
-    // lib.optionalAttrs (q.strictBaseEnv != null) { strict_base_env = q.strictBaseEnv; };
+    // lib.optionalAttrs (q.envAllow != null) { env_allow = q.envAllow; };
 
   renderedResources = lib.mapAttrsToList renderResource cfg.resources;
   renderedLevelQueries = lib.mapAttrsToList renderLevelQuery cfg.levelQueries;

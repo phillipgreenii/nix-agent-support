@@ -21,9 +21,6 @@ const configPath = "role.config"
 // own contract (name and survives_shutdown are not config). Anything else is an
 // unknown key.
 type roleConfig struct {
-	// StrictBaseEnv (INV-CCH-32): run the argv under the minimal base env.
-	// Absent = false.
-	StrictBaseEnv bool `json:"strictBaseEnv"`
 	// Command is required; its argv elements are templated.
 	Command *struct {
 		Argv []string `json:"argv"`
@@ -115,7 +112,7 @@ func decodeRole(ro roleObject) (roles.Role, []string) {
 		return roles.Role{}, problems
 	}
 	return roles.Role{
-		Name: ro.Name, StrictBaseEnv: rc.StrictBaseEnv,
+		Name:    ro.Name,
 		Command: &roles.CommandConfig{Argv: rc.Command.Argv},
 	}, nil
 }

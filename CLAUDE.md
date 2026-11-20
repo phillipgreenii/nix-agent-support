@@ -522,7 +522,7 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
   table and the `survives_shutdown` key. `pg-router config --show --json` prints it, so reading
   `config.toml`/`config --show` is enough; no per-role file is rendered. The role is declared once:
   the handler module's `phillipgreenii.programs.pg-router-ccpool-handler.roles.<name>` (its
-  `handler`, `ccpool`/`command` settings, `sessionEnv`, `strictBaseEnv`, `spec`) joins, by name, the
+  `handler`, `ccpool`/`command` settings, `sessionEnv`, `spec`) joins, by name, the
   pg-router module's `phillipgreenii.programs.pg-router.roles.<name>` (`binds`, `enabled`, and what
   the join fills in: `handler`, `config`, `survivesShutdown`). The adapter's own `validate` runs over
   the rendered config during the build (`roleValidation`), and `pg-router doctor` runs it again.

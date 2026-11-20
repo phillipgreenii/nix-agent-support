@@ -35,16 +35,18 @@ func TestRunRaw_envAllowPassesOnlyListedNames(t *testing.T) {
 	}
 }
 
-// Without env_allow or strict_base_env the process inherits the environment, and
-// an extra variable is added to it.
-func TestRunRaw_noAllowlistInheritsEnvironment(t *testing.T) {
-	t.Setenv("PGR_INHERITED", "yes")
+// Without env_allow the process still starts from the minimal base env: a
+// variable present only in the router's env does not reach it, and an extra
+// variable is added to the base env.
+func TestRunRaw_noAllowlistDropsAmbientEnvironment(t *testing.T) {
+	t.Setenv("PGR_AMBIENT", "yes")
 	q := &CommandQuery{Argv: []string{"/usr/bin/env"}, Format: FormatJSONL}
 	out, err := RunRaw(context.Background(), Env{}, q, []string{"PG_ROUTER_LEVEL_REFRESH=1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(out); !strings.Contains(got, "PGR_INHERITED=yes") || !strings.Contains(got, "PG_ROUTER_LEVEL_REFRESH=1") {
+	got := string(out)
+	if strings.Contains(got, "PGR_AMBIENT") || !strings.Contains(got, "PG_ROUTER_LEVEL_REFRESH=1") {
 		t.Errorf("env = \n%s", got)
 	}
 }

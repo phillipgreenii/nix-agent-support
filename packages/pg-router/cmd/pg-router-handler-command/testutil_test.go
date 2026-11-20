@@ -46,16 +46,12 @@ func eventWith(payload map[string]any) map[string]any {
 }
 
 // cmdConfig is the [role.config] of a command role.
-func cmdConfig(strict bool, argv ...string) map[string]any {
+func cmdConfig(argv ...string) map[string]any {
 	a := make([]any, len(argv))
 	for i, s := range argv {
 		a[i] = s
 	}
-	cfg := map[string]any{"command": map[string]any{"argv": a}}
-	if strict {
-		cfg["strictBaseEnv"] = true
-	}
-	return cfg
+	return map[string]any{"command": map[string]any{"argv": a}}
 }
 
 // dispatch runs serveDispatch over req and returns the exit code and the reply.

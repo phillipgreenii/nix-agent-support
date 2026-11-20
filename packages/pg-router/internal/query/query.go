@@ -49,7 +49,7 @@ type Commander interface {
 
 // EnvCommander is a Commander that can also start the command with an explicit
 // environment (nil inherits). CommandQuery uses it when its Commander offers it,
-// so strict_base_env reaches the real exec path; a Commander without it (a test
+// so the minimal base env reaches the real exec path; a Commander without it (a test
 // fake) just receives the composed argv.
 type EnvCommander interface {
 	Commander

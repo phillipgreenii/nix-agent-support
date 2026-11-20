@@ -12,7 +12,6 @@ subprocess. Every request is JSON on stdin; its "role" object ({"name",
 decodes strictly on every call (an unknown key or a wrong type is an error):
 
   [role.config]
-  strictBaseEnv = true          # optional: run under the minimal base env
   [role.config.command]
   argv = ["/path/to/tool", "{{.BeadID}}"]   # required; each element is templated
 

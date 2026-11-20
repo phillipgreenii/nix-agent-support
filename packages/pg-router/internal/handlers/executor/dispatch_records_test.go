@@ -74,11 +74,11 @@ func dispatchCommand(t *testing.T, role roles.Role, log *eventlog.Writer) error 
 	return err
 }
 
-func TestCommandDispatch_writesDispatchStart_strictNamesNoValues(t *testing.T) {
+func TestCommandDispatch_writesDispatchStart_baseNamesNoValues(t *testing.T) {
 	setHandlerEnv(t)
 	log, path := newTestLog(t)
 	role := roles.Role{
-		Name: "cmdrole", StrictBaseEnv: true,
+		Name:    "cmdrole",
 		Command: &roles.CommandConfig{Argv: []string{"/bin/sh", "-c", "exit 0", "{{.BeadID}}"}},
 	}
 	if err := dispatchCommand(t, role, log); err != nil {
@@ -95,8 +95,8 @@ func TestCommandDispatch_writesDispatchStart_strictNamesNoValues(t *testing.T) {
 	if got, want := strSlice(t, rec["argv"]), []string{"/bin/sh", "-c", "exit 0", "b-1"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("argv = %v, want the RENDERED argv %v", got, want)
 	}
-	if rec["strict_base_env"] != true {
-		t.Errorf("strict_base_env = %v, want true", rec["strict_base_env"])
+	if _, has := rec["strict_base_env"]; has {
+		t.Errorf("dispatch_start still carries the removed strict_base_env field: %v", rec)
 	}
 	names := strSlice(t, rec["base_env_names"])
 	_, wantNames := commandPayloadEnv(role, item.Item{ID: "b-1", Type: "task"}, "", "")
@@ -123,24 +123,6 @@ func TestCommandDispatch_writesDispatchStart_strictNamesNoValues(t *testing.T) {
 		if s, ok := v.(string); ok && (s == "s3cret" || s == "/custom/bin:/usr/bin:/bin") {
 			t.Errorf("record holds an env value: %v", rec)
 		}
-	}
-}
-
-func TestCommandDispatch_writesDispatchStart_strictOffHasNoNames(t *testing.T) {
-	log, path := newTestLog(t)
-	role := shCommandRole("exit 0")
-	if err := dispatchCommand(t, role, log); err != nil {
-		t.Fatal(err)
-	}
-	recs := readRecords(t, path, DispatchStartKind)
-	if len(recs) != 1 {
-		t.Fatalf("want one dispatch_start, got %d", len(recs))
-	}
-	if recs[0]["strict_base_env"] != false {
-		t.Errorf("strict_base_env = %v, want false", recs[0]["strict_base_env"])
-	}
-	if got := strSlice(t, recs[0]["base_env_names"]); len(got) != 0 {
-		t.Errorf("base_env_names = %v, want none when the switch is off", got)
 	}
 }
 

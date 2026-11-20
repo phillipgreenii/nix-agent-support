@@ -50,7 +50,7 @@ func TestHelperAdapterProcess(t *testing.T) {
 func TestOrphanedPayloadHoldsTheEventLock(t *testing.T) {
 	lockDir := t.TempDir()
 	pidFile := filepath.Join(t.TempDir(), "payload.pid")
-	cfg := cmdConfig(false, "/bin/sh", "-c", `echo $$ > "`+pidFile+`"; exec sleep 600`)
+	cfg := cmdConfig("/bin/sh", "-c", `echo $$ > "`+pidFile+`"; exec sleep 600`)
 	req := request(t, eventWith(map[string]any{"id": "b1"}), "cmdrole", cfg, true)
 
 	adapter := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHelperAdapterProcess$")
@@ -92,7 +92,7 @@ func TestOrphanedPayloadHoldsTheEventLock(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		// The next dispatch runs the payload; use a quick one so it ends.
-		quick := request(t, eventWith(map[string]any{"id": "b1"}), "cmdrole", cmdConfig(false, "/bin/sh", "-c", "exit 0"), true)
+		quick := request(t, eventWith(map[string]any{"id": "b1"}), "cmdrole", cmdConfig("/bin/sh", "-c", "exit 0"), true)
 		var out bytes.Buffer
 		exit := serveDispatch(context.Background(), strings.NewReader(quick), &out, "", lockedDeps(lockDir))
 		if exit == conformance.ExitOK {

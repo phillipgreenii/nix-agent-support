@@ -34,14 +34,14 @@ func runProbe(t *testing.T, q CommandQuery) string {
 	return evts[0].Item.Title
 }
 
-func TestCommandQuery_strictBaseEnvKeepsOnlyTheBaseList(t *testing.T) {
+func TestCommandQuery_runsOnlyUnderTheBaseList(t *testing.T) {
 	t.Setenv("PG_ROUTER_TEST_MODE", "1")
+	// PG_ROUTER_LEAKY is present only in the router's own env.
 	t.Setenv("PG_ROUTER_LEAKY", "secret")
 	t.Setenv("HOME", "/tmp/k06-home")
 	q := CommandQuery{
-		Argv:          []string{envProbe(t)},
-		Format:        FormatJSONL,
-		StrictBaseEnv: true,
+		Argv:   []string{envProbe(t)},
+		Format: FormatJSONL,
 	}
 	title := runProbe(t, q)
 	for _, want := range []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "PG_ROUTER_TEST_MODE=1", "HOME=/tmp/k06-home"} {
@@ -61,28 +61,6 @@ func TestCommandQuery_strictBaseEnvKeepsOnlyTheBaseList(t *testing.T) {
 		if !allowed[name] {
 			t.Errorf("variable %q outside the base list; env = %s", name, title)
 		}
-	}
-}
-
-// clearAmbientEnv removes every variable from the test process's environment
-// (restored at cleanup), so a probe that dumps the inherited env sees only what
-// the test sets. The nix build sandbox exports multi-line and quote-bearing
-// variables (buildPhase, shellHook, ...) that a JSONL title cannot carry.
-func clearAmbientEnv(t *testing.T) {
-	t.Helper()
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		t.Setenv(k, "") // registers the restore
-		_ = os.Unsetenv(k)
-	}
-}
-
-func TestCommandQuery_nonStrictInheritsTheAmbientEnv(t *testing.T) {
-	clearAmbientEnv(t)
-	t.Setenv("PG_ROUTER_LEAKY", "secret")
-	q := CommandQuery{Argv: []string{envProbe(t)}, Format: FormatJSONL}
-	if title := runProbe(t, q); !strings.Contains(title, "PG_ROUTER_LEAKY=secret") {
-		t.Fatalf("non-strict query lost the inherited env; env = %s", title)
 	}
 }
 

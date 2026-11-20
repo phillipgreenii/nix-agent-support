@@ -910,14 +910,14 @@ DEC-CLI-2`).
   environment variable, and its name) is a realization decision, not restated here:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.
 - **The command and the environment caveat.** Resolving the configuration (`config --show`, and its
-  machine-readable form `config --show --json`) **MUST** print each `[[query]]`'s **command** and its
-  **strict-env switch** (`INV-ROLE-4`, `INV-ENV-2`), so an operator reads what a producer will run
+  machine-readable form `config --show --json`) **MUST** print each `[[query]]`'s **command**
+  (`INV-ROLE-4`), so an operator reads what a producer will run
   without reconstructing it. A **role's** command follows when the handler split lands, since a
   role's command lives with its adapter. **Caveat:** the one-event
   handler smoke test (`run-role`) runs under the **operator's own shell environment**, not the
-  daemon's, so while a role's strict-env switch is off (`INV-ENV-2`) its run is **not representative**
-  of the environment that role's payload gets under the daemon, and a smoke test that passes there
-  does not prove the payload's environment. (Concrete spelling:
+  daemon's. The payload's own environment is the base environment either way (`INV-ENV-2`), but the
+  handler's and the router's own process still read the operator's shell, so a smoke test that
+  passes there does not prove the daemon's own environment. (Concrete spelling:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
 - **`config check` and `doctor`.** **`config check`** runs, on demand, the checks the core runs
   at startup (`INV-WORKFLOW-1`): the six pre-runtime conditions, and the role validation
@@ -1179,15 +1179,14 @@ or any other way to run its command**: whatever a command begins with is part of
 is opaque to the core (`INV-ROLE-4`). The core reads those keys strictly and passes the table through
 unread (`INV-ROLE-2`). The inspection and smoke-test commands (`INTF-CLI`) resolve a role's adapter
 the same way the running core does, and show each role's resolved adapter command, survives-shutdown
-property and the table exactly as it is sent, plus each `[[query]]`'s command and strict-env
-switch, so what a role will run is readable without reading the adapter's own files
+property and the table exactly as it is sent, plus each `[[query]]`'s command, so what a role will run is readable without reading the adapter's own files
 (`phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-ROLE-1`).
 
-**The base environment in the configuration.** A `[[query]]` MAY carry a boolean
-**`strict_base_env`** that defaults to **off** (`INV-ENV-2`, `INV-ENV-4`): while it is off the
-producer inherits the parent's environment, as it did before the key existed. A role's strict-env
-switch, where the role's adapter has one, is that adapter's own, under the same rules
-(`INV-ENV-2`). A `[[query]]` that omits `strict_base_env` runs its command exactly as it did before.
+**The base environment in the configuration.** A `[[query]]` producer always starts from the base
+environment (`INV-ENV-2`, `INV-ENV-4`), plus the names its optional `env_allow` list adds; there is no
+switch, and the key `strict_base_env` is no longer accepted (an unknown `[[query]]` key refuses to
+load). A role's payload starts from the base environment the same way, under its adapter's own
+rules.
 
 **Timer queries: metadata and the calendar trigger.** A `[[query]]` of `type = "timer"` MAY carry
 **`metadata`**, a table of string keys to string values, at most 16 keys; it is copied unchanged into
