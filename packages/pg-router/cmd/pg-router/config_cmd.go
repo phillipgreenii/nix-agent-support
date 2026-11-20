@@ -248,7 +248,7 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		}
 		out.Roles = append(out.Roles, configShowRole{
 			Requires: clauses,
-			Name:     r.Name, Enabled: r.Enabled, Binds: r.Binds, MaxDispatchRetries: r.MaxDispatchRetries,
+			Name:     r.Name, Enabled: r.Enabled, Binds: r.Binds, MaxDispatchRetries: r.MaxDispatchRetries, MaxRedrives: r.MaxRedrives,
 			Command: show.Command, CommandError: show.CommandError, SurvivesShutdown: show.SurvivesShutdown, Role: show.Role,
 		})
 	}
@@ -329,6 +329,8 @@ type configShowRole struct {
 	// MaxDispatchRetries is the role's opt-in bounded re-run count for a
 	// transiently failed dispatch (bead pg2-yu5y2); omitted when 0 (off).
 	MaxDispatchRetries int `json:"maxDispatchRetries,omitempty"`
+	// MaxRedrives is the role's opt-in redrive bound (ADR 0121); omitted when 0.
+	MaxRedrives int `json:"maxRedrives,omitempty"`
 	// Requires lists the role's requires clauses with their expansions.
 	Requires []configShowClause `json:"requires,omitempty"`
 	// Command is what core runs for the role's dispatch, resolved by the ONE

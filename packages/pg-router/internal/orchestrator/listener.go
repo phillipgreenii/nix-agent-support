@@ -249,6 +249,12 @@ type roleListener struct {
 	// maxRetries is role.MaxDispatchRetries clamped to
 	// roles.MaxDispatchRetriesCap; 0 disables the retry entirely.
 	maxRetries int
+	// maxRedrives and redriveDelay are the role's redrive bound (clamped to
+	// roles.MaxRedrivesCap) and delay (ADR 0121); redriveQ nil disables redrives.
+	maxRedrives  int
+	redriveDelay time.Duration
+	redriveQ     RedriveQueue
+	redriveObs   DispatchRedriveObserver
 	// retries tracks the re-runs already scheduled per event id. It is NOT a
 	// capacity count (INV-CONC-1): it bounds how often ONE event is re-run.
 	retries retryLedger
@@ -283,6 +289,10 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 		reofferObs:        o.ReofferObserver,
 		supervisionObs:    o.SupervisionObserver,
 		maxRetries:        clampRetries(role.MaxDispatchRetries),
+		maxRedrives:       clampRedrives(role.MaxRedrives),
+		redriveDelay:      role.RedriveDelay,
+		redriveQ:          o.RedriveQueue,
+		redriveObs:        o.DispatchRedriveObserver,
 		failedLog:         o.FailedLog,
 		now:               o.failedNow,
 	}
@@ -294,6 +304,16 @@ func clampRetries(n int) int {
 	}
 	if n > roles.MaxDispatchRetriesCap {
 		return roles.MaxDispatchRetriesCap
+	}
+	return n
+}
+
+func clampRedrives(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > roles.MaxRedrivesCap {
+		return roles.MaxRedrivesCap
 	}
 	return n
 }
@@ -397,6 +417,63 @@ func (l *roleListener) shouldRetry(evt eventqueue.Event, err error) bool {
 	if l.retryObs != nil {
 		l.retryObs.OnDispatchRetry(l.role.Name, class)
 	}
+	return true
+}
+
+// redrive enqueues one redrive of evt after its dispatch failed with err and
+// reports whether a redrive is now pending for it (ADR 0121 D3). It does so only
+// when the role opted in, the run is not shutting down, the failure is a
+// transient class, the event's generation is below max_redrives, and the role has
+// not already accepted a later event of the same entity. The copy has a new id,
+// generation + 1, a notBefore of now + redrive_delay, a window the length of the
+// original's starting at notBefore, and (being a new event) a fresh retry count.
+// A redrive that cannot be enqueued is logged and reported false, so the failure
+// counts as a normal terminal one.
+func (l *roleListener) redrive(evt eventqueue.Event, err error) bool {
+	if l.maxRedrives <= 0 || l.redriveQ == nil || l.ctx.Err() != nil || evt.Generation >= l.maxRedrives {
+		return false
+	}
+	class, ok := classifyTransient(err)
+	if !ok {
+		return false
+	}
+	now := l.clock()
+	if l.redriveQ.AcceptedAfter(l.role.Name, evt.ID, evt.At) {
+		slog.Info("orchestrator: redrive skipped; a later event for the same entity was already accepted",
+			"role", l.role.Name, "event", evt.ID, "generation", evt.Generation)
+		return false
+	}
+	delay := l.redriveDelay
+	if delay <= 0 {
+		delay = roles.DefaultRedriveDelay
+	}
+	window := evt.ExpiresAt.Sub(evt.At)
+	if window < 0 {
+		window = 0
+	}
+	next := evt
+	next.ID = eventqueue.RedriveID(evt.ID, evt.Generation+1)
+	next.Generation = evt.Generation + 1
+	next.At = now
+	next.NotBefore = now.Add(delay)
+	next.ExpiresAt = next.NotBefore.Add(window)
+	res, qerr := l.redriveQ.Enqueue(next)
+	if qerr != nil {
+		slog.Warn("orchestrator: redrive not enqueued; counting the failure as final",
+			"role", l.role.Name, "event", evt.ID, "generation", next.Generation, "err", qerr)
+		return false
+	}
+	if res == eventqueue.Deduped {
+		// An earlier attempt at this very redrive is still held (a crash between
+		// the enqueue and the accept record): it is the pending redrive.
+		return true
+	}
+	if l.redriveObs != nil {
+		l.redriveObs.OnDispatchRedrive(l.role.Name, class)
+	}
+	slog.Info("orchestrator: dispatch redriven",
+		"role", l.role.Name, "event", evt.ID, "event_type", evt.Type,
+		"redrive_id", next.ID, "generation", next.Generation, "not_before", next.NotBefore, "class", class)
 	return true
 }
 
@@ -595,11 +672,15 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailDispatchRetry}
 	}
 	l.retries.forget(evt.ID)
-	if err != nil && l.failedObs != nil {
+	// A transient failure whose retries are spent or whose window closed may be
+	// redriven (ADR 0121): then it is not the last generation, so it is neither
+	// counted as a failed dispatch nor recorded as a dead letter.
+	redriven := err != nil && l.redrive(evt, err)
+	if err != nil && !redriven && l.failedObs != nil {
 		// The dispatch ended failed: no re-run follows (shouldRetry said no above).
 		l.failedObs.OnDispatchFailed(evt.Type, l.role.Name)
 	}
-	if err != nil && l.failedLog != nil {
+	if err != nil && !redriven && l.failedLog != nil {
 		dl := DeadLetterFor(evt, l.role.Name, err, meta.Attempt, l.clock())
 		if rerr := l.failedLog.RecordFailed(dl); rerr != nil {
 			slog.Warn("orchestrator: failed record not persisted",

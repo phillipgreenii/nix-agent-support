@@ -187,6 +187,10 @@ const (
 	// a retry storm is visible; the cap on retries per event is
 	// roles.MaxDispatchRetriesCap.
 	MetricDispatchRetries = "pg_router_dispatch_retries"
+	// MetricDispatchRedrives counts each redrive the core enqueues for an event
+	// whose dispatch ended failed on a transient class (ADR 0121), per role and
+	// class; bounded per original event by the role's max_redrives (hard cap 2).
+	MetricDispatchRedrives = "pg_router_dispatch_redrives"
 	// MetricDispatchFailed counts each dispatch that ENDED failed, per event
 	// type and role: a handler error that is not re-run (orchestrator.
 	// DispatchFailedObserver, so a transient attempt that is retried is NOT
@@ -504,26 +508,27 @@ func IsTriagerRole(role string) bool {
 // pull-source retry hook), so every path that produces metrics drives one
 // emitter.
 type Emitter struct {
-	failures        metric.Int64Counter
-	unconsumed      metric.Int64Counter
-	expiredPending  metric.Int64Counter
-	unknownType     metric.Int64Counter
-	throughput      metric.Int64Counter
-	skipped         metric.Int64Counter
-	enqueued        metric.Int64Counter
-	reoffered       metric.Int64Counter
-	supervisors     metric.Int64Gauge
-	sourceFailures  metric.Int64Counter
-	sourceBackoff   metric.Int64Counter
-	ticksSkipped    metric.Int64Counter
-	loadBackoff     atomic.Int64
-	deduped         metric.Int64Counter
-	enqueueRejected metric.Int64Counter
-	dispatchRetries metric.Int64Counter
-	dispatchFailed  metric.Int64Counter
-	dispatchLatency metric.Float64Histogram
-	queueWait       metric.Float64Histogram
-	run             metric.Float64Histogram
+	failures         metric.Int64Counter
+	unconsumed       metric.Int64Counter
+	expiredPending   metric.Int64Counter
+	unknownType      metric.Int64Counter
+	throughput       metric.Int64Counter
+	skipped          metric.Int64Counter
+	enqueued         metric.Int64Counter
+	reoffered        metric.Int64Counter
+	supervisors      metric.Int64Gauge
+	sourceFailures   metric.Int64Counter
+	sourceBackoff    metric.Int64Counter
+	ticksSkipped     metric.Int64Counter
+	loadBackoff      atomic.Int64
+	deduped          metric.Int64Counter
+	enqueueRejected  metric.Int64Counter
+	dispatchRetries  metric.Int64Counter
+	dispatchRedrives metric.Int64Counter
+	dispatchFailed   metric.Int64Counter
+	dispatchLatency  metric.Float64Histogram
+	queueWait        metric.Float64Histogram
+	run              metric.Float64Histogram
 
 	// typeMu guards typeSeen, the bounded set of full event-type label values the
 	// wait/run histograms have minted (see eventTypeLabel).
@@ -934,6 +939,14 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	if err != nil {
 		return nil, err
 	}
+	dispatchRedrives, err := m.Int64Counter(
+		MetricDispatchRedrives,
+		metric.WithUnit("{redrive}"),
+		metric.WithDescription("redrives the core enqueued for an event whose dispatch ended failed on a transient class, per role and class (killed/deadline/unavailable); bounded per original event by the role's max_redrives"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	dispatchFailed, err := m.Int64Counter(
 		MetricDispatchFailed,
 		metric.WithUnit("{dispatch}"),
@@ -1237,6 +1250,7 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	e.deduped = deduped
 	e.enqueueRejected = enqueueRejected
 	e.dispatchRetries = dispatchRetries
+	e.dispatchRedrives = dispatchRedrives
 	e.dispatchFailed = dispatchFailed
 	e.dispatchLatency = dispatchLatency
 	e.queueWait = queueWait
@@ -1692,6 +1706,15 @@ func (e *Emitter) recordDispatchFailed(evtType, listenerID string) {
 // transient class (bead pg2-yu5y2).
 func (e *Emitter) OnDispatchRetry(role, class string) {
 	e.dispatchRetries.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("role", role),
+		attribute.String("class", class),
+	))
+}
+
+// OnDispatchRedrive implements orchestrator.DispatchRedriveObserver: it counts
+// one redrive enqueued for a transiently failed event (ADR 0121).
+func (e *Emitter) OnDispatchRedrive(role, class string) {
+	e.dispatchRedrives.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("role", role),
 		attribute.String("class", class),
 	))

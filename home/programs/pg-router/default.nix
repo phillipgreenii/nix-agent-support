@@ -81,7 +81,8 @@ let
         description = ''
           Any other `[[role]]` keys, under their TOML spelling (for example
           `extra.retry`, `extra.description`,
-          `extra.max_dispatch_retries`), merged into the rendered table so a
+          `extra.max_dispatch_retries`, `extra.max_redrives`,
+          `extra.redrive_delay`), merged into the rendered table so a
           consumer never has to hand-write a `[[role]]` table for a role it
           also declares here.
         '';

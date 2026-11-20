@@ -160,6 +160,13 @@ type roleTOML struct {
 	// bead pg2-yu5y2). Absent or 0: no re-run (the default). Must be within
 	// 0..roles.MaxDispatchRetriesCap.
 	MaxDispatchRetries *int `toml:"max_dispatch_retries"`
+	// MaxRedrives opts this role in to a bounded redrive of an event whose
+	// dispatch ended failed on a transient class (ADR 0121). Absent or 0: none
+	// (the default). Must be within 0..roles.MaxRedrivesCap. RedriveDelay is how
+	// long after the failure the redrive becomes eligible; absent means
+	// roles.DefaultRedriveDelay, and it must be positive.
+	MaxRedrives  *int      `toml:"max_redrives"`
+	RedriveDelay *duration `toml:"redrive_delay"`
 	// Handler is the role's own adapter command (an absolute path; docket
 	// pg2-12gr4.10, the handler split). A role that sets it is on the NEW path.
 	// A pointer so an explicit empty string is rejected rather than read as unset.
@@ -742,7 +749,21 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if maxRetries < 0 || maxRetries > roles.MaxDispatchRetriesCap {
 		return roles.Role{}, fmt.Errorf("max_dispatch_retries = %d: must be between 0 and %d (a hard cap so a transient-failure storm cannot amplify load)", maxRetries, roles.MaxDispatchRetriesCap)
 	}
-	role := roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, Description: rt.Description, Requires: rt.Requires}
+	maxRedrives := 0
+	if rt.MaxRedrives != nil {
+		maxRedrives = *rt.MaxRedrives
+	}
+	if maxRedrives < 0 || maxRedrives > roles.MaxRedrivesCap {
+		return roles.Role{}, fmt.Errorf("max_redrives = %d: must be between 0 and %d (a hard cap so a poisoned event cannot loop)", maxRedrives, roles.MaxRedrivesCap)
+	}
+	redriveDelay := roles.DefaultRedriveDelay
+	if rt.RedriveDelay != nil {
+		if rt.RedriveDelay.D <= 0 {
+			return roles.Role{}, fmt.Errorf("redrive_delay = %s: must be positive", rt.RedriveDelay.D)
+		}
+		redriveDelay = rt.RedriveDelay.D
+	}
+	role := roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, MaxRedrives: maxRedrives, RedriveDelay: redriveDelay, Description: rt.Description, Requires: rt.Requires}
 	if err := applyHandlerKeys(&role, rt); err != nil {
 		return roles.Role{}, err
 	}

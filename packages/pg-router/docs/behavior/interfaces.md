@@ -596,10 +596,16 @@ sequenceDiagram
     dispatch: a handler error that the core does **not** re-run (a deterministic failure, or a
     transient one whose bounded re-runs are spent or whose retry window has closed), or a panic
     recovered from a listener's offer. A transient attempt the core re-runs is **not** counted here
-    (it counts under `dispatch_retries`), and the **failure rate** member above keeps its own labels
+    (it counts under `dispatch_retries`), nor is a failure for which the core enqueued a redrive
+    (it counts under `dispatch_redrives`; only the **last generation's** terminal failure counts
+    here, `INV-EVT-9`), and the **failure rate** member above keeps its own labels
     and still counts every failed attempt. `type` is bounded by the configured bindings and `role`
     by the configured roles (`DEC-OBS-5`). It is the per-event source for an alert on a failed run
     that nothing will re-run until the entity changes again (`DEC-OBS-3`, amended);
+  - **dispatch_redrives** — counter, per `role` and transient `class` (`killed`, `deadline`,
+    `unavailable`): a **redrive** the core enqueued for an event whose dispatch ended failed on a
+    transient class (`INV-EVT-9`). At most `max_redrives` (hard cap 2) per original event. `role` is
+    bounded by the configured roles (`DEC-OBS-5`);
   - **unconsumed-expired** — counter, per `type`: events that expired with no handler accepting them,
     which under `INV-EVT-4` is a **genuine miss** and is the concrete "no event misses" signal
     (`INV-DISP-3`, its **declared but inactive this run** case together with the ordinary miss);

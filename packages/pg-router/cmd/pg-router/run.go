@@ -403,6 +403,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	o.HandlerFailureObserver = fanOutHandlerFailureObserver{emitter, &handlerFailureCountObserver{counts: listenerCounts}}
 	// pg_router_dispatch_retries_total{role,class} (bead pg2-yu5y2).
 	o.DispatchRetryObserver = emitter
+	// pg_router_dispatch_redrives_total{role,class} (ADR 0121).
+	o.DispatchRedriveObserver = emitter
 	// pg_router_dispatch_failed_total{type,role}: a dispatch that ended failed.
 	o.DispatchFailedObserver = emitter
 	// pg_router_dispatch_at_level_{,seconds_}total{role,resource,level[,outcome]}.
@@ -536,6 +538,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// The retry count lives in the queue log so a restart does not reset it (ADR 0121).
 	o.RetryLog = q
 	o.FailedLog = q
+	// A transiently failed event of a role with max_redrives > 0 is re-enqueued here.
+	o.RedriveQueue = q
 	// Registration happens AFTER Listen (svc must exist) but is otherwise
 	// independent of Accept: an in-process participant never dials the
 	// socket, so there is no handshake to wait on. Task 2.1: register every

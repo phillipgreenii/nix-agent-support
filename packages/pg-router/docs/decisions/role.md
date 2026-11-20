@@ -12,7 +12,7 @@ reads a role's own configuration, and that survival of a shutdown is a generic r
 `pg2-12gr4.1` design review of 2026-10-20: rulings 23 and 24; no separate approval, ruling 26).
 
 **The keys.** A `[[role]]` entry gains three keys beside `name`, `enabled`, `binds`,
-`requires` and `max_dispatch_retries`. **No `[[role]]` key carries a `wrap`**, and
+`requires`, `max_dispatch_retries`, `max_redrives` and `redrive_delay` (ADR 0121; `DEC-RETRY-2`). **No `[[role]]` key carries a `wrap`**, and
 `[[query]]` gains none either (the operator's ruling 30 of the role-environment design): a command
 is opaque to the core, and whatever prefixes it is part of the command:
 

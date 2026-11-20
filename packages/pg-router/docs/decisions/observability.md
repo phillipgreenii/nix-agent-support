@@ -231,7 +231,9 @@ The router now exposes the per-event series that item needs: `pg_router_dispatch
 It counts a dispatch **once, when it ends failed**: a handler error that is not re-run (the role's
 `max_dispatch_retries` spent, a deterministic failure, or the event's window closed) and a panic
 recovered from a listener's offer; a transient attempt that is re-run is counted only by
-`pg_router_dispatch_retries_total`. `pg_router_failures_total` is **unchanged** (same labels, still
+`pg_router_dispatch_retries_total`. A failure for which the router enqueued a redrive (ADR 0121,
+`max_redrives`) is not counted either: it counts under `pg_router_dispatch_redrives_total{role,class}`,
+and only the last generation's terminal failure counts here. `pg_router_failures_total` is **unchanged** (same labels, still
 one count per failed attempt), and `type` is added to no existing series. The rule
 `pg-router-event-dispatch-failed` pages on `sum by (type, role) (increase(pg_router_dispatch_failed_total{type="issue.changed"}[1h])) >= 1`
 held 5 minutes. **Accepted limitation:** the counter has no per-entity label, so the rule cannot tell

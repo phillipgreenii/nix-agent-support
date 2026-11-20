@@ -341,6 +341,27 @@ increments `pg_router_dispatch_retries{role,class}`; the failed attempts still c
 `handler-error` and the hand-back as `declined` with reason `dispatch-retry` (`DEC-RETRY-2`).
 The handler MUST be idempotent per event (delivery is already at-least-once).
 
+A `[[role]]` MAY also opt in to a **redrive** of an event whose dispatch ended failed on a transient
+class (retries spent or window closed), for an outage longer than one window (ADR 0121):
+
+- `max_redrives = N` (0 = off, the default; hard cap 2, a larger or negative value fails config
+  load). The router enqueues one fresh copy of the event: a new id (`<id>~r<generation>`), generation
+  plus 1, a new `expiresAt` of its `notBefore` plus the original window, and a fresh retry count.
+- `redrive_delay = "1h"` (a Go duration, default 1 hour, must be positive): the redrive is offered
+  to no handler before `notBefore` = failure time plus this delay.
+- Never redriven: a deterministic failure, a shutdown hand-back, a success, an event whose
+  generation already equals `max_redrives`, or one whose entity (the id before `@`) has since had
+  a later event accepted by the role. A redrive that cannot be enqueued counts as a normal terminal
+  failure.
+- Bound: one original event gets at most `(1 + max_redrives) x (1 + max_dispatch_retries)` attempts
+  (12 at the hard caps), however often the daemon restarts, because the generation rides on the
+  event and the retry count is in the queue log.
+- Each redrive increments `pg_router_dispatch_redrives_total{role,class}`. Only the last
+  generation's terminal failure counts toward `pg_router_dispatch_failed_total` and is recorded in
+  `dead-letters`, so a recovered redrive is not a page.
+- A redrive is a new event of the same type, so every role bound to that type is offered it
+  (handlers MUST be idempotent per event, as above).
+
 ## Configuration (pool-wide env)
 
 Pool-wide settings come from `PG_ROUTER_*` environment variables; roles are NOT

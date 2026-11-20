@@ -30,3 +30,27 @@ func TestOnDispatchRetryCountsPerRoleAndClass(t *testing.T) {
 		t.Fatalf("counts = %v", got)
 	}
 }
+
+// OnDispatchRedrive counts per role and transient class as the
+// pg_router_dispatch_redrives counter (ADR 0121).
+func TestOnDispatchRedriveCountsPerRoleAndClass(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.OnDispatchRedrive("desk-pr", "killed")
+	h.emitter.OnDispatchRedrive("desk-pr", "killed")
+	h.emitter.OnDispatchRedrive("desk-pr", "unavailable")
+
+	m := findMetric(t, h.collect(t), MetricDispatchRedrives)
+	sum, ok := m.Data.(metricdata.Sum[int64])
+	if !ok || !sum.IsMonotonic {
+		t.Fatalf("dispatch_redrives is not a monotonic counter: %#v", m.Data)
+	}
+	got := map[string]int64{}
+	for _, dp := range sum.DataPoints {
+		role, _ := dp.Attributes.Value("role")
+		class, _ := dp.Attributes.Value("class")
+		got[role.AsString()+"/"+class.AsString()] = dp.Value
+	}
+	if got["desk-pr/killed"] != 2 || got["desk-pr/unavailable"] != 1 || len(got) != 2 {
+		t.Fatalf("counts = %v", got)
+	}
+}

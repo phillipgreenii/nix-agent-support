@@ -25,6 +25,22 @@ type DispatchRetryObserver interface {
 	OnDispatchRetry(role, class string)
 }
 
+// DispatchRedriveObserver is notified once per redrive enqueued for a
+// transiently failed event (ADR 0121); the production implementation is
+// metrics.Emitter's pg_router_dispatch_redrives_total{role,class}. nil disables
+// the notification.
+type DispatchRedriveObserver interface {
+	OnDispatchRedrive(role, class string)
+}
+
+// RedriveQueue is the slice of the event queue a redrive needs: enqueue the fresh
+// copy, and ask whether a later event of the same entity was already accepted by
+// the role (then the redrive is skipped). *eventqueue.Queue implements it.
+type RedriveQueue interface {
+	Enqueue(evt eventqueue.Event) (eventqueue.EnqueueResult, error)
+	AcceptedAfter(listenerID, eventID string, at time.Time) bool
+}
+
 // DispatchFailedObserver is notified once per dispatch that ENDED failed: a
 // handler error that is not handed back for a dispatch re-run (a deterministic
 // failure, or a transient one whose retries are spent or whose window is closed).

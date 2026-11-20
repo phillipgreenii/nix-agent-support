@@ -106,6 +106,14 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 # failure), at the role's retry cadence, at most this many times per event
 # (0 = off, the default; hard cap 3):
 # max_dispatch_retries = 2
+# A role MAY also opt in to a bounded REDRIVE: when an event ends failed on a
+# transient class (retries spent or window closed), the router enqueues one
+# fresh copy (new id, generation + 1, a new window) that is not offered before
+# redrive_delay has passed (default 1h, must be positive). max_redrives is the
+# most redrives per original event (0 = off, the default; hard cap 2), so one
+# event is attempted at most (1 + max_redrives) x (1 + max_dispatch_retries) times:
+# max_redrives = 1
+# redrive_delay = "1h"
 # The event log (queue.jsonl) is size-limited: [pool].max_log_bytes (default
 # 67108864 = 64 MiB; PG_ROUTER_MAX_LOG_BYTES takes units such as 64MiB). Past 90%
 # of it polled emitters are halted; at it new events are rejected with a log_full

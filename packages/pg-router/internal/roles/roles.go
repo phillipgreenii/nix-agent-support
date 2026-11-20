@@ -15,6 +15,8 @@
 package roles
 
 import (
+	"time"
+
 	"github.com/phillipgreenii/pg-router/internal/backoff"
 )
 
@@ -50,6 +52,16 @@ func (rs RoleSet) DeclaredBindTypes() []string {
 // Config decode rejects a larger value and the listener clamps defensively.
 const MaxDispatchRetriesCap = 3
 
+// MaxRedrivesCap is the hard ceiling on a role's MaxRedrives (ADR 0121 D3):
+// config decode rejects a larger value and the listener clamps defensively, so
+// with MaxDispatchRetriesCap one original event is never attempted more than
+// (1+2)x(1+3) = 12 times.
+const MaxRedrivesCap = 2
+
+// DefaultRedriveDelay is the RedriveDelay of a role that opts in to redrives
+// without naming one (ADR 0121 D3).
+const DefaultRedriveDelay = time.Hour
+
 type Role struct {
 	Name    string
 	Enabled bool
@@ -78,6 +90,15 @@ type Role struct {
 	// and never re-run, exactly as before. Capped at
 	// MaxDispatchRetriesCap by config decode.
 	MaxDispatchRetries int
+	// MaxRedrives bounds how many redrives (ADR 0121) one original event gets: a
+	// fresh copy of an event whose dispatch ended failed on a transient class,
+	// enqueued with a new id, generation + 1 and a notBefore of RedriveDelay.
+	// 0 (the zero value, and every built-in role) disables it. Capped at
+	// MaxRedrivesCap by config decode.
+	MaxRedrives int
+	// RedriveDelay is how long after the failure a redrive becomes eligible
+	// (its notBefore); zero means DefaultRedriveDelay.
+	RedriveDelay time.Duration
 	// Description is an optional, operator-authored free-text note about
 	// this role (pg2-ec754) — purely informational, surfaced in the TUI
 	// drill-down details so an operator can record why a listener exists

@@ -156,6 +156,12 @@ type Orchestrator struct {
 	// failed (see retry.go). nil records nothing; captured by NewListener.
 	// cmd/pg-router's bootCore wires the queue in here.
 	FailedLog FailedLog
+	// RedriveQueue is where a redrive of a transiently failed event is enqueued
+	// (ADR 0121); nil disables redrives. Captured by NewListener.
+	RedriveQueue RedriveQueue
+	// DispatchRedriveObserver is notified of each redrive enqueued. nil disables
+	// the notification, not the redrive; captured by NewListener.
+	DispatchRedriveObserver DispatchRedriveObserver
 	// failedNow is the failure-instant clock for tests (nil means time.Now).
 	failedNow func() time.Time
 	// DispatchFailedObserver is notified once per dispatch that ended failed
