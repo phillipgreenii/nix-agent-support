@@ -23,7 +23,7 @@ var Version = "dev"
 var errFailed = errors.New("pg-router-source-pg-desk: command failed")
 
 // run executes the adapter with args, writing to stdout/stderr (threaded
-// explicitly so tests can capture them). The exit scheme is 0/1 only.
+// explicitly so tests can capture them). The exit scheme is 0/1, plus 2 for a settle usage error.
 func run(args []string, stdout, stderr io.Writer) int {
 	root := newRootCmd()
 	root.SetOut(stdout)
@@ -31,6 +31,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 
 	if err := root.ExecuteContext(context.Background()); err != nil {
+		if errors.Is(err, errUsage) {
+			return 2
+		}
 		if !errors.Is(err, errFailed) {
 			fmt.Fprintln(stderr, err)
 		}

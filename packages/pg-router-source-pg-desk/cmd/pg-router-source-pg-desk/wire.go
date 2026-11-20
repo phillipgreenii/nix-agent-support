@@ -16,8 +16,16 @@ import (
 // translator.
 type envelope struct {
 	Contract string      `json:"contract"`
+	Cursor   envCursor   `json:"cursor"`
 	Sources  []envSource `json:"sources"`
 	Records  []envRecord `json:"records"`
+}
+
+// envCursor is the envelope's cursor; under --no-ack To is the position the
+// caller acknowledges.
+type envCursor struct {
+	From json.Number `json:"from"`
+	To   json.Number `json:"to"`
 }
 
 type envSource struct {
@@ -44,6 +52,8 @@ type rawItem struct {
 	Type     string         `json:"type"`
 	Title    string         `json:"title"`
 	Metadata map[string]any `json:"metadata"`
+	// Ack is the settlement handle, set only under --deferred-ack.
+	Ack *ackHandle `json:"ack,omitempty"`
 	// At and ExpiresAt are UTC RFC 3339 strings (second precision), set only
 	// when --retry-window is greater than zero; omitted otherwise so the
 	// output without the flag is unchanged.
@@ -57,4 +67,11 @@ func writeItems(stdout io.Writer, items []rawItem) error {
 	enc := json.NewEncoder(stdout)
 	enc.SetEscapeHTML(false)
 	return enc.Encode(items)
+}
+
+// ackHandle is the opaque lane and token pg-router keeps with an event and
+// hands back to the settle subcommand (both strings).
+type ackHandle struct {
+	Lane  string `json:"lane"`
+	Token string `json:"token"`
 }

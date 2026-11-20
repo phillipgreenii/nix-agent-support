@@ -4,6 +4,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -33,6 +34,7 @@ type entityGroup struct {
 	origin  string
 	seq     json.Number
 	seqVal  float64
+	minSeq  int64
 	kinds   []string
 	seen    map[string]bool
 }
@@ -45,6 +47,14 @@ type entityGroup struct {
 // the maximum-seq record (the latest state of the entity). The result is
 // always non-nil.
 func itemsFromEnvelope(env envelope) ([]rawItem, error) {
+	items, _, err := itemsWithLowest(env)
+	return items, err
+}
+
+// itemsWithLowest is itemsFromEnvelope plus, per item, the lowest record
+// sequence of its entity in the poll (the input of the deferred-ack token
+// rule).
+func itemsWithLowest(env envelope) ([]rawItem, []int64, error) {
 	degraded := make([]string, 0, len(env.Sources))
 	for _, s := range env.Sources {
 		if s.Status != statusOK {
@@ -56,18 +66,23 @@ func itemsFromEnvelope(env envelope) ([]rawItem, error) {
 	for _, r := range env.Records {
 		seq, err := numberOrZero(r.Seq)
 		if err != nil {
-			return nil, fmt.Errorf("record %q: seq: %w", r.ID, err)
+			return nil, nil, fmt.Errorf("record %q: seq: %w", r.ID, err)
 		}
 		version, err := numberOrZero(r.Version)
 		if err != nil {
-			return nil, fmt.Errorf("record %q: version: %w", r.ID, err)
+			return nil, nil, fmt.Errorf("record %q: version: %w", r.ID, err)
 		}
 		seqVal, _ := strconv.ParseFloat(string(seq), 64)
+		seqInt, _ := strconv.ParseInt(string(seq), 10, 64)
 		g, ok := groups[r.ID]
 		if !ok {
 			g = &entityGroup{id: r.ID, typ: r.Type, seen: map[string]bool{}, kinds: []string{}}
 			groups[r.ID] = g
+			g.minSeq = seqInt
 			order = append(order, r.ID)
+		}
+		if seqInt < g.minSeq {
+			g.minSeq = seqInt
 		}
 		for _, kind := range r.Kinds {
 			if !g.seen[kind] {
@@ -81,8 +96,10 @@ func itemsFromEnvelope(env envelope) ([]rawItem, error) {
 		}
 	}
 	items := make([]rawItem, 0, len(order))
+	lows := make([]int64, 0, len(order))
 	for _, id := range order {
 		g := groups[id]
+		lows = append(lows, g.minSeq)
 		items = append(items, rawItem{
 			ID:    g.id + "@" + string(g.seq),
 			Emit:  g.typ + changedSuffix,
@@ -99,7 +116,37 @@ func itemsFromEnvelope(env envelope) ([]rawItem, error) {
 			},
 		})
 	}
-	return items, nil
+	return items, lows, nil
+}
+
+// withAck orders items by each entity's lowest record sequence and gives item
+// k the token (lowest sequence of item k+1) - 1 and the last item the
+// envelope's cursor.to, so every record at or below a token belongs to an item
+// at or before it. The lane of every item is its entity type.
+func withAck(items []rawItem, lows []int64, to json.Number) ([]rawItem, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	last, err := strconv.ParseInt(string(to), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("envelope cursor.to %q is not an integer", string(to))
+	}
+	idx := make([]int, len(items))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return lows[idx[a]] < lows[idx[b]] })
+	out := make([]rawItem, len(items))
+	for k, i := range idx {
+		tok := last
+		if k+1 < len(idx) {
+			tok = lows[idx[k+1]] - 1
+		}
+		it := items[i]
+		it.Ack = &ackHandle{Lane: it.Type, Token: strconv.FormatInt(tok, 10)}
+		out[k] = it
+	}
+	return out, nil
 }
 
 // numberOrZero validates a JSON number copied from the envelope and keeps it
@@ -130,6 +177,14 @@ origin, degraded_sources}}. pg-router types the event from emit, so a query
 running this adapter MUST declare emit "<type>.changed". --cached is never
 passed (it does not advance the cursor).
 
+--deferred-ack opts one query in to settlement: pg-desk is run with --no-ack
+(the cursor does not move), the items are ordered by each entity's lowest
+record sequence and each carries ack {"lane": <type>, "token": <decimal
+sequence>}, where item k's token is (lowest sequence of item k+1) - 1 and the
+last item's is the envelope's cursor.to. The "settle" subcommand, run by the
+router once the items are accepted, acknowledges through a token. Without
+--deferred-ack nothing changes.
+
 --retry-window D (a Go duration such as 10m; default 0 = off) is NOT passed to
 pg-desk. When D is greater than zero every item additionally carries "at" (this
 invocation's emit time, one UTC second-precision RFC 3339 value for the whole
@@ -144,6 +199,7 @@ nothing on stdout and the diagnostic on stderr.`
 
 func newRootCmd() *cobra.Command {
 	var consumer, query string
+	var deferredAck bool
 	var limit int
 	var retryWindow time.Duration
 	root := &cobra.Command{
@@ -160,7 +216,9 @@ func newRootCmd() *cobra.Command {
 	root.Flags().StringVar(&query, "query", "", "restrict the call to one configured watched query (passed through)")
 	root.Flags().IntVar(&limit, "limit", 0, "return at most N records (passed through; 0 = all)")
 	root.Flags().DurationVar(&retryWindow, "retry-window", 0, "when > 0, give each item at (emit time) and expiresAt (at + window) so pg-router retries a failed dispatch inside the window; 0 (default) = off, not passed to pg-desk")
+	root.Flags().BoolVar(&deferredAck, "deferred-ack", false, "opt in to settlement: pass --no-ack to pg-desk, order items by each entity's lowest record sequence and give each an ack {lane, token}; the cursor then moves only when the settle subcommand runs")
 	_ = root.MarkFlagRequired("consumer")
+	root.AddCommand(newSettleCmd())
 	root.RunE = func(cmd *cobra.Command, args []string) error {
 		if retryWindow < 0 {
 			fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-desk: --retry-window must not be negative")
@@ -172,6 +230,9 @@ func newRootCmd() *cobra.Command {
 		}
 		if cmd.Flags().Changed("limit") {
 			argv = append(argv, "--limit", strconv.Itoa(limit))
+		}
+		if deferredAck {
+			argv = append(argv, "--no-ack")
 		}
 		argv = append(argv, "--json")
 
@@ -193,7 +254,10 @@ func newRootCmd() *cobra.Command {
 			fmt.Fprintf(stderr, "pg-router-source-pg-desk: pg-desk output is not a change envelope: %v\n", err)
 			return errFailed
 		}
-		items, err := itemsFromEnvelope(env)
+		items, lows, err := itemsWithLowest(env)
+		if err == nil && deferredAck {
+			items, err = withAck(items, lows, env.Cursor.To)
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "pg-router-source-pg-desk: malformed envelope: %v\n", err)
 			return errFailed

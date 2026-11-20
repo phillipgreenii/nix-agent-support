@@ -412,3 +412,96 @@ func TestRetryWindowInvalidFailsBeforeRunningPgDesk(t *testing.T) {
 		}
 	}
 }
+
+// Interleaved records: entity A owns seq 1 and 3, entity B owns seq 2. Under
+// --deferred-ack the items are ordered by lowest seq, A's token is B's lowest
+// minus one (so an ack through it cannot pass B's record 2), and the last
+// item takes cursor.to.
+func TestDeferredAckTokensRespectInterleavedRecords(t *testing.T) {
+	env := `{"contract":"pg-desk.changes/v1","cursor":{"from":0,"to":9},"sources":[],"records":[
+	{"seq":1,"type":"widget","id":"a","title":"A","version":1,"kinds":["x"],"origin":"poll"},
+	{"seq":2,"type":"widget","id":"b","title":"B","version":1,"kinds":["x"],"origin":"poll"},
+	{"seq":3,"type":"widget","id":"a","title":"A2","version":2,"kinds":["y"],"origin":"poll"}]}`
+	f := withHelper(t, "GO_HELPER_STDOUT="+env)
+	stdout, stderr, code := runCLI(t, "widget", "--consumer", "router", "--deferred-ack")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+	if !reflect.DeepEqual(f.lastArgs(), []string{"widget", "changes", "--consumer", "router", "--no-ack", "--json"}) {
+		t.Errorf("argv = %v", f.lastArgs())
+	}
+	items := mustItems(t, stdout)
+	if len(items) != 2 {
+		t.Fatalf("items = %d", len(items))
+	}
+	want := []struct{ id, token string }{{"a@3", "1"}, {"b@2", "9"}}
+	for i, w := range want {
+		ack, _ := items[i]["ack"].(map[string]any)
+		if items[i]["id"] != w.id || ack["lane"] != "widget" || ack["token"] != w.token || len(ack) != 2 {
+			t.Errorf("item %d = %v, want id %s token %s", i, items[i], w.id, w.token)
+		}
+	}
+}
+
+// Without --deferred-ack nothing changes: no --no-ack, no ack object.
+func TestNoDeferredAckIsDormant(t *testing.T) {
+	f := withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_all_ok.json"))
+	stdout, _, code := runCLI(t, "widget", "--consumer", "router")
+	if code != 0 || strings.Contains(stdout, `"ack"`) {
+		t.Fatalf("code=%d stdout=%q", code, stdout)
+	}
+	for _, a := range f.lastArgs() {
+		if a == "--no-ack" {
+			t.Errorf("argv has --no-ack: %v", f.lastArgs())
+		}
+	}
+}
+
+// An empty poll under --deferred-ack emits nothing.
+func TestDeferredAckEmptyPollEmitsNothing(t *testing.T) {
+	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_empty.json"))
+	stdout, _, code := runCLI(t, "widget", "--consumer", "router", "--deferred-ack")
+	if code != 0 || strings.TrimSpace(stdout) != "[]" {
+		t.Fatalf("code=%d stdout=%q", code, stdout)
+	}
+}
+
+func TestSettleRunsChangesAck(t *testing.T) {
+	f := withHelper(t, `GO_HELPER_STDOUT={"acked_seq":7}`)
+	stdout, stderr, code := runCLI(t, "settle", "widget", "--consumer", "router", "--lane", "widget", "--through", "7")
+	if code != 0 || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	want := []string{"widget", "changes-ack", "--consumer", "router", "--next-seq", "7"}
+	if !reflect.DeepEqual(f.lastArgs(), want) {
+		t.Errorf("argv = %v, want %v", f.lastArgs(), want)
+	}
+}
+
+func TestSettleUsageErrorsExit2WithoutCallingPgDesk(t *testing.T) {
+	cases := map[string][]string{
+		"wrong lane":      {"settle", "widget", "--consumer", "r", "--lane", "other", "--through", "1"},
+		"non-integer":     {"settle", "widget", "--consumer", "r", "--lane", "widget", "--through", "x"},
+		"negative":        {"settle", "widget", "--consumer", "r", "--lane", "widget", "--through", "-1"},
+		"missing through": {"settle", "widget", "--consumer", "r", "--lane", "widget"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := withHelper(t)
+			if _, _, code := runCLI(t, args...); code != 2 {
+				t.Errorf("exit = %d, want 2", code)
+			}
+			if len(f.Calls()) != 0 {
+				t.Errorf("pg-desk was called: %v", f.Calls())
+			}
+		})
+	}
+}
+
+func TestSettleFailureOfChangesAckIsNonZero(t *testing.T) {
+	withHelper(t, "GO_HELPER_EXIT=2", "GO_HELPER_STDERR=past delivered\n")
+	_, stderr, code := runCLI(t, "settle", "widget", "--consumer", "r", "--lane", "widget", "--through", "99")
+	if code != 1 || !strings.Contains(stderr, "past delivered") {
+		t.Errorf("code=%d stderr=%q", code, stderr)
+	}
+}
