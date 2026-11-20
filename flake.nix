@@ -3513,8 +3513,8 @@
               # stale while the hooks keep appending event files.
               test-claude-tool-tracker-ingest-darwin-module =
                 let
-                  evalDarwin =
-                    users:
+                  evalDarwinObs =
+                    obsEnable: users:
                     (lib.evalModules {
                       specialArgs = { inherit pkgs lib; };
                       modules = [
@@ -3529,15 +3529,31 @@
                               type = lib.types.nullOr lib.types.str;
                               default = "tester";
                             };
-                            phillipgreenii.system.launchdServices.userAgents = lib.mkOption {
-                              type = lib.types.attrsOf lib.types.anything;
-                              default = { };
+                            phillipgreenii = {
+                              system.launchdServices.userAgents = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              # Stubs for the observability options declared at system scope in
+                              # nix-support-apps; the module registers a logSources entry when enabled.
+                              observability = {
+                                enable = lib.mkOption {
+                                  type = lib.types.bool;
+                                  default = false;
+                                };
+                                logSources = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.anything;
+                                  default = { };
+                                };
+                              };
                             };
                           };
                           config.home-manager.users = users;
+                          config.phillipgreenii.observability.enable = obsEnable;
                         }
                       ];
                     }).config;
+                  evalDarwin = evalDarwinObs false;
                   hm = enable: interval: {
                     phillipgreenii.programs.claude-tool-tracker.ingest = {
                       inherit enable;
@@ -3547,8 +3563,13 @@
                   on = evalDarwin { alice = hm true 120; };
                   off = evalDarwin { alice = hm false 120; };
                   none = evalDarwin { };
+                  obsOn = evalDarwinObs true { alice = hm true 120; };
+                  obsOnIngestOff = evalDarwinObs true { alice = hm false 120; };
                   a = on.phillipgreenii.system.launchdServices.userAgents.claude-tool-tracker-ingest;
                 in
+                assert obsOn.phillipgreenii.observability.logSources.claude-tool-tracker-ingest.format == "raw";
+                assert on.phillipgreenii.observability.logSources == { };
+                assert obsOnIngestOff.phillipgreenii.observability.logSources == { };
                 assert a.label == "com.phillipg.claude-tool-tracker-ingest";
                 assert a.runAtLoad;
                 assert !a.keepAlive;

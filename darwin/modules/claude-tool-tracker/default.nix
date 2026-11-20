@@ -33,29 +33,45 @@ in
   #
   # Health check: the agent's stdout log holds one `total` line per run, and
   # tracker.db's mtime must stay within a few intervals of the newest event file.
-  config = lib.mkIf ingestEnabledByAnyUser {
-    phillipgreenii.system.launchdServices.userAgents.claude-tool-tracker-ingest = {
-      label = "com.phillipg.claude-tool-tracker-ingest";
-      script = ''
-        # ingest prints one line per event file (thousands); keep only the `total` line so
-        # the append-only log grows by one line per run. The exit status is preserved.
-        rc=0
-        out=$(${pkg}/bin/claude-tool-tracker ingest) || rc=$?
-        printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(printf '%s\n' "$out" | tail -n 1)"
-        exit "$rc"
-      '';
-      runAtLoad = true;
-      # A periodic one-shot: StartInterval is the only re-trigger and the process
-      # exits, so keepAlive and the state=running health check do not apply.
-      keepAlive = false;
-      healthCheck = false;
-      serviceConfig = {
-        StartInterval = interval;
-        # Without logs a failing ingest would be silent and the database would go stale
-        # while every report kept answering from it.
-        StandardErrorPath = "${stateHome}/claude-tool-tracker/ingest.err.log";
-        StandardOutPath = "${stateHome}/claude-tool-tracker/ingest.out.log";
+  config = lib.mkMerge [
+    (lib.mkIf ingestEnabledByAnyUser {
+      phillipgreenii.system.launchdServices.userAgents.claude-tool-tracker-ingest = {
+        label = "com.phillipg.claude-tool-tracker-ingest";
+        script = ''
+          # ingest prints one line per event file (thousands); keep only the `total` line so
+          # the append-only log grows by one line per run. The exit status is preserved.
+          rc=0
+          out=$(${pkg}/bin/claude-tool-tracker ingest) || rc=$?
+          printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(printf '%s\n' "$out" | tail -n 1)"
+          exit "$rc"
+        '';
+        runAtLoad = true;
+        # A periodic one-shot: StartInterval is the only re-trigger and the process
+        # exits, so keepAlive and the state=running health check do not apply.
+        keepAlive = false;
+        healthCheck = false;
+        serviceConfig = {
+          StartInterval = interval;
+          # Without logs a failing ingest would be silent and the database would go stale
+          # while every report kept answering from it.
+          StandardErrorPath = "${stateHome}/claude-tool-tracker/ingest.err.log";
+          StandardOutPath = "${stateHome}/claude-tool-tracker/ingest.out.log";
+        };
       };
-    };
-  };
+    })
+
+    # phillipgreenii.observability.logSources is declared at darwin/system scope in
+    # phillipgreenii-nix-support-apps; the launchdServices helper asserts that every
+    # consumer with log collection enabled has an entry. The ingest writes plain text
+    # (one `total` line per run on stdout), not the JSONL contract, so format = "raw",
+    # as for pg-ccaudit-ingest. Guarded on obs.enable so it is a no-op without the stack.
+    (lib.mkIf (ingestEnabledByAnyUser && ((config.phillipgreenii.observability or { }).enable or false))
+      {
+        phillipgreenii.observability.logSources.claude-tool-tracker-ingest = {
+          path = "${stateHome}/claude-tool-tracker/ingest.*.log";
+          format = "raw";
+        };
+      }
+    )
+  ];
 }
