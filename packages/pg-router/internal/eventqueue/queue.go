@@ -983,6 +983,11 @@ func (q *Queue) retainedLocked(e *entry, now time.Time) bool {
 	if !e.evt.Expired(now) {
 		return true
 	}
+	if e.evt.NotYetEligible(now) {
+		// expiresAt bounds a gated event (ADR 0121 D3): one whose window closed
+		// before its notBefore was never offered, owes nothing and is dropped.
+		return false
+	}
 	for _, ls := range q.listeners {
 		if ls.l.Matches(e.evt) && !e.settled[ls.l.ID()] {
 			return true // a bound listener is still owed its final attempt
@@ -1072,6 +1077,9 @@ func (q *Queue) headFor(l Listener) *entry {
 		}
 		if !l.Matches(e.evt) {
 			continue // not bound
+		}
+		if e.evt.NotYetEligible(q.now()) {
+			continue // not offered before its notBefore (ADR 0121 D3); later events are not blocked
 		}
 		return e
 	}

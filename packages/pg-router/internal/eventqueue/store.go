@@ -75,6 +75,8 @@ type Record struct {
 	At            time.Time      `json:"at,omitzero"`
 	ExpiresAt     time.Time      `json:"expiresAt,omitzero"`
 	EnqueuedAt    time.Time      `json:"enqueuedAt,omitzero"`
+	NotBefore     time.Time      `json:"notBefore,omitzero"`
+	Generation    int            `json:"generation,omitempty"`
 	Payload       map[string]any `json:"payload,omitempty"`
 	// Accept fields. ListenerID names the accepting listener. At (shared with the
 	// enqueue/gate field above) is, on an accept record, the instant the accept was
@@ -189,6 +191,8 @@ func recordFromEvent(e Event, enqueuedAt time.Time) Record {
 		At:            e.At,
 		ExpiresAt:     e.ExpiresAt,
 		EnqueuedAt:    enqueuedAt,
+		NotBefore:     e.NotBefore,
+		Generation:    e.Generation,
 		Payload:       e.Payload,
 	}
 }
@@ -201,6 +205,8 @@ func (r Record) event() Event {
 		Type:          r.Type,
 		At:            r.At,
 		ExpiresAt:     r.ExpiresAt,
+		NotBefore:     r.NotBefore,
+		Generation:    r.Generation,
 		Payload:       r.Payload,
 	}
 }

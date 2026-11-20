@@ -281,6 +281,12 @@ arrives at their values:
   (`INV-EVT-4`). Setting it in the future is how a retry window is requested; nothing computes a
   duration. A command-query source supplies both per record (`at`, `expiresAt`: RFC 3339), and the
   producer path carries them onto the queued event unchanged.
+- `notBefore` — **optional**, an **absolute instant** (RFC 3339). The queue MUST NOT offer the event
+  to any handler before it; absent, there is no gate. `expiresAt` still bounds the event: one whose
+  `expiresAt` passes before `notBefore` is dropped unoffered. A gated event does not block later
+  events for the same handler (ADR 0121 D3).
+- `generation` — **optional** non-negative integer, the redrive generation (original = 0). The queue
+  stores it verbatim; absent means 0.
 - `payload` — MUST be a JSON **object** (a keyed structure, never a bare scalar/array), so a handler
   always receives a struct. `payload` is itself **optional** on the wire — a source MAY omit it
   entirely — but a handler is never handed nothing in its place: the core **realizes an absent

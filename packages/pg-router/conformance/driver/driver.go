@@ -236,6 +236,10 @@ var negativeMatrix = map[string][]negativeCase{
 		{"missing type", `{"schemaVersion":"1","id":"e"}`},
 		{"wrong-type payload", `{"id":"e","type":"t","payload":"notobj"}`},
 		{"wrong-type expiresAt", `{"id":"e","type":"t","expiresAt":900}`},
+		{"malformed notBefore", `{"id":"e","type":"t","notBefore":"not-a-date"}`},
+		{"wrong-type notBefore", `{"id":"e","type":"t","notBefore":900}`},
+		{"negative generation", `{"id":"e","type":"t","generation":-1}`},
+		{"wrong-type generation", `{"id":"e","type":"t","generation":"1"}`},
 		// The duration-valued field is GONE from the event (DEC-EVENT-1), and
 		// additionalProperties:false is what makes that a REJECTION rather than a
 		// silently-ignored leftover — the one check that would have caught the

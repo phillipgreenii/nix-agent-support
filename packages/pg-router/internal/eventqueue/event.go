@@ -42,6 +42,15 @@ type Event struct {
 	// resolved by Resolve). Nothing computes a duration, and neither field is
 	// configured — they ride on the event (DEC-EVENT-1).
 	ExpiresAt time.Time
+	// NotBefore is an OPTIONAL absolute instant before which the queue MUST NOT
+	// offer the event to any handler (ADR 0121 D3). Zero means no gate. It is
+	// bounded by ExpiresAt: an event whose ExpiresAt passes is retired even if
+	// its NotBefore never arrived. Unlike At and ExpiresAt it has no default
+	// and Resolve leaves it alone.
+	NotBefore time.Time
+	// Generation is the OPTIONAL redrive generation (original = 0, ADR 0121 D3).
+	// The queue stores it verbatim and does not interpret it.
+	Generation int
 	// Payload MUST be a JSON object (keyed structure), OPAQUE to the core unless
 	// a binding declares a matchable path (INV-DISP-1). The core neither reads
 	// nor validates it beyond "is an object".
@@ -103,6 +112,11 @@ func (e Event) Resolve(now time.Time) Event {
 	}
 	return e
 }
+
+// NotYetEligible reports whether the event carries a NotBefore that is still in
+// the future at instant now, so the queue must not offer it yet (ADR 0121 D3).
+// An absent NotBefore (zero) never gates.
+func (e Event) NotYetEligible(now time.Time) bool { return now.Before(e.NotBefore) }
 
 // Expired reports whether the event is already past its expiry at instant now —
 // the STATELESS check INV-EVT-4 evaluates at attempt time. It MUST be called on a

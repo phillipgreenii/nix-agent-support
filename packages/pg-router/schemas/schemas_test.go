@@ -346,6 +346,10 @@ func TestPushInjectRefResolves(t *testing.T) {
 	if err := Validate("cli.push-inject", withExpiry); err != nil {
 		t.Fatalf("push-inject (ref to event) rejected an event with expiresAt: %v", err)
 	}
+	withGate := map[string]any{"schemaVersion": "1", "id": "e", "type": "t", "notBefore": "2026-07-16T13:00:00Z", "generation": 1}
+	if err := Validate("cli.push-inject", withGate); err != nil {
+		t.Fatalf("push-inject (ref to event) rejected an event with notBefore/generation: %v", err)
+	}
 	if err := Validate("cli.push-inject", map[string]any{"id": "e"}); err == nil || !strings.Contains(err.Error(), "type") {
 		t.Fatalf("push-inject should require event field type, got %v", err)
 	}

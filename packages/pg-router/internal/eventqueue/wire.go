@@ -37,6 +37,8 @@ type wireEvent struct {
 	Type          string         `json:"type"`
 	At            string         `json:"at,omitempty"`
 	ExpiresAt     string         `json:"expiresAt,omitempty"`
+	NotBefore     string         `json:"notBefore,omitempty"`
+	Generation    int            `json:"generation,omitempty"`
 	Payload       map[string]any `json:"payload"`
 }
 
@@ -88,6 +90,13 @@ func DecodeEvent(data []byte) (Event, error) {
 	if err != nil {
 		return Event{}, err
 	}
+	notBefore, err := parseInstant("notBefore", w.NotBefore)
+	if err != nil {
+		return Event{}, err
+	}
+	if w.Generation < 0 {
+		return Event{}, fmt.Errorf("%w: negative generation %d", ErrInvalidEvent, w.Generation)
+	}
 	payload := w.Payload
 	if payload == nil {
 		payload = map[string]any{}
@@ -98,6 +107,8 @@ func DecodeEvent(data []byte) (Event, error) {
 		Type:          w.Type,
 		At:            at,
 		ExpiresAt:     expiresAt,
+		NotBefore:     notBefore,
+		Generation:    w.Generation,
 		Payload:       payload,
 	}, nil
 }
@@ -143,6 +154,10 @@ func EncodeEvent(evt Event) ([]byte, error) {
 	if !evt.ExpiresAt.IsZero() {
 		w.ExpiresAt = formatInstant(evt.ExpiresAt)
 	}
+	if !evt.NotBefore.IsZero() {
+		w.NotBefore = formatInstant(evt.NotBefore)
+	}
+	w.Generation = evt.Generation
 	data, err := json.Marshal(w)
 	if err != nil {
 		return nil, fmt.Errorf("encode event %s: %w", evt.ID, err)
