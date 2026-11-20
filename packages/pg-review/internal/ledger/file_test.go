@@ -180,29 +180,6 @@ func TestPendingCapWaitingAndPromotion(t *testing.T) {
 	}
 }
 
-func TestBatchRollbackLeavesNothing(t *testing.T) {
-	l, _ := openClock(t)
-	r := startRun(t, l, "l", "s")
-	_, err := l.FileBatch(ctx, Batch{
-		RunID: r.ID, MaxPending: 10,
-		Doc:      validate.Document{Lens: "l", Scope: "s", Findings: []validate.Finding{finding("ok"), finding("ghost")}},
-		Evidence: []validate.EvidenceRow{evidence("ok", nil, "")},
-	})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("want ErrInvalid, got %v", err)
-	}
-	for _, q := range []string{"topic", "occurrence", "revision", "subject"} {
-		var n int
-		_ = l.DB().QueryRowContext(context.Background(), `SELECT COUNT(*) FROM `+q).Scan(&n)
-		if n != 0 {
-			t.Errorf("%s has %d rows after a rolled-back batch", q, n)
-		}
-	}
-	if got, _ := l.GetRun(ctx, r.ID); got.State != RunRunning {
-		t.Errorf("run state %s", got.State)
-	}
-}
-
 func TestFileIsIdempotentPerRun(t *testing.T) {
 	l, _ := openClock(t)
 	rows := []validate.EvidenceRow{evidence("x", nil, ""), evidence("y", nil, "")}
@@ -483,5 +460,26 @@ func TestFindingsAreRedactedBeforeStorage(t *testing.T) {
 	}
 	if strings.Contains(wj, "a1a1a1") || !strings.Contains(wj, "[REDACTED:sk]") {
 		t.Errorf("stored write-up: %s", wj)
+	}
+}
+
+func TestUnknownOrEmptySubjectDoesNotFailTheRun(t *testing.T) {
+	l, _ := openClock(t)
+	res := fileOnce(t, l, startRun(t, l, "l", "s"), 10,
+		[]validate.EvidenceRow{evidence("ok", nil, "")},
+		finding("ok"), finding(""), finding("unknown"))
+	if res.Filed != 1 || res.Skipped != 2 || len(res.Rejected) != 2 {
+		t.Errorf("result = %+v, want 1 filed, 2 skipped with reasons", res)
+	}
+	topicOf(t, l, "ok")
+}
+
+func TestEvidenceRowWithoutDefinedInIsFiled(t *testing.T) {
+	l, _ := openClock(t)
+	row := evidence("sig:(empty):e3b0c442", nil, "")
+	row.DefinedIn = ""
+	res := fileOnce(t, l, startRun(t, l, "l", "s"), 10, []validate.EvidenceRow{row}, finding("sig:(empty):e3b0c442"))
+	if res.Filed != 1 || len(res.Rejected) != 0 {
+		t.Errorf("result = %+v, want 1 filed", res)
 	}
 }

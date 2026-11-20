@@ -171,6 +171,7 @@ func (e *Error) ExitCode() int { return appcode.Validation }
 const (
 	RuleUnknownKind       = "unknown-kind"
 	RuleUnknownSubject    = "unknown-subject"
+	RuleEmptySubject      = "empty-subject"
 	RuleUnknownID         = "unknown-evidence-id"
 	RuleUnknownMetric     = "unknown-metric"
 	RuleCountMismatch     = "count-mismatch"

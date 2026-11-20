@@ -51,7 +51,15 @@ type FileResult struct {
 	DryRun         bool `json:"dry_run,omitempty"`
 	PendingAfter   int  `json:"pending"`
 	PromotedBefore int  `json:"promoted,omitempty"`
+	// Rejected records, per finding set aside rather than filed, why. One
+	// such finding never fails the batch.
+	Rejected []string `json:"rejected,omitempty"`
 }
+
+// UnspecifiedDefinedIn stands in for the defined_in of an evidence row whose
+// provider names no defining file (its defined_in is the empty string, which
+// the evidence-row schema allows).
+const UnspecifiedDefinedIn = "(unspecified)"
 
 func batchHash(doc validate.Document) (string, error) {
 	b, err := json.Marshal(doc)
@@ -217,14 +225,24 @@ func (t *Tx) observe(ctx context.Context, topicID string, f validate.Finding, ro
 
 func (t *Tx) fileOne(ctx context.Context, b Batch, run Run, f validate.Finding, rows map[string]validate.EvidenceRow, seen map[string]bool, res *FileResult) error {
 	var defined, subjType string
-	for _, r := range b.Evidence {
-		if r.SubjectKey == f.SubjectKey {
-			defined, subjType = r.DefinedIn, r.Type
-			break
+	found := false
+	if f.SubjectKey != "" {
+		for _, r := range b.Evidence {
+			if r.SubjectKey == f.SubjectKey {
+				defined, subjType, found = r.DefinedIn, r.Type, true
+				break
+			}
 		}
 	}
+	if !found {
+		// An empty or unknown subject sets this one finding aside; it MUST NOT
+		// fail the whole run.
+		res.Skipped++
+		res.Rejected = append(res.Rejected, fmt.Sprintf("finding %q: no evidence row for its subject", f.SubjectKey))
+		return nil
+	}
 	if defined == "" {
-		return fmt.Errorf("%w: finding %q has no evidence row for its subject", ErrInvalid, f.SubjectKey)
+		defined = UnspecifiedDefinedIn
 	}
 	id := TopicID(defined, f.SubjectKey, f.Kind)
 	if seen[id] {

@@ -132,7 +132,9 @@ func (c *checker) finding(i int, f Finding) {
 	if f.Kind != "" && !contains(c.in.Kinds, f.Kind) {
 		fail("kind", RuleUnknownKind, f.Kind)
 	}
-	if !c.subjects[f.SubjectKey] {
+	if strings.TrimSpace(f.SubjectKey) == "" {
+		fail("subject_key", RuleEmptySubject, "")
+	} else if !c.subjects[f.SubjectKey] {
 		fail("subject_key", RuleUnknownSubject, f.SubjectKey)
 	}
 

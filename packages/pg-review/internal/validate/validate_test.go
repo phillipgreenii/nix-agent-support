@@ -216,6 +216,12 @@ func TestUnknownSubject(t *testing.T) {
 	expect(t, in, RuleUnknownSubject)
 }
 
+func TestEmptySubjectIsNamed(t *testing.T) {
+	in := golden(t)
+	in.Doc.Findings[0].SubjectKey = ""
+	expect(t, in, RuleEmptySubject)
+}
+
 func TestUnknownKind(t *testing.T) {
 	in := golden(t)
 	in.Doc.Findings[0].Kind = "made-up"
