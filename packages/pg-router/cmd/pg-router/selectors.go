@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/pg-router/internal/config"
+	"github.com/phillipgreenii/pg-router/internal/daemon"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 )
@@ -249,19 +250,8 @@ func checkSmokeReachable(kind, name string, sel runSelectors) error {
 // re-derived pass) — see runExclusions' own doc.
 
 // runExclusions is applySelectors' own record of which configured roles/
-// queries it excluded THIS RUN (Task 4.1, Binding Decision 4) — captured at
-// the exact moment each exclusion decision is made, BEFORE Role.Enabled is
-// flipped or a query.Source is dropped: once those mutations run, the
-// post-selector config can no longer distinguish "config-disabled" from
-// "selector-excluded" (both look like Enabled==false), and an excluded
-// query.Source has already vanished from the slice entirely. Consumed by
-// cmd/pg-router's bootCore, which threads it into
-// core.Options.ExcludedRoles/ExcludedSources so composeStatusReply's
-// listeners[]/sources[] can report `excluded` independently of `enabled`.
-type runExclusions struct {
-	Roles   []string
-	Sources []string
-}
+// queries it excluded THIS RUN; the type lives with its consumer, daemon.BootCore.
+type runExclusions = daemon.RunExclusions
 
 func applySelectors(cfg config.Config, sel runSelectors) (config.Config, runExclusions, error) {
 	onlyRoles, onlyQueries, err := splitByKind(sel.Only)

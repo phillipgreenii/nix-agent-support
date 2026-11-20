@@ -23,34 +23,6 @@ import (
 // forwards the timing hook, the queue-wait / run histograms and the two new gauges
 // reach a real scrape, and bootCore wires the gauges to the live queue.
 
-// timingRecorder is an eventqueue.Observer that also implements TimingObserver.
-type timingRecorder struct {
-	recordingDispatchFailureObserver
-	timings []eventqueue.DispatchTiming
-}
-
-func (r *timingRecorder) OnAcceptTiming(t eventqueue.DispatchTiming) {
-	r.timings = append(r.timings, t)
-}
-
-func TestFanOutObserver_OnAcceptTimingForwardsToImplementingArmsOnly(t *testing.T) {
-	a := &timingRecorder{}
-	b := &recordingDispatchFailureObserver{} // no TimingObserver: must be skipped, not panic
-	f := fanOutObserver{a, b}
-	tm := eventqueue.DispatchTiming{EventID: "e1", EventType: "pr.changed", ListenerID: "desk-pr"}
-	f.OnAcceptTiming(tm)
-	if len(a.timings) != 1 || a.timings[0] != tm {
-		t.Fatalf("a.timings = %+v, want the one timing", a.timings)
-	}
-	// And through a nested fan-out, as bootCore builds it.
-	c := &timingRecorder{}
-	nested := fanOutObserver{b, fanOutObserver{a, c}}
-	nested.OnAcceptTiming(tm)
-	if len(a.timings) != 2 || len(c.timings) != 1 {
-		t.Fatalf("nested forwarding: a=%d c=%d, want 2 and 1", len(a.timings), len(c.timings))
-	}
-}
-
 func TestStartMetricsServer_ExposesWaitRunHistogramsAndNewGauges(t *testing.T) {
 	var ln net.Listener
 	mp, shutdown, err := startMetricsServer("127.0.0.1:0", func(l net.Listener) { ln = l })

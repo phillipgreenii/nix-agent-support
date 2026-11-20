@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"encoding/binary"
@@ -9,17 +9,17 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/config"
 )
 
-// load1 reports the host's 1-minute load average, for loadBackoff and the
+// Load1 reports the host's 1-minute load average, for LoadBackoff and the
 // producer-tick "source failed" log line: a source killed by its timeout on
 // a loaded host reads very differently from one killed on an idle host. ok is
 // false when the value cannot be read (never an error: this is diagnostic
 // context, so it must not itself fail or block). A package var so a test can
 // pin the value.
-var load1 = readLoad1
+var Load1 = readLoad1
 
 // readLoad1 reads /proc/loadavg (Linux) and falls back to the in-process
 // vm.loadavg sysctl (macOS, see loadavg_darwin.go). Neither launches a
-// process: this runs on every tick via loadBackoff, and every process launch
+// process: this runs on every tick via LoadBackoff, and every process launch
 // is inspected by endpoint security software.
 func readLoad1() (float64, bool) {
 	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
@@ -35,7 +35,7 @@ func readLoad1() (float64, bool) {
 const kernLoadavgSize = 24
 
 // parseKernLoadavg decodes the raw vm.loadavg sysctl value (native-endian
-// struct loadavg) and returns load1 = ldavg[0] / fscale. ok is false for a
+// struct loadavg) and returns Load1 = ldavg[0] / fscale. ok is false for a
 // short buffer or a non-positive fscale.
 func parseKernLoadavg(b []byte) (float64, bool) {
 	if len(b) < kernLoadavgSize {
@@ -69,15 +69,15 @@ func parseSysctlLoadavg(s string) (float64, bool) {
 	return v, err == nil
 }
 
-// loadBackoff reports whether the producer pass should be skipped this tick:
+// LoadBackoff reports whether the producer pass should be skipped this tick:
 // the host load1 is above cfg.LoadBackoffThreshold. A threshold of 0 or less
 // disables it, and an unreadable load never backs off (fail open, so a missing
-// sysctl cannot silence every source). The load comes from the load1 package var.
-func loadBackoff(cfg config.Config) (float64, bool) {
+// sysctl cannot silence every source). The load comes from the Load1 package var.
+func LoadBackoff(cfg config.Config) (float64, bool) {
 	if cfg.LoadBackoffThreshold <= 0 {
 		return 0, false
 	}
-	l, ok := load1()
+	l, ok := Load1()
 	if !ok {
 		return 0, false
 	}

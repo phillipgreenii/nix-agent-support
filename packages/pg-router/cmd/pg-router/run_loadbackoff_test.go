@@ -11,15 +11,16 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
+	"github.com/phillipgreenii/pg-router/internal/daemon"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 )
 
 func pinLoad1(t *testing.T, v float64, ok bool) {
 	t.Helper()
-	prev := load1
-	load1 = func() (float64, bool) { return v, ok }
-	t.Cleanup(func() { load1 = prev })
+	prev := daemon.Load1
+	daemon.Load1 = func() (float64, bool) { return v, ok }
+	t.Cleanup(func() { daemon.Load1 = prev })
 }
 
 // Above the threshold the real tick skips the producer pass (the polled source

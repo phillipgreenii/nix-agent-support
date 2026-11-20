@@ -1,4 +1,4 @@
-package main
+package daemon
 
 import (
 	"bytes"
@@ -15,14 +15,14 @@ import (
 // load1 (bead pg2-zdowv); the load average parsers cover both host families.
 
 func TestSourceFailedAttrs_ElapsedArgvAttemptsAndLoad(t *testing.T) {
-	prev := load1
-	load1 = func() (float64, bool) { return 7.25, true }
-	t.Cleanup(func() { load1 = prev })
+	prev := Load1
+	Load1 = func() (float64, bool) { return 7.25, true }
+	t.Cleanup(func() { Load1 = prev })
 
 	var buf bytes.Buffer
 	l := slog.New(slog.NewTextHandler(&buf, nil))
 	l.Warn("producer tick: source failed; other sources still produced",
-		sourceFailedAttrs("pr-mine", errors.New("signal: killed"), discover.FailureInfo{
+		SourceFailedAttrs("pr-mine", errors.New("signal: killed"), discover.FailureInfo{
 			Count: 2, Elapsed: 30*time.Second + 12*time.Millisecond, Argv: []string{"/bin/x", "changes", "pr"},
 		})...)
 	out := buf.String()
@@ -34,11 +34,11 @@ func TestSourceFailedAttrs_ElapsedArgvAttemptsAndLoad(t *testing.T) {
 }
 
 func TestSourceFailedAttrs_NonGiveUpOmitsAttemptDetail(t *testing.T) {
-	prev := load1
-	load1 = func() (float64, bool) { return 0, false }
-	t.Cleanup(func() { load1 = prev })
+	prev := Load1
+	Load1 = func() (float64, bool) { return 0, false }
+	t.Cleanup(func() { Load1 = prev })
 
-	attrs := sourceFailedAttrs("s", errors.New("e"), discover.FailureInfo{})
+	attrs := SourceFailedAttrs("s", errors.New("e"), discover.FailureInfo{})
 	if len(attrs) != 4 {
 		t.Fatalf("attrs = %v, want only source and err when there is no attempt detail and no load", attrs)
 	}
