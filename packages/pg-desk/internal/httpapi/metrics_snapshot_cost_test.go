@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -163,4 +164,28 @@ func TestHandlerServesThroughTheReadOnlyPool(t *testing.T) {
 	if strings.Contains(body, "snapshot_errors_total 1") {
 		t.Fatalf("the snapshot build reported an error through the read pool:\n%s", body)
 	}
+}
+
+// The focus health computation reads annotations and links in two repo-wide
+// statements, so its statement count does not grow with the entity count (it
+// was one annotation and one link statement per entity, about 5,400 on the
+// live store, which made every cold focus computation a long burst of reads).
+func TestFocusHealthStatementsAreConstantInEntityCount(t *testing.T) {
+	setClock(t, time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
+	cfg := testConfig()
+	cfg.Repos = []config.RepoConfig{{Remote: "o/r"}}
+	counts := map[int]int64{}
+	for _, n := range []int{10, 300} {
+		base := store.OpenForTest(t)
+		base.SeedLiveSizeForTest(t, n, 10, 1)
+		st, cnt := base.WithCounterForTest(t)
+		if _, err := focus.ComputeHealth(context.Background(), st, cfg, nowUTC()); err != nil {
+			t.Fatal(err)
+		}
+		counts[n] = cnt.Queries()
+	}
+	if counts[10] != counts[300] {
+		t.Fatalf("focus health statements depend on entity count: 10 entities %d, 300 entities %d", counts[10], counts[300])
+	}
+	t.Logf("focus.ComputeHealth: %d statements at both sizes", counts[10])
 }

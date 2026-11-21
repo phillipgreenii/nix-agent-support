@@ -282,6 +282,38 @@ func (s *Store) ListKVAnnotations(ctx context.Context, repo, entityType, entityI
 	return out, nil
 }
 
+// ListKVAnnotationsForRepo returns every annotation of repo, ordered by
+// entity type, entity id and key (the order ListKVAnnotations gives per
+// entity). It is the batched form for a caller that reads the annotations of
+// many entities: one statement instead of one per entity.
+func (s *Store) ListKVAnnotationsForRepo(ctx context.Context, repo string) ([]KVAnnotation, error) {
+	if err := s.RequireNewSchema(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.sql.QueryContext(
+		ctx,
+		`SELECT repo, entity_type, entity_id, key, value, origin, set_by, set_at
+		 FROM annotation WHERE repo = ? ORDER BY entity_type, entity_id, key`,
+		repo,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list annotations of %s: %w", repo, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []KVAnnotation
+	for rows.Next() {
+		var a KVAnnotation
+		if err := rows.Scan(&a.Repo, &a.EntityType, &a.EntityID, &a.Key, &a.Value, &a.Origin, &a.SetBy, &a.SetAt); err != nil {
+			return nil, fmt.Errorf("store: scan annotation of %s: %w", repo, err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate annotations of %s: %w", repo, err)
+	}
+	return out, nil
+}
+
 // PRHiddenWIP returns an entity's hidden flag, hidden reason and wip flag from
 // the hidden and wip key/value annotations. An entity with no annotation is
 // not hidden and not wip. Callers that only need these three facts use it

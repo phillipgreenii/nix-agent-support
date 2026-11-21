@@ -82,37 +82,48 @@ func load(ctx context.Context, st *store.Store, cfg *config.Config, repo string,
 	// is found from its source, so both directions are derivable from this
 	// list and none is read twice. A link from an entity the store has never
 	// gathered can yield nothing (a seed must be stored), so it is not read.
-	keys := make([]Key, 0, len(in.Entities))
-	for k := range in.Entities {
+	// Two repo-wide reads, grouped here by entity, replace one annotation and
+	// one link statement per stored entity (a store of 2,700 entities took
+	// about 5,400 statements per focus computation).
+	allAnns, err := st.ListKVAnnotationsForRepo(ctx, repo)
+	if err != nil {
+		return Inputs{}, fmt.Errorf("focus: load annotations: %w", err)
+	}
+	byEntity := map[Key][]store.KVAnnotation{}
+	for _, a := range allAnns {
+		k := Key{a.EntityType, a.EntityID}
+		if _, ok := in.Entities[k]; ok {
+			byEntity[k] = append(byEntity[k], a)
+		}
+	}
+	keys := make([]Key, 0, len(byEntity))
+	for k := range byEntity {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool { return keyLess(keys[i], keys[j]) })
 	for _, k := range keys {
-		anns, err := st.ListKVAnnotations(ctx, repo, k.Type, k.ID)
-		if err != nil {
-			return Inputs{}, fmt.Errorf("focus: load annotations of %s:%s: %w", k.Type, k.ID, err)
+		m := make(map[string]string, len(byEntity[k]))
+		for _, a := range byEntity[k] {
+			m[a.Key] = a.Value
 		}
-		if len(anns) > 0 {
-			m := make(map[string]string, len(anns))
-			for _, a := range anns {
-				m[a.Key] = a.Value
+		if raw, ok := m[store.AnnotationHidden]; ok {
+			if _, derr := decodeHidden(raw); derr != nil {
+				return Inputs{}, fmt.Errorf("focus: decode hidden annotation of %s:%s: %w", k.Type, k.ID, derr)
 			}
-			if raw, ok := m[store.AnnotationHidden]; ok {
-				if _, derr := decodeHidden(raw); derr != nil {
-					return Inputs{}, fmt.Errorf("focus: decode hidden annotation of %s:%s: %w", k.Type, k.ID, derr)
-				}
-			}
-			in.Annotations[k] = m
 		}
-		ls, err := st.ListXrefLinksFrom(ctx, repo, k.Type, k.ID)
-		if err != nil {
-			return Inputs{}, fmt.Errorf("focus: load links of %s:%s: %w", k.Type, k.ID, err)
+		in.Annotations[k] = m
+	}
+	allLinks, err := st.ListXrefLinksForRepo(ctx, repo)
+	if err != nil {
+		return Inputs{}, fmt.Errorf("focus: load links: %w", err)
+	}
+	for _, l := range allLinks {
+		if _, ok := in.Entities[Key{l.FromType, l.FromID}]; !ok {
+			continue
 		}
-		for _, l := range ls {
-			in.Links = append(in.Links, l)
-			if l.Relation == relationReferences && strings.HasPrefix(l.Origin, externalOriginPrefix) && l.Reason == MergeReason {
-				in.Absorbed[Key{l.ToType, l.ToID}] = Key{l.FromType, l.FromID}
-			}
+		in.Links = append(in.Links, l)
+		if l.Relation == relationReferences && strings.HasPrefix(l.Origin, externalOriginPrefix) && l.Reason == MergeReason {
+			in.Absorbed[Key{l.ToType, l.ToID}] = Key{l.FromType, l.FromID}
 		}
 	}
 
