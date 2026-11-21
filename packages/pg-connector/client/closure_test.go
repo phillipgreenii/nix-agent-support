@@ -1,10 +1,12 @@
 package client
 
 import (
+	"context"
 	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -55,6 +57,7 @@ func TestClosureIsStdlibAndCmdrunOnly(t *testing.T) {
 		if !seen[p] {
 			continue
 		}
+		ensureGOROOT(t)
 		pkg, err := build.Import(p, ".", 0)
 		if err != nil {
 			t.Fatalf("resolve allowed dependency %s: %v", p, err)
@@ -65,6 +68,26 @@ func TestClosureIsStdlibAndCmdrunOnly(t *testing.T) {
 			}
 		}
 	}
+}
+
+// ensureGOROOT fills build.Default.GOROOT from `go env GOROOT` when it is empty:
+// a test binary built with -trimpath has no compiled-in GOROOT and go test does
+// not set GOROOT in the environment, so build.Import could not find the
+// standard library.
+func ensureGOROOT(t *testing.T) {
+	t.Helper()
+	if build.Default.GOROOT != "" {
+		return
+	}
+	out, err := exec.CommandContext(context.Background(), "go", "env", "GOROOT").Output()
+	if err != nil {
+		t.Fatalf("go env GOROOT: %v", err)
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		t.Fatal("go env GOROOT printed nothing")
+	}
+	build.Default.GOROOT = root
 }
 
 func TestClosureCheckRejectsForeignImport(t *testing.T) {
