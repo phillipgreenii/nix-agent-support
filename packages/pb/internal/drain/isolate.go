@@ -30,6 +30,11 @@ type Params struct {
 	// call's whole process group is killed and Isolate returns ErrGitTimeout
 	// (after removing only what this call created, when it was `worktree add`).
 	GitTimeout time.Duration
+	// GitCallTimeout is the per-call timeout seam (see gitBound.callTimeout):
+	// when non-nil and it returns a positive duration for a git call's args,
+	// that call alone gets that bound instead of GitTimeout. Test-only; leave
+	// nil in production.
+	GitCallTimeout func(args []string) time.Duration
 	// Isolation selects the mode: "" or IsolationAuto picks pg-gwm when its
 	// config names the repo and the worktree-root is writable, else the legacy
 	// .worktrees/<bead>; IsolationLegacy and IsolationGwm force one.
@@ -68,7 +73,7 @@ func Isolate(ctx context.Context, inner run.Runner, p Params) (Result, error) {
 	if timeout <= 0 {
 		timeout = DefaultGitTimeout
 	}
-	r := gitBound{inner: inner, timeout: timeout}
+	r := gitBound{inner: inner, timeout: timeout, callTimeout: p.GitCallTimeout}
 	// Resolve the repo root ourselves from the CALLER-supplied path rather
 	// than trust `git -C p.RepoPath rev-parse --show-toplevel`'s stdout for
 	// it. That command reads core.worktree off .git/config, and when the

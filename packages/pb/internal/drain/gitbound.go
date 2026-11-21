@@ -59,9 +59,18 @@ func fsmonitorOffEnv(base []string) []string {
 // environment and a timeout (which also puts the call in its own process
 // group, killed whole on expiry). Non-git commands (pg-hooks) pass through
 // untouched. A timeout is rewrapped as ErrGitTimeout with the diagnosis.
+//
+// callTimeout is the per-call timeout seam: when non-nil it is asked, for each
+// git call, for a bound that REPLACES timeout for that call alone (0 or
+// negative = keep timeout). It exists so a test can give only the call it
+// deliberately hangs a short bound while every other git call keeps the real,
+// longer GitTimeout (and real git), instead of shortening GitTimeout for the
+// whole Isolate and risking spurious timeouts on a loaded host. Production
+// code leaves it nil. Set through Params.GitCallTimeout.
 type gitBound struct {
-	inner   run.Runner
-	timeout time.Duration
+	inner       run.Runner
+	timeout     time.Duration
+	callTimeout func(args []string) time.Duration
 }
 
 func (g gitBound) Run(ctx context.Context, name string, args []string, opts run.Options) (run.Result, error) {
@@ -69,14 +78,20 @@ func (g gitBound) Run(ctx context.Context, name string, args []string, opts run.
 		return g.inner.Run(ctx, name, args, opts)
 	}
 	opts.Env = fsmonitorOffEnv(opts.Env)
-	opts.Timeout = g.timeout
+	timeout := g.timeout
+	if g.callTimeout != nil {
+		if d := g.callTimeout(args); d > 0 {
+			timeout = d
+		}
+	}
+	opts.Timeout = timeout
 	res, err := g.inner.Run(ctx, name, args, opts)
 	if errors.Is(err, run.ErrTimeout) {
 		return res, fmt.Errorf("%w: git %s did not finish within %s and its process group was "+
 			"killed — this is the signature of fsmonitor/fseventsd contention on the machine "+
 			"(leaked `git fsmonitor--daemon` processes, fseventsd at high CPU, very high load); "+
 			"check `pgrep -fl fsmonitor--daemon` and `uptime`: %w",
-			ErrGitTimeout, strings.Join(args, " "), g.timeout, err)
+			ErrGitTimeout, strings.Join(args, " "), timeout, err)
 	}
 	return res, err
 }

@@ -104,6 +104,18 @@ esac
 	return log, pidfile
 }
 
+// hangOnlyWorktreeAdd gives ONLY `git worktree add` (the call fakeGit hangs) a
+// short bound; every other git call keeps the default GitTimeout. The shim runs
+// the real add before it hangs, so the bound must cover that real add.
+func hangOnlyWorktreeAdd(args []string) time.Duration {
+	for i, a := range args {
+		if a == "worktree" && i+1 < len(args) && args[i+1] == "add" {
+			return 750 * time.Millisecond
+		}
+	}
+	return 0
+}
+
 func pidAlive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
 func readPid(t *testing.T, pidfile string) int {
@@ -135,7 +147,7 @@ func TestIsolate_hungWorktreeAddIsBoundedAndCleansOnlyItsOwn(t *testing.T) {
 
 	start := time.Now()
 	_, err := Isolate(context.Background(), run.CLIRunner{}, Params{
-		RepoPath: repo, BeadID: "pg2-hang", GitTimeout: 2 * time.Second,
+		RepoPath: repo, BeadID: "pg2-hang", GitCallTimeout: hangOnlyWorktreeAdd,
 	})
 	if elapsed := time.Since(start); elapsed > 30*time.Second {
 		t.Errorf("Isolate took %s; the bound did not hold", elapsed)
@@ -197,7 +209,7 @@ func TestIsolate_hungAddOfParkedBranchKeepsTheBranch(t *testing.T) {
 	_, pidfile := fakeGit(t)
 
 	_, err := Isolate(context.Background(), run.CLIRunner{}, Params{
-		RepoPath: repo, BeadID: "pg2-parked", GitTimeout: 2 * time.Second,
+		RepoPath: repo, BeadID: "pg2-parked", GitCallTimeout: hangOnlyWorktreeAdd,
 	})
 	if !errors.Is(err, ErrGitTimeout) {
 		t.Fatalf("err = %v, want ErrGitTimeout", err)
