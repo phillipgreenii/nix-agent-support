@@ -86,7 +86,7 @@ fake_pnwf() {
       "repo-unreadable","detached-worktree","anchored-process","canonical-checkout",
       "bead-lookup-failed","claimed","worktree-unreadable","dirty","landed-ancestor",
       "landed-patch-equivalent","bead-match-weak","patch-equivalent-no-bead",
-      "patch-equivalent-bead-open","idle-clean-unworked","isolated-not-worked","unlanded-work"))' <<<"$SCAN"
+      "patch-equivalent-bead-open","idle-clean-unworked","isolated-not-worked","unlanded-work","lander-stopped","lander-owned"))' <<<"$SCAN"
   jq -e '.candidates | all(.anchored | all(has("pid","command","blocking")))' <<<"$SCAN"
   jq -e '.sets | all(has("set","members","action","reason","evidence"))' <<<"$SCAN"
   jq -e '.sets | all(.action | IN("keep","agent","remove-via-pnwf"))' <<<"$SCAN"
@@ -217,7 +217,7 @@ PN
   for reason in repo-unreadable detached-worktree anchored-process canonical-checkout \
     bead-lookup-failed claimed worktree-unreadable dirty landed-ancestor \
     landed-patch-equivalent bead-match-weak patch-equivalent-no-bead \
-    patch-equivalent-bead-open idle-clean-unworked isolated-not-worked unlanded-work \
+    patch-equivalent-bead-open idle-clean-unworked isolated-not-worked unlanded-work lander-stopped lander-owned \
     pnwf-disagrees pnwf-unavailable branch-refused tip-moved-late teardown-refused \
     tip-moved verdict-changed set-member usage; do
     [[ $output == *"$reason"* ]] || { echo "help lacks $reason" >&2; return 1; }

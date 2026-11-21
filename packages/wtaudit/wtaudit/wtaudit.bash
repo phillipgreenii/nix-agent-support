@@ -11,7 +11,7 @@
 # The closed reason enum (the verdict `reason` strings), in decision-table
 # order, then the set-only and remove-only reasons.
 # shellcheck disable=SC2034  # read by wtaudit.sh (help text)
-WTAUDIT_SCAN_REASONS="repo-unreadable canonical-checkout anchored-process bead-lookup-failed claimed worktree-unreadable dirty detached-worktree landed-ancestor bead-match-weak landed-patch-equivalent patch-equivalent-no-bead patch-equivalent-bead-open idle-clean-unworked isolated-not-worked unlanded-work"
+WTAUDIT_SCAN_REASONS="repo-unreadable canonical-checkout anchored-process bead-lookup-failed claimed worktree-unreadable dirty detached-worktree landed-ancestor bead-match-weak landed-patch-equivalent patch-equivalent-no-bead patch-equivalent-bead-open idle-clean-unworked isolated-not-worked unlanded-work lander-stopped lander-owned"
 # shellcheck disable=SC2034  # read by wtaudit.sh (help text)
 WTAUDIT_SET_REASONS="pnwf-disagrees pnwf-unavailable"
 # shellcheck disable=SC2034  # read by wtaudit.sh (help text)
@@ -19,6 +19,9 @@ WTAUDIT_REMOVE_REASONS="branch-refused tip-moved-late teardown-refused tip-moved
 
 # Field separator for the entry records (a non-whitespace separator, so empty
 # fields survive `read`).
+# Per-scan cache of the repo's stopped pg-git-lander operations (JSON array).
+WTAUDIT_LANDER_STOPPED=""
+
 WTAUDIT_US=$'\x1f'
 
 # wtaudit_repo_readable <dir>: succeeds iff <dir> is inside a git work tree.
@@ -240,6 +243,8 @@ elif .bead_lookup == "failed" then
   verdict("keep"; "bead-lookup-failed"; "bd could not be read for branch \(.branch)")
 elif claimed then
   verdict("keep"; "claimed"; "bead \(.bead.id) is \(.bead.status) with assignee \"\(.bead.assignee)\" and lease \"\(.bead.lease_expires_at)\"")
+elif .lander_stopped != null then
+  verdict("keep"; "lander-stopped"; "pg-git-lander operation \(.lander_stopped.op_id) is stopped (\(.lander_stopped.reason // "no reason"), stage \(.lander_stopped.stage // "unknown")) since \(.lander_stopped.since // "unknown"); resume with `pg-git-lander land \(.lander_stopped.branch // .branch) --continue --repo \(.repo_path)` or give up with `pg-git-lander land \(.lander_stopped.branch // .branch) --abort --repo \(.repo_path)`")
 elif .worktree_state == "missing" or .worktree_state == "locked" or .worktree_state == "unreadable" then
   verdict("keep"; "worktree-unreadable"; "worktree \(.worktree) is \(.worktree_state)")
 elif .dirty == true then
@@ -267,7 +272,28 @@ elif .ancestor == true and bead_open then
 else
   verdict("agent"; "unlanded-work"; "branch \(.branch) has \(.plus_commits) commit(s) not on \(.primary) and \(.merge_commits) merge commit(s)")
 end
+| if .action == "agent" and ((.branch // "") | startswith("pg-git-lander/")) then
+    verdict("keep"; "lander-owned"; "branch \(.branch) is in the pg-git-lander namespace, which only pg-git-lander lands or removes (it would otherwise be \(.reason): \(.evidence))")
+  else . end
 '
+
+# wtaudit_lander_stopped_json <repo>: the stopped pg-git-lander operations of
+# <repo> as a JSON array (`.stopped[]` of `pg-git-lander status --json`). Prints
+# `[]` when pg-git-lander is not on PATH, the call fails or the output does not
+# parse, so the namespace-prefix rule alone still applies.
+wtaudit_lander_stopped_json() {
+  local out stopped
+  if ! command -v pg-git-lander >/dev/null 2>&1; then
+    printf '[]\n'
+    return 0
+  fi
+  out="$(pg-git-lander status --json --repo "$1" 2>/dev/null || true)"
+  if [[ -z $out ]] || ! stopped="$(jq -c '[(.stopped // [])[] | select(type == "object")]' <<<"$out" 2>/dev/null)" || [[ -z $stopped ]]; then
+    printf '[]\n'
+    return 0
+  fi
+  printf '%s\n' "$stopped"
+}
 
 # wtaudit_build_candidate <repo_name> <repo_path> <primary> <kind> <set>
 #   <branch> <worktree> <wtstate> <detached> <head>: print one classified
@@ -277,11 +303,13 @@ wtaudit_build_candidate() {
   local branch="$6" worktree="$7" wtstate="$8" detached="$9" head="${10}"
   local tip="" ahead="" behind="" ancestor="" plus="" merges="" patch_eq=""
   local last_date="" subjects='[]' dirty="null" anchored='[]' canonical=false
+  local stopped_ops="${WTAUDIT_LANDER_STOPPED:-}"
   local porcelain bead_json='{"lookup":"none","match":null,"bead":null}' id
 
   if [[ $wtstate == canonical ]]; then
     canonical=true
   fi
+  [[ -n $stopped_ops ]] || stopped_ops="$(wtaudit_lander_stopped_json "$repo_path")"
 
   if [[ -n $branch && $detached != 1 ]]; then
     tip="$(git -C "$repo_path" rev-parse "refs/heads/$branch")"
@@ -327,7 +355,7 @@ wtaudit_build_candidate() {
     --arg merges "$merges" --arg patch_eq "$patch_eq" --arg last_date "$last_date" \
     --argjson subjects "$subjects" --argjson dirty "$dirty" \
     --argjson anchored "$anchored" --argjson bead "$bead_json" \
-    --argjson canonical "$canonical" --argjson detached "$([[ $detached == 1 ]] && echo true || echo false)" '
+    --argjson stopped_ops "$stopped_ops" --argjson canonical "$canonical" --argjson detached "$([[ $detached == 1 ]] && echo true || echo false)" '
     def nn: if . == "" then null else . end;
     def num: if . == "" then null else tonumber end;
     def bool: if . == "" then null else (. == "true") end;
@@ -344,6 +372,10 @@ wtaudit_build_candidate() {
       last_commit_date: ($last_date | nn), subjects: $subjects,
       canonical_checkout: $canonical,
       worktree_state: $wtstate,
+      lander_stopped: ($stopped_ops | map(select(
+          (($branch | nn) != null and .branch == $branch)
+          or (($worktree | nn) != null and (.worktree // null) == $worktree)))
+        | .[0] // null),
       repo_unreadable: false
     }' | jq -c "$WTAUDIT_DECIDE_JQ"
 }
@@ -357,7 +389,7 @@ wtaudit_unreadable_candidate() {
      patch_equivalent: null, dirty: null, anchored: [], bead: null,
      bead_lookup: "none", bead_match: null, last_commit_date: null,
      subjects: [], canonical_checkout: false, worktree_state: "none",
-     repo_unreadable: true}' | jq -c "$WTAUDIT_DECIDE_JQ"
+     lander_stopped: null, repo_unreadable: true}' | jq -c "$WTAUDIT_DECIDE_JQ"
 }
 
 # wtaudit_scan_repo <repo_name> <repo_path>: print one JSON line per candidate
@@ -375,10 +407,12 @@ wtaudit_scan_repo() {
     wtaudit_unreadable_candidate "$repo_name" "$repo_path"
     return 0
   fi
+  WTAUDIT_LANDER_STOPPED="$(wtaudit_lander_stopped_json "$top")"
   while IFS="$WTAUDIT_US" read -r kind set branch worktree wtstate detached head; do
     [[ -n $kind ]] || continue
     wtaudit_build_candidate "$repo_name" "$top" "$primary" "$kind" "$set" "$branch" "$worktree" "$wtstate" "$detached" "$head"
   done < <(wtaudit_entries "$top" "$primary")
+  WTAUDIT_LANDER_STOPPED=""
 }
 
 # wtaudit_set_land_plan <workspace_root> <set>: run the ambient `pnwf land-plan

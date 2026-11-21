@@ -583,3 +583,62 @@ scan_sets() {
   doc="$(scan_sets)"
   [ "$(jq -r '.sets[0] | "\(.action) \(.reason)"' <<<"$doc")" = "agent idle-clean-unworked" ]
 }
+
+# ---- pg-git-lander awareness -------------------------------------------------
+
+# stub_lander <json>: a `pg-git-lander` on PATH whose `status` prints <json>.
+stub_lander() {
+  mkdir -p "$FX/landerbin"
+  printf '#!/usr/bin/env bash\nprintf %%s %q\n' "$1" >"$FX/landerbin/pg-git-lander"
+  chmod +x "$FX/landerbin/pg-git-lander"
+  PATH="$FX/landerbin:$PATH"
+}
+
+@test "lander: a worktree on a stopped op's work branch is keep lander-stopped with the op id, since and resume commands" {
+  WT="$(add_wt "$REPO" "pg-git-lander/op1")"
+  commit_in "$WT" f.txt "work in progress"
+  stub_lander "{\"stopped\":[{\"branch\":\"feat-x\",\"worktree\":\"$WT\",\"op_id\":\"20261121T0-abc\",\"reason\":\"conflict\",\"stage\":\"rebase\",\"since\":\"2026-11-21T03:00:00Z\",\"next\":[]}]}"
+  row="$(classify "$REPO" "pg-git-lander/op1")"
+  [ "$(jq -r '"\(.action) \(.reason)"' <<<"$row")" = "keep lander-stopped" ]
+  ev="$(jq -r '.evidence' <<<"$row")"
+  [[ $ev == *20261121T0-abc* ]]
+  [[ $ev == *2026-11-21T03:00:00Z* ]]
+  [[ $ev == *"pg-git-lander land feat-x --continue --repo $REPO"* ]]
+  [[ $ev == *"pg-git-lander land feat-x --abort --repo $REPO"* ]]
+}
+
+@test "lander: a worktree path equal to a stopped op's worktree is keep lander-stopped even on another branch" {
+  WT="$(add_wt "$REPO" "feat-y")"
+  commit_in "$WT" f.txt "work"
+  stub_lander "{\"stopped\":[{\"branch\":\"feat-y\",\"worktree\":\"$WT\",\"op_id\":\"op-2\",\"reason\":\"hook\",\"stage\":\"verify\",\"since\":\"t\",\"next\":[]}]}"
+  [ "$(verdict "$REPO" feat-y)" = "keep lander-stopped" ]
+}
+
+@test "lander: a landed pg-git-lander/idle branch stays remove landed-ancestor" {
+  git -C "$REPO" branch "pg-git-lander/idle/w1"
+  stub_lander '{"stopped":[]}'
+  [ "$(verdict "$REPO" "pg-git-lander/idle/w1")" = "remove landed-ancestor" ]
+}
+
+@test "lander: an unlanded pg-git-lander/ branch with no stopped op is keep lander-owned, never agent" {
+  WT="$(add_wt "$REPO" "pg-git-lander/other")"
+  commit_in "$WT" f.txt "work"
+  stub_lander '{"stopped":[]}'
+  [ "$(verdict "$REPO" "pg-git-lander/other")" = "keep lander-owned" ]
+}
+
+@test "lander: with pg-git-lander missing or failing the namespace rule alone yields keep lander-owned" {
+  WT="$(add_wt "$REPO" "pg-git-lander/op9")"
+  commit_in "$WT" f.txt "work"
+  mkdir -p "$FX/failbin"
+  printf '#!/usr/bin/env bash\nexit 1\n' >"$FX/failbin/pg-git-lander"
+  chmod +x "$FX/failbin/pg-git-lander"
+  PATH="$FX/failbin:$PATH"
+  [ "$(verdict "$REPO" "pg-git-lander/op9")" = "keep lander-owned" ]
+}
+
+@test "lander: an ordinary unlanded branch is still agent unlanded-work when no op is stopped" {
+  mk_unlanded scratch
+  stub_lander '{"stopped":[]}'
+  [ "$(verdict "$REPO" scratch)" = "agent unlanded-work" ]
+}
