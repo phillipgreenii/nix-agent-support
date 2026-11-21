@@ -665,6 +665,9 @@ PRIMARY_WORKTREE=$(get_primary_worktree)
 BASE_BRANCH="origin/main"
 
 # Temporary worktree settings
+# The pg-gwm standing exceptions for this directory (zrGwmExceptions in nix-ziprecruiter,
+# machines/phillipg-mbp-02/default.nix) match /tmp/git-branch-maintenance-* and its contents;
+# keep the prefix here and there in agreement.
 TMP_WORKTREE="/tmp/git-branch-maintenance-$$"
 TMP_BRANCH="tmp-gbm"
 
