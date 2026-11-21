@@ -3,7 +3,6 @@
 package main
 
 import (
-	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -18,9 +17,12 @@ import (
 // log (so no detected change is lost), and the process exits 0. These tests run
 // the real daemon child and hold its pjira calls with the shim.
 
-// TestDrainSIGTERMFinishesTheRequestInFlightAndExitsZero stops the daemon while a
-// read waits on the origin: the read still gets its answer and the exit is 0.
-func TestDrainSIGTERMFinishesTheRequestInFlightAndExitsZero(t *testing.T) {
+// TestDrainSIGTERMCancelsTheRequestInFlightAndExitsZero stops the daemon while a
+// read waits on the origin. A shutdown cancels the handlers' contexts (the one
+// shutdown deadline is the backstop, it does not wait for the request): the read
+// is answered with an error rather than a result, the origin call is dropped
+// while still held, and the exit is 0.
+func TestDrainSIGTERMCancelsTheRequestInFlightAndExitsZero(t *testing.T) {
 	d := servetest.StartDaemon(t, servetest.Options{Hooks: "poll_interval=50ms"})
 	d.Shim.SetIssue(servetest.Open("EXA-5"))
 	t.Cleanup(d.Shim.Release)
@@ -40,28 +42,15 @@ func TestDrainSIGTERMFinishesTheRequestInFlightAndExitsZero(t *testing.T) {
 	d.Shim.WaitHeld(t, 30*time.Second)
 
 	d.Term(t)
-	// The daemon is draining, not gone: it waits for the request in flight.
+	// The handler's context is cancelled with the shutdown, so the held origin
+	// call does not keep the request (or the daemon) alive: no result comes back.
 	select {
 	case a := <-got:
-		t.Fatalf("the request answered (%+v, %v) while its origin call was still held", a.resp, a.err)
-	case <-time.After(500 * time.Millisecond):
-	}
-	if ended, code := d.Exited(); ended {
-		t.Fatalf("the daemon exited (%d) with a request still in flight; output: %s", code, d.Stderr())
-	}
-
-	d.Shim.Release()
-	select {
-	case a := <-got:
-		if a.err != nil || a.resp.Error != nil {
-			t.Fatalf("the request in flight was not finished by the drain: %v %+v", a.err, a.resp.Error)
-		}
-		var iss schema.Issue
-		if err := json.Unmarshal(a.resp.Result, &iss); err != nil || iss.ID != "EXA-5" {
-			t.Errorf("the answer = %s (%v), want EXA-5", a.resp.Result, err)
+		if a.err == nil && a.resp.Error == nil && len(a.resp.Result) > 0 {
+			t.Errorf("the cancelled request still produced a result: %s", a.resp.Result)
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("the request in flight never answered")
+		t.Fatal("the request in flight was neither answered nor dropped by the drain")
 	}
 	if code := d.Wait(t, 30*time.Second); code != 0 {
 		t.Errorf("exit = %d, want 0; output: %s", code, d.Stderr())

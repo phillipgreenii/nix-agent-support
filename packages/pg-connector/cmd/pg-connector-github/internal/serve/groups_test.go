@@ -169,13 +169,15 @@ func TestReads_FreshTrueCostsOneFetchPerNeededGroup(t *testing.T) {
 		t.Errorf("files fresh: calls %v, want one summary fetch and one files fetch", got)
 	}
 
-	// list_runs needs the summary and runs: one summary fetch and one REST runs
-	// request (the failed run's jobs are cached in the job table).
+	// list_runs needs the summary and runs: one summary fetch, one REST runs
+	// request (the failed run's jobs are cached in the job table) and one REST
+	// request for the base branch's rules, which marks each run's required flag
+	// (kind "rules").
 	mark = len(d.Shim.OriginCalls())
 	callOK(t, d, "ci", "list_runs", map[string]any{"pr_id": prA.Ref(), "fresh": true})
 	got = kinds(originSince(d, mark))
-	if got["nodes"] != 1 || got["runs"] != 1 || len(originSince(d, mark)) != 2 {
-		t.Errorf("list_runs fresh: calls %v, want one summary fetch and one runs request", got)
+	if got["nodes"] != 1 || got["runs"] != 1 || got["rules"] != 1 || len(originSince(d, mark)) != 3 {
+		t.Errorf("list_runs fresh: calls %v, want one summary fetch, one runs request and one branch-rules request", got)
 	}
 }
 

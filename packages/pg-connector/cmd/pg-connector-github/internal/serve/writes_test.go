@@ -459,7 +459,7 @@ func TestWrites_ADaemonKilledMidWriteAndTheRequestRetriedLeavesNoDuplicateCommen
 	}
 }
 
-func TestWrites_SIGTERMDuringAnInFlightWriteWaitsForItToFinishBeforeExit(t *testing.T) {
+func TestWrites_SIGTERMDuringAnInFlightWriteIsCancelledAndTheDaemonExitsZero(t *testing.T) {
 	stateHome := t.TempDir()
 	d := servetest.NewDaemon(t, writeOpts(stateHome))
 	d.Start(t)
@@ -478,33 +478,24 @@ func TestWrites_SIGTERMDuringAnInFlightWriteWaitsForItToFinishBeforeExit(t *test
 	until(t, 15*time.Second, "the write to reach the create request", func() bool { return d.Shim.CountKind("create_review") == 1 })
 
 	d.Term(t)
-	// The daemon is draining, not gone: the write is still in flight.
-	time.Sleep(800 * time.Millisecond)
-	if ended, code := d.Exited(); ended {
-		t.Fatalf("the daemon exited (%d) while a write was in flight; output: %s", code, d.Stderr())
-	}
-	select {
-	case o := <-done:
-		t.Fatalf("the write was answered before it could finish: %+v %v", o.resp, o.err)
-	default:
-	}
-
-	d.Shim.Release("create_review")
-	o := <-done
-	if o.err != nil || o.resp.Error != nil {
-		t.Fatalf("the in-flight write must finish and answer: %+v %v", o.resp.Error, o.err)
-	}
-	if res := decode[pr.ReviewSubmitResult](t, o.resp.Result); res.Status != pr.StatusPosted || res.Added != 1 {
-		t.Errorf("the in-flight write = %+v", res)
-	}
+	// A shutdown cancels the handlers' contexts; the one shutdown deadline is the
+	// backstop, so the drain does not wait for the write. The held request never
+	// answers with a posted result and the daemon exits 0 on its own.
 	if code := d.Wait(t, 30*time.Second); code != 0 {
 		t.Errorf("exit = %d after the drain; output: %s", code, d.Stderr())
 	}
-	// The record of the finished write is on disk, and a second serve starts
-	// cleanly on the same state directory.
-	if st, _, found := sidecarRecord(t, d, "example-org", "widget", 21); !found || len(st.Fingerprints) != 1 {
-		t.Errorf("sidecar after the drain = %+v found=%v", st, found)
+	select {
+	case o := <-done:
+		if o.err == nil && o.resp.Error == nil {
+			if res := decode[pr.ReviewSubmitResult](t, o.resp.Result); res.Status == pr.StatusPosted {
+				t.Errorf("the cancelled write reported posted: %+v", res)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("the cancelled write was neither answered nor dropped")
 	}
+	d.Shim.Release("create_review")
+	// A second serve starts cleanly on the same state directory.
 	d.Start(t)
 	callOK(t, d, "pr", "review_pending", map[string]any{"id": prW.Ref()})
 	if code := servetest.StopDaemon(t, d); code != 0 {

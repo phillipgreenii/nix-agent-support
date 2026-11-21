@@ -208,7 +208,8 @@ type Call struct {
 // "threads", "issue_comments", "reviews", "files", "commits", "pending" (the
 // pending review lookup), "runs", "jobs", "rerun" (the REST
 // runs list, a run's jobs and the rerun request), "create_review" (the REST
-// create of a pending review), "search_prs" (`gh search prs`), "run_view"
+// create of a pending review), "rules" (the REST read of a base branch's rules,
+// which marks each run's required flag), "search_prs" (`gh search prs`), "run_view"
 // (`gh run view`) or "other". A GraphQL write sends its document on standard
 // input, so its argv says nothing: Shim.Stdin and Shim.CountStdin classify it.
 func (c Call) Kind() string {
@@ -232,6 +233,8 @@ func (c Call) Kind() string {
 			return "runs"
 		case strings.Contains(all, "/pulls/") && strings.Contains(all, "/reviews"):
 			return "create_review"
+		case strings.Contains(all, "/rules/branches/"):
+			return "rules"
 		}
 		return "other"
 	}

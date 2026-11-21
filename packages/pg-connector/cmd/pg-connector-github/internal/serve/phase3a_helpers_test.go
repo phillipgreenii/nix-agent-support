@@ -83,7 +83,7 @@ func kinds(calls []servetest.Call) map[string]int {
 // viewer_interval repeats forever.
 var workKinds = []string{
 	"search", "nodes", "detail", "threads", "issue_comments", "reviews", "files", "commits", "pending",
-	"runs", "jobs", "rerun", "create_review", "search_prs", "run_view", "other",
+	"runs", "jobs", "rerun", "create_review", "rules", "search_prs", "run_view", "other",
 }
 
 // quiet waits until the daemon has made no call of its work for a second, and

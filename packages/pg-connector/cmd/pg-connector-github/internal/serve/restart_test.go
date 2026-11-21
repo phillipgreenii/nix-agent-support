@@ -113,12 +113,13 @@ func restartAfterALongDowntime(t *testing.T, originDelay int) {
 	}
 	_ = db.Close()
 
-	// GraphQL calls cost one point each; the runs and jobs requests are REST.
+	// GraphQL calls cost one point each; the runs, jobs and branch-rules requests
+	// are REST.
 	graphqlCalls := func(calls []servetest.Call) int {
 		n := 0
 		for _, c := range calls {
 			switch c.Kind() {
-			case "runs", "jobs", "rerun", "create_review":
+			case "runs", "jobs", "rerun", "create_review", "rules":
 			default:
 				n++
 			}

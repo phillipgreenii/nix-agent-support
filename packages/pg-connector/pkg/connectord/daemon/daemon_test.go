@@ -220,3 +220,30 @@ func TestRunDrainsOnParentCancel(t *testing.T) {
 		t.Fatal("run did not drain")
 	}
 }
+
+// Run starts the opt-in pprof endpoint named by Spec.PprofEnv from the process
+// environment, and reports it on the spec's stderr; Serve never does.
+func TestRunStartsThePprofEndpointWhenTheVariableIsSet(t *testing.T) {
+	const env = "X_TESTD_PPROF_ADDR"
+	t.Setenv(env, "127.0.0.1:0")
+	rec := &recorder{}
+	started := make(chan struct{})
+	spec, stderr := newSpec(t, rec, func(context.Context) error { close(started); return nil })
+	spec.PprofEnv = env
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() { done <- daemon.Run(ctx, spec) }()
+	<-started
+	cancel()
+	select {
+	case c := <-done:
+		if c != daemon.ExitOK {
+			t.Fatalf("exit %d", c)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not drain")
+	}
+	if !strings.Contains(stderr.String(), "pprof listening on 127.0.0.1:") {
+		t.Fatalf("stderr %q lacks the pprof listening line", stderr.String())
+	}
+}

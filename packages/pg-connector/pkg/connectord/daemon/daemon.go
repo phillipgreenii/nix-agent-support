@@ -25,6 +25,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/phillipgreenii/x/exitcode"
@@ -109,6 +110,9 @@ func Run(parent context.Context, spec Spec) int {
 	if err != nil {
 		fmt.Fprintf(spec.stderr(), "%s serve: %v\n", spec.Name, err)
 		return ExitUsage
+	}
+	if spec.PprofEnv != "" {
+		defer StartPprof(spec.PprofEnv, os.Getenv, spec.stderr())()
 	}
 	return RunWithDeadline(parent, spec, deadline)
 }
