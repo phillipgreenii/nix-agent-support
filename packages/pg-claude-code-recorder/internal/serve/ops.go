@@ -98,17 +98,19 @@ func (d *Daemon) computeCoverageMode(view string, withSummary bool, mode statMod
 // computeCoverageModeCtx is computeCoverageMode with the read transaction and
 // every statement in it under ctx.
 func (d *Daemon) computeCoverageModeCtx(ctx context.Context, view string, withSummary bool, mode statMode) (wire.Coverage, error) {
-	// The commit counter is read before the snapshot opens: a commit in between
-	// leaves the cache one step behind, never ahead.
-	seq := d.st.CommitSeq()
 	// One read transaction for every statement: one lock round trip instead of
 	// one per statement, and the figures come from one snapshot.
-	var cov wire.Coverage
+	// Only the reads run under the snapshot; the Lstat loop runs after it closes.
+	var in coverageInputs
 	err := d.st.ReadTxCtx(ctx, func(rd *store.Reader) error {
 		var e error
-		cov, e = d.computeCoverageFrom(ctx, rd, view, withSummary, mode, seq)
+		in, e = d.readCoverageInputs(ctx, rd, withSummary, mode)
 		return e
 	})
+	var cov wire.Coverage
+	if err == nil {
+		cov, err = d.computeCoverageOver(ctx, in, view, mode)
+	}
 	if err == nil && mode == statAll {
 		d.lastFullStatNS.Store(d.clock.Now().UnixNano())
 	}
@@ -153,36 +155,78 @@ func (d *Daemon) cachedStages() ([]store.StageRow, bool) {
 // The commit count argument is kept for the callers' sake: the status file rows
 // are now kept up to date from the store's file tracker, not keyed on it.
 func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view string, withSummary bool, mode statMode, _ uint64) (wire.Coverage, error) {
-	var files fileView
-	var curPaths map[int64][]string
-	var byGen, parse map[genKey]int64 // statAll: copy and parse offsets
-	var fresh map[int64]bool
+	in, err := d.readCoverageInputs(ctx, rd, withSummary, mode)
+	if err != nil {
+		return wire.Coverage{}, err
+	}
+	return d.computeCoverageOver(ctx, in, view, mode)
+}
+
+// coverageInputs is everything a coverage pass reads from the store, so the
+// per-file Lstat loop can run after the read snapshot is closed.
+type coverageInputs struct {
+	files    fileView
+	curPaths map[int64][]string
+	byGen    map[genKey]int64 // statAll: copy offsets
+	parse    map[genKey]int64 // statAll: parse offsets
+	fresh    map[int64]bool
+	summary  *parser.Summary
+	stages   []store.StageRow
+	stagesOK bool // stages was read; false leaves the stage counts at zero
+}
+
+// readCoverageInputs is the part of a coverage pass that needs the snapshot:
+// statements only, no filesystem access.
+func (d *Daemon) readCoverageInputs(ctx context.Context, rd *store.Reader, withSummary bool, mode statMode) (coverageInputs, error) {
+	var in coverageInputs
 	var err error
 	if mode == statLazy {
-		if files, curPaths, err = d.statusRows(ctx, rd); err != nil {
-			return wire.Coverage{}, err
+		if in.files, in.curPaths, err = d.statusRows(ctx, rd); err != nil {
+			return coverageInputs{}, err
 		}
-		fresh = d.freshTouched(d.clock.Now())
+		in.fresh = d.freshTouched(d.clock.Now())
 	} else {
 		all, err := rd.AllFiles()
 		if err != nil {
-			return wire.Coverage{}, err
+			return coverageInputs{}, err
 		}
-		files = viewOf(all)
+		in.files = viewOf(all)
 		gens, err := rd.AllGenerations()
 		if err != nil {
-			return wire.Coverage{}, err
+			return coverageInputs{}, err
 		}
-		if curPaths, err = rd.AllCurrentPaths(); err != nil { // one query for every file, not one per file
-			return wire.Coverage{}, err
+		if in.curPaths, err = rd.AllCurrentPaths(); err != nil { // one query for every file, not one per file
+			return coverageInputs{}, err
 		}
-		byGen = make(map[genKey]int64, len(gens))
-		parse = make(map[genKey]int64, len(gens))
+		in.byGen = make(map[genKey]int64, len(gens))
+		in.parse = make(map[genKey]int64, len(gens))
 		for _, g := range gens {
-			byGen[genKey{g.File, g.Gen}] = g.CopyOffset
-			parse[genKey{g.File, g.Gen}] = g.ParseOffset
+			in.byGen[genKey{g.File, g.Gen}] = g.CopyOffset
+			in.parse[genKey{g.File, g.Gen}] = g.ParseOffset
 		}
 	}
+	if withSummary {
+		if sum, err := parser.SummarizeFrom(rd); err == nil {
+			in.summary = &sum
+		}
+	}
+	cached := false
+	if mode == statLazy {
+		in.stages, cached = d.cachedStages()
+	}
+	if cached {
+		in.stagesOK = true
+	} else if rows, serr := rd.Stages(); serr == nil {
+		in.stages, in.stagesOK = rows, true
+	}
+	return in, nil
+}
+
+// computeCoverageOver is the part of a coverage pass that touches the
+// filesystem (Lstat per file, Stat per root). It runs with no read snapshot
+// open.
+func (d *Daemon) computeCoverageOver(ctx context.Context, in coverageInputs, view string, mode statMode) (wire.Coverage, error) {
+	files, curPaths, byGen, parse, fresh := in.files, in.curPaths, in.byGen, in.parse, in.fresh
 	// Each file's current-generation lag entry, one lock acquisition. Both modes
 	// read UnparsedSince from it (the parse-lag seconds), so statAll needs it
 	// too, but never the whole per-generation copy.
@@ -267,9 +311,8 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 		_, err := os.Stat(root)
 		cov.Roots = append(cov.Roots, wire.RootCoverage{Path: root, Present: err == nil, Files: counts[root]})
 	}
-	if !withSummary {
-		// the caller does not read the aggregates
-	} else if sum, err := parser.SummarizeFrom(rd); err == nil {
+	if in.summary != nil { // nil when the caller does not read the aggregates
+		sum := *in.summary
 		cov.BadLines = sum.BadLines
 		cov.UnknownKeys = []wire.UnknownKey{}
 		for _, u := range sum.UnknownKeys {
@@ -281,17 +324,8 @@ func (d *Daemon) computeCoverageFrom(ctx context.Context, rd *store.Reader, view
 		cov.UnparsedKinds = append(cov.UnparsedKinds, wire.UnparsedKind{Kind: k, Files: n})
 	}
 	sort.Slice(cov.UnparsedKinds, func(i, j int) bool { return cov.UnparsedKinds[i].Kind < cov.UnparsedKinds[j].Kind })
-	var rows []store.StageRow
-	cached := false
-	if mode == statLazy {
-		rows, cached = d.cachedStages()
-	}
-	var serr error
-	if !cached {
-		rows, serr = rd.Stages()
-	}
-	if serr == nil {
-		for _, r := range rows {
+	if in.stagesOK {
+		for _, r := range in.stages {
 			switch r.Stage {
 			case store.StageHeld:
 				cov.Held++
