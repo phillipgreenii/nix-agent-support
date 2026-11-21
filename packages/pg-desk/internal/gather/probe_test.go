@@ -18,11 +18,11 @@ func TestProbeQueryUsesTheReadOnlyListingVerb(t *testing.T) {
 	}
 }
 
-func TestProbeQueryExit2IsPartialAndPasses(t *testing.T) {
-	entityFactory(t, `issue list=2:{"entities":[]}`)
+func TestProbeQueryExit5IsDegradedAndPasses(t *testing.T) {
+	entityFactory(t, `issue list=5:{"entities":[]}`)
 	g := NewGatherer(testConfig(""), nil)
 	if err := g.ProbeQuery(context.Background(), "issue", "work"); err != nil {
-		t.Fatalf("exit 2 (partial degradation) must pass, got %v", err)
+		t.Fatalf("exit 5 (degraded) must pass, got %v", err)
 	}
 }
 

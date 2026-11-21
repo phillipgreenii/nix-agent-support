@@ -26,17 +26,17 @@ func TestBaselineOpenAgesReturnsOnlyQueriesWithoutAStoredBaseline(t *testing.T) 
 }
 
 func TestBaselineOpenAgesPartialExitIsAnAnswer(t *testing.T) {
-	entityFactory(t, "issue health=2:"+healthWire)
+	entityFactory(t, "issue health=5:"+healthWire)
 	g := NewGatherer(testConfig(""), nil)
 	if _, err := g.BaselineOpenAges(context.Background(), "issue", "jira-a"); err != nil {
-		t.Fatalf("exit 2 with the backend's document is an answer: %v", err)
+		t.Fatalf("exit 5 with the backend's document is an answer: %v", err)
 	}
 }
 
 func TestBaselineOpenAgesFailuresAreErrors(t *testing.T) {
 	cases := map[string]string{
 		"total failure":      `issue health=3:{"sources":[{"source":"jira-a","status":"degraded","reason":"boom"}],"backends":[]}`,
-		"no status document": `issue health=2:{"sources":[{"source":"jira-a","status":"degraded","reason":"status exploded"}],"backends":[]}`,
+		"no status document": `issue health=5:{"sources":[{"source":"jira-a","status":"degraded","reason":"status exploded"}],"backends":[]}`,
 		"another backend":    `issue health=0:{"sources":[],"backends":[{"backend":"other","status":{"queries":[]}}]}`,
 		"unparseable":        `issue health=0:not json`,
 	}

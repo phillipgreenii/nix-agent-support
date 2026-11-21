@@ -60,7 +60,7 @@ const threadChangeTitleMaxRunes = 80
 // ListChanges is the ONE place pg-desk execs `pg-connector <type> changes
 // --query <query> --consumer <consumer> --output json`; it goes through the
 // package's single exec chokepoint (run). It classifies the call by
-// pg-connector's fan-out exit scheme: 0 ok, 2 partial (the partial result is
+// pg-connector's fan-out exit scheme: 0 ok, 5 degraded (the partial result is
 // returned, its degraded sources visible in Sources), 3 total failure (an
 // error). A failure to start pg-connector, any other exit code, or an
 // undecodable response is an error too.
@@ -73,17 +73,12 @@ func (g *Gatherer) ListChanges(ctx context.Context, entityType, query, consumer 
 		env = g.issueBeadsDirEnv()
 	}
 	args := []string{entityType, "changes", "--query", query, "--consumer", consumer, "--output", "json"}
-	res, err := g.run(ctx, args, env)
+	stdout, err := g.fanOutCall(ctx, args, env)
 	if err != nil {
 		return ListChangesResult{}, err
 	}
-	switch res.exitCode {
-	case 0, 2:
-	default:
-		return ListChangesResult{}, fmt.Errorf("pg-connector %v: exit %d: %s", args, res.exitCode, wireErrorMessage(res.stdout))
-	}
 	var wire changesWireOut
-	if err := json.Unmarshal(res.stdout, &wire); err != nil {
+	if err := json.Unmarshal(stdout, &wire); err != nil {
 		return ListChangesResult{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
 	out := ListChangesResult{
@@ -159,7 +154,7 @@ type listWireOut struct {
 // --fingerprints --output json` (no cursor, no consumer: the listing is the
 // whole current state of the query) through the package's single exec
 // chokepoint. It classifies the call by pg-connector's fan-out exit scheme: 0
-// ok, 2 partial (the partial result is returned, its non-succeeded sources
+// ok, 5 degraded (the partial result is returned, its non-succeeded sources
 // visible in Sources), 3 total failure (an error). A failure to start
 // pg-connector, any other exit code, or an undecodable response is an error
 // too.
@@ -172,17 +167,12 @@ func (g *Gatherer) ListFingerprints(ctx context.Context, entityType, query strin
 		env = g.issueBeadsDirEnv()
 	}
 	args := []string{entityType, "list", "--query", query, "--fingerprints", "--output", "json"}
-	res, err := g.run(ctx, args, env)
+	stdout, err := g.fanOutCall(ctx, args, env)
 	if err != nil {
 		return ListFingerprintsResult{}, err
 	}
-	switch res.exitCode {
-	case 0, 2:
-	default:
-		return ListFingerprintsResult{}, fmt.Errorf("pg-connector %v: exit %d: %s", args, res.exitCode, wireErrorMessage(res.stdout))
-	}
 	var wire listWireOut
-	if err := json.Unmarshal(res.stdout, &wire); err != nil {
+	if err := json.Unmarshal(stdout, &wire); err != nil {
 		return ListFingerprintsResult{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
 	out := ListFingerprintsResult{

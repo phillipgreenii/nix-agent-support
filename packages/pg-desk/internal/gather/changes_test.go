@@ -58,12 +58,12 @@ func TestListChangesThreadTitleIsFirstNonEmptyLineTruncated(t *testing.T) {
 	}
 }
 
-func TestListChangesExit2ReturnsPartialResult(t *testing.T) {
-	entityFactory(t, "pr changes=2:"+changesWirePR)
+func TestListChangesExit5ReturnsPartialResult(t *testing.T) {
+	entityFactory(t, "pr changes=5:"+changesWirePR)
 	g := NewGatherer(testConfig(""), nil)
 	got, err := g.ListChanges(context.Background(), "pr", "mine", "pg-desk")
 	if err != nil {
-		t.Fatalf("exit 2 must return the partial result, got error %v", err)
+		t.Fatalf("exit 5 must return the partial result, got error %v", err)
 	}
 	if len(got.Changes) != 3 {
 		t.Errorf("changes = %+v", got.Changes)
@@ -143,12 +143,12 @@ func TestListFingerprintsDecodesEntitiesSourcesAndFingerprints(t *testing.T) {
 	}
 }
 
-func TestListFingerprintsExit2ReturnsPartialResultAndAbsentMapIsEmpty(t *testing.T) {
-	entityFactory(t, `issue list=2:{"entities":[],"sources":[{"source":"b","status":"degraded","count":0}],"truncated":false}`)
+func TestListFingerprintsExit5ReturnsPartialResultAndAbsentMapIsEmpty(t *testing.T) {
+	entityFactory(t, `issue list=5:{"entities":[],"sources":[{"source":"b","status":"degraded","count":0}],"truncated":false}`)
 	g := NewGatherer(testConfig(""), nil)
 	got, err := g.ListFingerprints(context.Background(), "issue", "open")
 	if err != nil {
-		t.Fatalf("exit 2 must return the partial result, got error %v", err)
+		t.Fatalf("exit 5 must return the partial result, got error %v", err)
 	}
 	if got.Fingerprints == nil || len(got.Fingerprints) != 0 || len(got.Sources) != 1 {
 		t.Errorf("result = %+v", got)

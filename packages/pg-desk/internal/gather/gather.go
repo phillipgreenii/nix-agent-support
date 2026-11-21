@@ -935,24 +935,21 @@ func (g *Gatherer) callError(args []string, err error) error {
 	return wireErrorOf(args, ce)
 }
 
-// fanOutCall runs a fan-out pg-connector verb (ci list, issue list) and
-// classifies per pg-connector's own 0/2/3 fan-out scheme
-// (cmd/pg-connector's outcome.go FanOutOutcome.ExitCode): exit 0 or 2 both
-// return the raw stdout as-is (it already carries its own per-source
-// degradation detail in "sources[]" — gather does not re-inspect that
-// detail, it only cares whether the CALL overall produced usable data);
-// exit 3 (total failure), or any other outcome (e.g. exit 1 from
-// issue list's own query_not_recognized CLI-level failure, or a failure to
-// even start pg-connector), reports err.
+// fanOutCall runs a fan-out pg-connector verb (ci list, issue list) through
+// the typed client and classifies per pg-connector's own 0/5/3 fan-out
+// scheme (the client's FanOutStdout): exit 0 (ok) or 5 (degraded) both return
+// the raw stdout as-is (it already carries its own per-source degradation
+// detail in "sources[]" — gather does not re-inspect that detail, it only
+// cares whether the CALL overall produced usable data); exit 3 (total
+// failure), or any other outcome (e.g. exit 2 from issue list's own
+// query_not_recognized usage failure, or a failure to even start
+// pg-connector), reports err. Exit 2 is the shared Usage code, never a
+// degraded answer.
 func (g *Gatherer) fanOutCall(ctx context.Context, args []string, extraEnv []string) (json.RawMessage, error) {
-	res, runErr := g.run(ctx, args, extraEnv)
-	if runErr != nil {
-		return nil, runErr
+	c := client.Client{Run: g.clientRunner, Env: extraEnv, Timeout: callTimeout}
+	raw, err := c.FanOutStdout(ctx, args...)
+	if err != nil {
+		return nil, g.callError(args, err)
 	}
-	switch res.exitCode {
-	case 0, 2:
-		return json.RawMessage(res.stdout), nil
-	default:
-		return nil, exitError(args, res.exitCode, res.stdout)
-	}
+	return raw, nil
 }

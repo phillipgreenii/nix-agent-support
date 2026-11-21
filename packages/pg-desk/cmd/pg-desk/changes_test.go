@@ -442,8 +442,8 @@ func TestChangesExit2OnPartialFailure(t *testing.T) {
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
 	// "down" fails outright (exit 3 from pg-connector).
 	f.listing("down", 3, "")
-	// "partial": pg-connector exit 2 with one degraded backend; its entity hydrates.
-	f.listing("partial", 2, `{"source":"b1","status":"succeeded"},{"source":"b2","status":"degraded","reason":"rate_limited"},{"source":"b3","status":"disabled"}`, [2]string{"changed", "bd-2"})
+	// "partial": pg-connector exit 5 (degraded) with one degraded backend; its entity hydrates.
+	f.listing("partial", 5, `{"source":"b1","status":"succeeded"},{"source":"b2","status":"degraded","reason":"rate_limited"},{"source":"b3","status":"disabled"}`, [2]string{"changed", "bd-2"})
 	f.showIssue("bd-2", "2026-09-30T00:00:00Z")
 	// "brokenhydrate": its entity cannot be read.
 	f.listing("brokenhydrate", 0, okSource, [2]string{"added", "bd-3"})
@@ -719,7 +719,7 @@ func TestChangesTextRendering(t *testing.T) {
 	f := newChangesFixture(t, "issue", "open", "mine")
 	f.listing("open", 0, okSource, [2]string{"added", "bd-1"})
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
-	f.listing("mine", 2, `{"source":"b","status":"degraded","reason":"rate_limited"}`)
+	f.listing("mine", 5, `{"source":"b","status":"degraded","reason":"rate_limited"}`)
 	out, _, err := runChangesCmd(t, "issue", "--consumer", "router")
 	if exitCodeFor(err) != exitPartial {
 		t.Fatalf("err = %v", err)
@@ -929,7 +929,7 @@ func TestChangesDegradedSourceYieldsNoRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f.listing("a", 2, `{"source":"b","status":"degraded","reason":"rate_limited"}`)
+	f.listing("a", 5, `{"source":"b","status":"degraded","reason":"rate_limited"}`)
 	env, err := f.envOf("--consumer", "router")
 	if exitCodeFor(err) != exitPartial {
 		t.Fatalf("err = %v, want exit %d", err, exitPartial)

@@ -148,7 +148,7 @@ type feedFreshnessWire struct {
 // the exec chokepoint: the feed is read pinned to one backend and is NOT
 // acknowledged (AckFeed does that). An empty query passes no --query (the
 // daemon keeps one cursor per consumer, so a caller reads each owning
-// instance with an empty query). Exit 0, 2 and 3 with a parseable JSON
+// instance with an empty query). Exit 0, 5 (degraded) and 3 (unavailable) with a parseable JSON
 // document are answers and are RETURNED with their sources (so CursorExpired
 // is visible); an unparseable answer, any other exit, or the wire error
 // unavailable (wrapping ErrUnavailable) is an error.
@@ -165,24 +165,19 @@ func (g *Gatherer) ListFeed(ctx context.Context, entityType, query, consumer, ba
 		args = append(args, "--reset")
 	}
 	args = append(args, "--output", "json")
-	res, err := g.run(ctx, args, g.feedEnv(entityType))
+	stdout, err := g.fanOutDocStdout(ctx, args, g.feedEnv(entityType))
 	if err != nil {
 		return FeedResult{}, err
 	}
-	switch res.exitCode {
-	case 0, 2, 3:
-	default:
-		return FeedResult{}, exitError(args, res.exitCode, res.stdout)
-	}
-	if wireErrorCode(res.stdout) == "unavailable" {
-		return FeedResult{}, exitError(args, res.exitCode, res.stdout)
+	if wireErrorCode(stdout) == "unavailable" {
+		return FeedResult{}, exitError(args, client.ExitOK, stdout)
 	}
 	var wire feedWireOut
-	if err := json.Unmarshal(res.stdout, &wire); err != nil {
+	if err := json.Unmarshal(stdout, &wire); err != nil {
 		return FeedResult{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
 	if hasWireError(wire.Error) {
-		return FeedResult{}, exitError(args, res.exitCode, res.stdout)
+		return FeedResult{}, exitError(args, client.ExitOK, stdout)
 	}
 	out := FeedResult{
 		Sources:   make([]FeedSource, 0, len(wire.Sources)),
@@ -317,21 +312,16 @@ type MemberList struct {
 
 // ListQueryMembers runs `pg-connector issue list --query <query> --backend
 // <backend> --output json` and decodes entities[].id, each entity's stated
-// entity_meta.watched and the truncated flag. Exit 0 and 2 are answers; the
+// entity_meta.watched and the truncated flag. Exit 0 and 5 (degraded) are answers; the
 // wire error unavailable wraps ErrUnavailable.
 func (g *Gatherer) ListQueryMembers(ctx context.Context, query, backend string) (MemberList, error) {
 	if query == "" || backend == "" {
 		return MemberList{}, fmt.Errorf("gather: list query members: query and backend are required")
 	}
 	args := []string{"issue", "list", "--query", query, "--backend", backend, "--output", "json"}
-	res, err := g.run(ctx, args, g.issueBeadsDirEnv())
+	stdout, err := g.fanOutCall(ctx, args, g.issueBeadsDirEnv())
 	if err != nil {
 		return MemberList{}, err
-	}
-	switch res.exitCode {
-	case 0, 2:
-	default:
-		return MemberList{}, exitError(args, res.exitCode, res.stdout)
 	}
 	var wire struct {
 		Entities []struct {
@@ -342,7 +332,7 @@ func (g *Gatherer) ListQueryMembers(ctx context.Context, query, backend string) 
 		} `json:"entities"`
 		Truncated bool `json:"truncated"`
 	}
-	if err := json.Unmarshal(res.stdout, &wire); err != nil {
+	if err := json.Unmarshal(stdout, &wire); err != nil {
 		return MemberList{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
 	out := MemberList{Members: make([]MemberRef, 0, len(wire.Entities)), Truncated: wire.Truncated}

@@ -78,7 +78,7 @@ func TestFeedListCursorExpiredExit3ReturnsDocument(t *testing.T) {
 }
 
 func TestFeedListOtherDegradedReasonIsNotCursorExpired(t *testing.T) {
-	entityFactory(t, `issue changes=2:{"sources":[{"backend":"jira","status":"degraded","reason":"rate_limited"}],"changes":[]}`)
+	entityFactory(t, `issue changes=5:{"sources":[{"backend":"jira","status":"degraded","reason":"rate_limited"}],"changes":[]}`)
 	g := NewGatherer(testConfig(""), nil)
 	got, err := g.ListFeed(context.Background(), "issue", "", "pg-desk", "jira-a", false)
 	if err != nil || got.Sources[0].CursorExpired {

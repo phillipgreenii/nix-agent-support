@@ -15,7 +15,7 @@ import (
 // backend refresh and would still look healthy [design: 9.10, 11].
 //
 // The call is classified by the fan-out exit scheme shared with fanOutCall:
-// exit 0 or 2 pass (2 is partial degradation of some backend, which says
+// exit 0 or 5 pass (5 is partial degradation of some backend, which says
 // nothing about the query name); any other outcome, including a failure to
 // start pg-connector, is an error.
 func (g *Gatherer) ProbeQuery(ctx context.Context, entityType, query string) error {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 )
 
 // BaselineOpenAges runs `pg-connector <type> health --backend <backend>
@@ -13,7 +15,7 @@ import (
 // query whose baseline is stored has no entry. The backend's own status
 // document is the only source: the feed wire does not carry the baseline time.
 //
-// Exit 0 and 2 are answers; exit 3 and any other exit are errors, and so is an
+// Exit 0 and 5 (degraded) are answers; exit 3 and any other exit are errors, and so is an
 // answer whose backends[] holds no status document for the backend (the
 // backend's source row is degraded or disabled), because "no entry" would
 // then read as "baseline stored". The wire error unavailable wraps
@@ -23,17 +25,12 @@ func (g *Gatherer) BaselineOpenAges(ctx context.Context, entityType, backend str
 		return nil, fmt.Errorf("gather: baseline open ages: type and backend are required")
 	}
 	args := []string{entityType, "health", "--backend", backend, "--output", "json"}
-	res, err := g.run(ctx, args, g.feedEnv(entityType))
+	stdout, err := g.fanOutCall(ctx, args, g.feedEnv(entityType))
 	if err != nil {
 		return nil, err
 	}
-	switch res.exitCode {
-	case 0, 2:
-	default:
-		return nil, exitError(args, res.exitCode, res.stdout)
-	}
-	if wireErrorCode(res.stdout) == "unavailable" {
-		return nil, exitError(args, res.exitCode, res.stdout)
+	if wireErrorCode(stdout) == "unavailable" {
+		return nil, exitError(args, client.ExitOK, stdout)
 	}
 	var wire struct {
 		Sources []struct {
@@ -53,11 +50,11 @@ func (g *Gatherer) BaselineOpenAges(ctx context.Context, entityType, backend str
 		} `json:"backends"`
 		Error json.RawMessage `json:"error"`
 	}
-	if err := json.Unmarshal(res.stdout, &wire); err != nil {
+	if err := json.Unmarshal(stdout, &wire); err != nil {
 		return nil, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
 	if hasWireError(wire.Error) {
-		return nil, exitError(args, res.exitCode, res.stdout)
+		return nil, exitError(args, client.ExitOK, stdout)
 	}
 	for _, b := range wire.Backends {
 		if b.Backend != backend {
