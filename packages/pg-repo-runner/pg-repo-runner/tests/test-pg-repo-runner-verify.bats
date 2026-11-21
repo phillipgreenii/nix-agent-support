@@ -982,6 +982,20 @@ only_alpha_verified() {
   [ "$output" = 7 ]
 }
 
+@test "repos.<key>.check_timeout overrides the global cap for that repo only" {
+  unset PG_REPO_RUNNER_CHECK_TIMEOUT
+  sd '\[thresholds\]' $'[thresholds]\ncheck_timeout = 90' "$TEST_DIR/config.toml"
+  sd '\[repos.nix-alpha\]' $'[repos.nix-alpha]\ncheck_timeout = 30000' "$TEST_DIR/config.toml"
+  lib_eval "rr_load_config; rr_check_cap nix-alpha"
+  [ "$output" = 30000 ]
+  lib_eval "rr_load_config; rr_check_cap nix-other"
+  [ "$output" = 90 ]
+  lib_eval "rr_load_config; rr_check_cap"
+  [ "$output" = 90 ]
+  PG_REPO_RUNNER_CHECK_TIMEOUT=7 lib_eval "rr_load_config; rr_check_cap nix-alpha"
+  [ "$output" = 7 ]
+}
+
 # ---- real nix, on a fixture flake -------------------------------------------
 
 # require_real_nix: skip unless a usable nix is on PATH (not inside a nix build

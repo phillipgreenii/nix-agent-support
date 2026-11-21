@@ -94,7 +94,7 @@ let
         build = true;
       };
       nix-beta.verify = true;
-      nix-gamma = { };
+      nix-gamma.checkTimeout = 30000;
     };
   };
   surfaced = evaluate {

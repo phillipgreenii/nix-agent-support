@@ -129,7 +129,8 @@ and ignores the kill switch: it only reads refs and the verdict store.
 3. Latest wins: if the primary branch no longer points at `<sha>`, a `superseded` verdict is stored
    and the run exits 0 without running nix (the newer tip has its own event).
    3a. Cap: the `nix flake check` runs under a wall-clock cap, `thresholds.check_timeout` seconds
-   (default 3600, `PG_REPO_RUNNER_CHECK_TIMEOUT`, 0 turns it off), enforced with `timeout
+   (default 3600, `PG_REPO_RUNNER_CHECK_TIMEOUT`, 0 turns it off; a repo's own
+   `repos.<key>.check_timeout` replaces it for that repo only), enforced with `timeout
 --kill-after=60` over the whole process group so nix and its children die together. A check that
    hits it is stored as a `red` verdict with `timedOut: true` and exit 124 (never `error`, which would
    be re-offered every retry window and re-run for the full cap each time), the run log and the check
@@ -573,6 +574,7 @@ verify = false
 sync = false
 build = false # take part in the workspace build (runner C): EVERY workspace repo must opt in
 push = false
+check_timeout = 30000 # optional: this repo's own check cap in seconds, replaces thresholds.check_timeout for it only (0 = no cap)
 dry_run = true # only read when push = true: log the range, push nothing
 consumes = [] # sibling repo keys whose unpublished commits can make this repo red
 ```
@@ -595,26 +597,26 @@ package.
 
 ## Test seams (environment)
 
-| Variable                        | Effect                                                                             |
-| ------------------------------- | ---------------------------------------------------------------------------------- |
-| `PG_REPO_RUNNER_CONFIG`         | Path of the config file.                                                           |
-| `PG_REPO_RUNNER_LOADAVG`        | Replaces the 1-minute load reading (the bats suites use this).                     |
-| `PG_REPO_RUNNER_MAX_LOAD`       | Replaces the load threshold.                                                       |
-| `PG_REPO_RUNNER_NCPU`           | Replaces the core count used as the default threshold.                             |
-| `PG_REPO_RUNNER_NIX_BIN`        | Replaces the nix binary (the bats suites use it to classify).                      |
-| `PG_REPO_RUNNER_GIT_BIN`        | Replaces the git binary (the sync suite records git calls).                        |
-| `PG_REPO_RUNNER_PN_BIN`         | Replaces the pn binary (default: `pn` on PATH).                                    |
-| `PG_REPO_RUNNER_EPOCH`          | Replaces the clock, in epoch seconds (the debounce tests).                         |
-| `PG_REPO_RUNNER_QUIET_WINDOW`   | Replaces the quiet window, in seconds.                                             |
-| `PG_REPO_RUNNER_BD_BIN`         | Replaces the bd binary (default: `bd` on PATH).                                    |
-| `PG_REPO_RUNNER_CCPOOL_BIN`     | Replaces the ccpool that emits the gauges (the metrics suite).                     |
-| `PG_REPO_RUNNER_CCPOOL_TIMEOUT` | Replaces the 10 s bound of one gauge call.                                         |
-| `PG_OSX_NOTIFY_BIN`             | Replaces the `pg-osx-notify` CLI (the surfacing suites record it).                 |
-| `PG_REPO_RUNNER_RETRY_WINDOW`   | Replaces the tip item's retry window, in seconds.                                  |
-| `PG_REPO_RUNNER_CHECK_INTERVAL` | Replaces the per-repo check spacing, in seconds (0 turns it off).                  |
-| `PG_REPO_RUNNER_CHECK_TIMEOUT`  | Replaces the wall-clock cap on one `nix flake check`, in seconds (0 turns it off). |
-| `PG_REPO_RUNNER_ENOSPC_RETRIES` | Replaces the retry bound of a check that failed only with a full disk.             |
-| `XDG_STATE_HOME`                | Root of the state directory.                                                       |
+| Variable                        | Effect                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `PG_REPO_RUNNER_CONFIG`         | Path of the config file.                                                                      |
+| `PG_REPO_RUNNER_LOADAVG`        | Replaces the 1-minute load reading (the bats suites use this).                                |
+| `PG_REPO_RUNNER_MAX_LOAD`       | Replaces the load threshold.                                                                  |
+| `PG_REPO_RUNNER_NCPU`           | Replaces the core count used as the default threshold.                                        |
+| `PG_REPO_RUNNER_NIX_BIN`        | Replaces the nix binary (the bats suites use it to classify).                                 |
+| `PG_REPO_RUNNER_GIT_BIN`        | Replaces the git binary (the sync suite records git calls).                                   |
+| `PG_REPO_RUNNER_PN_BIN`         | Replaces the pn binary (default: `pn` on PATH).                                               |
+| `PG_REPO_RUNNER_EPOCH`          | Replaces the clock, in epoch seconds (the debounce tests).                                    |
+| `PG_REPO_RUNNER_QUIET_WINDOW`   | Replaces the quiet window, in seconds.                                                        |
+| `PG_REPO_RUNNER_BD_BIN`         | Replaces the bd binary (default: `bd` on PATH).                                               |
+| `PG_REPO_RUNNER_CCPOOL_BIN`     | Replaces the ccpool that emits the gauges (the metrics suite).                                |
+| `PG_REPO_RUNNER_CCPOOL_TIMEOUT` | Replaces the 10 s bound of one gauge call.                                                    |
+| `PG_OSX_NOTIFY_BIN`             | Replaces the `pg-osx-notify` CLI (the surfacing suites record it).                            |
+| `PG_REPO_RUNNER_RETRY_WINDOW`   | Replaces the tip item's retry window, in seconds.                                             |
+| `PG_REPO_RUNNER_CHECK_INTERVAL` | Replaces the per-repo check spacing, in seconds (0 turns it off).                             |
+| `PG_REPO_RUNNER_CHECK_TIMEOUT`  | Replaces the wall-clock cap on one `nix flake check` (any repo), in seconds (0 turns it off). |
+| `PG_REPO_RUNNER_ENOSPC_RETRIES` | Replaces the retry bound of a check that failed only with a full disk.                        |
+| `XDG_STATE_HOME`                | Root of the state directory.                                                                  |
 
 ## Load threshold: the first calibration sample
 

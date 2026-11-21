@@ -19217,6 +19217,10 @@
                     [ "$(tj ${r.live.configFlagged} '.thresholds.max_load')" = 8 ]
                     [ "$(tj ${r.live.configDefaults} '.thresholds.check_timeout')" = 3600 ]
                     [ "$(tj ${r.live.configFlagged} '.thresholds.check_timeout')" = 1800 ]
+                    # the per-repo cap renders only where set
+                    [ "$(tj ${r.live.configFlagged} '.repos["nix-gamma"].check_timeout')" = 30000 ]
+                    [ "$(tj ${r.live.configFlagged} '[.repos[] | has("check_timeout")] | map(select(. == true)) | length')" = 1 ]
+                    [ "$(tj ${r.live.configDefaults} '[.repos[] | has("check_timeout")] | map(select(. == true)) | length')" = 0 ]
                     [ "$(tj ${r.live.configFlagged} '.thresholds.nice_level')" = 15 ]
                     [ "$(tj ${r.live.configFlagged} '.thresholds.retry_window')" = 900 ]
                     [ "$(tj ${r.live.configDefaults} '.thresholds.retry_window')" = 3600 ]

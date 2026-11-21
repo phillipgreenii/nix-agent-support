@@ -78,6 +78,17 @@ let
           `dry_run`. Has no effect while `push` is false.
         '';
       };
+      checkTimeout = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.unsigned;
+        default = null;
+        example = 30000;
+        description = ''
+          Wall-clock cap, in seconds, on one `nix flake check` of THIS repo,
+          overriding `thresholds.checkTimeout` for this repo only. null (the
+          default) uses the global cap. 0 turns the cap off for this repo.
+          Renders as `repos.<key>.check_timeout`, and only when set.
+        '';
+      };
       consumes = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [ ];
@@ -105,16 +116,20 @@ let
       check_timeout = cfg.thresholds.checkTimeout;
     }
     // lib.optionalAttrs (cfg.thresholds.maxLoad != null) { max_load = cfg.thresholds.maxLoad; };
-    repos = lib.mapAttrs (_: r: {
-      inherit (r)
-        verify
-        sync
-        build
-        push
-        consumes
-        ;
-      dry_run = r.dryRun;
-    }) cfg.repos;
+    repos = lib.mapAttrs (
+      _: r:
+      {
+        inherit (r)
+          verify
+          sync
+          build
+          push
+          consumes
+          ;
+        dry_run = r.dryRun;
+      }
+      // lib.optionalAttrs (r.checkTimeout != null) { check_timeout = r.checkTimeout; }
+    ) cfg.repos;
   }
   // lib.optionalAttrs cfg.surface.enable {
     surface = {

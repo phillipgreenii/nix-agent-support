@@ -491,11 +491,15 @@ rr_check_interval() {
   printf '%s' "$v"
 }
 
-# rr_check_cap: the wall-clock cap, in seconds, on one `nix flake check`
-# (PG_REPO_RUNNER_CHECK_TIMEOUT, else the config's thresholds.check_timeout, else
-# 3600). 0 turns the cap off.
+# rr_check_cap [REPO]: the wall-clock cap, in seconds, on one `nix flake check`
+# (PG_REPO_RUNNER_CHECK_TIMEOUT, else the config's repos.<REPO>.check_timeout when
+# REPO is given, else thresholds.check_timeout, else 3600). 0 turns the cap off.
 rr_check_cap() {
   local v="${PG_REPO_RUNNER_CHECK_TIMEOUT:-}"
+  if [[ -z $v && -n ${1:-} ]]; then
+    # shellcheck disable=SC2016  # jq program, not shell: $k is a jq variable
+    v="$(rr_jq -r --arg k "$1" '.repos[$k].check_timeout // empty' <<<"$RR_CONFIG_JSON")"
+  fi
   [[ -n $v ]] || v="$(rr_cfg '.thresholds.check_timeout // empty')"
   [[ $v =~ ^[0-9]+$ ]] || v=3600
   printf '%s' "$v"

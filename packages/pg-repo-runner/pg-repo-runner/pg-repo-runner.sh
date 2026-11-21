@@ -233,7 +233,8 @@ Files and environment:
   PG_REPO_RUNNER_RETRY_WINDOW   seconds an emitted tip item stays offered
                                 (else thresholds.retry_window, else 3600)
   PG_REPO_RUNNER_CHECK_TIMEOUT  wall-clock cap in seconds on one nix flake check
-                                (else thresholds.check_timeout, else 3600; 0 = off);
+                                (else repos.<key>.check_timeout, else
+                                thresholds.check_timeout, else 3600; 0 = off);
                                 a check over it is a red verdict marked timedOut
   PG_REPO_RUNNER_CHECK_INTERVAL seconds between two finished checks of one repo;
                                 verify declines (exit 9) inside it (else
@@ -316,7 +317,7 @@ rr_verify_override() {
     return 1
   fi
   local -a cap=()
-  rr_cap_pre "$(($(rr_check_cap) / 4))"
+  rr_cap_pre "$(($(rr_check_cap "$repo") / 4))"
   cap=("${RR_CAP_PRE[@]}")
   PN_WORKSPACE_ROOT="$root" "${cap[@]}" "${RR_NICE_BIN:-nice}" -n "$(rr_nice_level)" \
     env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY \
@@ -400,7 +401,7 @@ act_verify() {
   load0="$(rr_loadavg1)" || load0=""
   rr_log "check start: nix flake check --keep-going --no-write-lock-file $url (load $load0)"
   rc=0
-  cap="$(rr_check_cap)"
+  cap="$(rr_check_cap "$repo")"
   RR_NIX_CAP="$cap" rr_nix_run flake check --keep-going --no-write-lock-file "$url" >"$log" 2>&1 || rc=$?
   t1="$(rr_epoch)"
   # 124 is the cap's TERM; 137 is its --kill-after KILL, but a nix killed by a stray
