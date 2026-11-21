@@ -1019,3 +1019,29 @@ func TestClassifyExit_AcceptsSharedAndLegacyDegraded(t *testing.T) {
 		}
 	}
 }
+
+// The adapter-failure loss path: with --deferred-ack the call passes --no-ack,
+// so an answer that decodes at first and then fails after pg-connector has
+// flushed (here a seq that is a string) leaves the cursor where it was. The
+// adapter exits non-zero, prints nothing and sends no changes-ack, so the next
+// call redelivers the same rows.
+func TestChanges_DeferredAck_DecodeFailureAfterFlush_AcknowledgesNothing(t *testing.T) {
+	pinEmitTime(t)
+	fake := withFactory(t, "changes_body_env", "GO_HELPER_BODY="+daemonBody("9",
+		daemonRow("changed", "o/r#1", "v1", "3"),
+		daemonRow("changed", "o/r#2", "v1", `"41"`)))
+
+	stdout, stderr, code := runCLI(t, deferredArgs()...)
+	if code == 0 || stdout != "" || stderr == "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want non-zero, empty stdout, a diagnostic", code, stdout, stderr)
+	}
+	calls := fake.Calls()
+	if len(calls) != 1 || !hasArg(calls[0].Args, "--no-ack") {
+		t.Fatalf("calls = %v, want exactly one changes call carrying --no-ack", calls)
+	}
+	for _, c := range calls {
+		if isChangesAck(c.Args) {
+			t.Fatalf("call %v acknowledges an answer the adapter failed to deliver", c.Args)
+		}
+	}
+}
