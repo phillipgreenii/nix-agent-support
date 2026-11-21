@@ -61,7 +61,7 @@ func proxyTo(t *testing.T, e *clienttest.Env) (*facts.Reader, *recordingProxy) {
 	}
 	rec := &recordingProxy{}
 	rp := &httputil.ReverseProxy{
-		Director: func(r *http.Request) { r.URL.Scheme = "http"; r.URL.Host = "recorder" },
+		Rewrite: func(pr *httputil.ProxyRequest) { pr.Out.URL.Scheme = "http"; pr.Out.URL.Host = "recorder" },
 		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", e.Socket)

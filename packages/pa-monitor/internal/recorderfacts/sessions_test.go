@@ -222,7 +222,7 @@ func degradedInventoryProxy(t *testing.T, target string) (socket string, sent fu
 	var mu sync.Mutex
 	var buf bytes.Buffer
 	rp := &httputil.ReverseProxy{
-		Director: func(r *http.Request) { r.URL.Scheme, r.URL.Host = "http", "recorder" },
+		Rewrite: func(pr *httputil.ProxyRequest) { pr.Out.URL.Scheme, pr.Out.URL.Host = "http", "recorder" },
 		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", target)
 		}},

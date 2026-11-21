@@ -248,7 +248,7 @@ func failingProxyUntil(t *testing.T, target, failSID string, healed *atomic.Bool
 		t.Fatal(err)
 	}
 	rp := &httputil.ReverseProxy{
-		Director: func(r *http.Request) { r.URL.Scheme, r.URL.Host = "http", "recorder" },
+		Rewrite: func(pr *httputil.ProxyRequest) { pr.Out.URL.Scheme, pr.Out.URL.Host = "http", "recorder" },
 		Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", target)
 		}},

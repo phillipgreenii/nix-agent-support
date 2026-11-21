@@ -136,13 +136,6 @@ func TestUnboundedErrorRateByToolUsesTheToolCallDrivenPlan(t *testing.T) {
 	}
 }
 
-func head(rows [][]any) [][]any {
-	if len(rows) > 3 {
-		return rows[:3]
-	}
-	return rows
-}
-
 func planOf(t testing.TB, db *sql.DB, q Query, w windowCase, f flagCase) string {
 	t.Helper()
 	req := Request{Query: q, Since: w.since, Until: w.until, CwdPrefixes: f.in, ExcludeCwdPrefixes: f.ex}
