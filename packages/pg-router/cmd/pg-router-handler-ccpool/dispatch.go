@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dispatchlib"
@@ -74,7 +74,7 @@ func (w wiring) serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Wr
 	}
 	// Check already proved raw decodes and matches handler.dispatch's schema, so
 	// this second Unmarshal (into the typed shape) cannot fail.
-	var req wire.DispatchRequest
+	var req participant.DispatchRequest
 	_ = json.Unmarshal(raw, &req)
 
 	role, cfg, err := rolefile.LoadRoleAndConfig(ro, cfgPath)
@@ -94,7 +94,7 @@ func (w wiring) serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Wr
 	declineLog := handlerstate.NewEventLog(cfg)
 	if reason, declined := originGate(ctx, newOriginProber(cfg), w.newGuardCheck(cfg), role, cfg, dctx.Item.ID); declined {
 		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, wire.NeutralDecline(reason, ""), dctx.EventID, dctx.DispatchID)
-		return conformance.ExitBusy
+		return participant.ExitBusy
 	}
 	deps := mkDeps(cfg, role)
 	// The event payload's metadata is a snapshot from enqueue time. Re-read the
@@ -131,7 +131,7 @@ func (w wiring) serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Wr
 			// reply's skipped field lets the router count it apart from a real
 			// completion (bead pg2-6t91v7).
 			wire.WriteReply(stdout, wire.SkippedReply(req.ID, skip.Reason, dctx.Item.ID))
-			return conformance.ExitOK
+			return participant.ExitOK
 		}
 		decline := wire.NeutralDecline(skip.Reason, skip.Detail)
 		if skip.Retryable {
@@ -140,7 +140,7 @@ func (w wiring) serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Wr
 			decline.Kind = wire.DeclineKindBusy
 		}
 		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, decline, dctx.EventID, dctx.DispatchID)
-		return conformance.ExitBusy
+		return participant.ExitBusy
 	}
 	result, err := executor.NewCCPool().Dispatch(ctx, dctx, deps)
 	if decline, busy := wire.BusyDeclineFor(err); busy {
@@ -148,29 +148,29 @@ func (w wiring) serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Wr
 		// the event with backoff. The reason and kind are a handler-to-alert
 		// contract (bead pg2-j4uwg) and stay as they are.
 		wire.DeclineAndReply(stdout, declineLog, role, dctx.Item.ID, decline, dctx.EventID, dctx.DispatchID)
-		return conformance.ExitBusy
+		return participant.ExitBusy
 	}
 	if err != nil {
 		wire.WriteErrorReply(stdout, err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	// outcome is an opaque STRING on the wire; result.Fields() is the structured
 	// shape the core stores uninterpreted, JSON-encoded into it (INV-CCH-3).
 	outcomeJSON, err := json.Marshal(result.Fields())
 	if err != nil {
 		wire.WriteErrorReply(stdout, "encode outcome: "+err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	wire.WriteReply(stdout, wire.WithSupervision(
 		wire.OutcomeReply(req.ID, string(outcomeJSON), result.StartedAt), result.Session, result.Supervisors,
 	))
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // failDispatch writes msg to stderr and as an error reply, and returns
-// conformance.ExitError.
+// participant.ExitError.
 func failDispatch(stdout io.Writer, msg string) int {
 	fmt.Fprintln(os.Stderr, "dispatch:", msg)
 	wire.WriteErrorReply(stdout, msg)
-	return conformance.ExitError
+	return participant.ExitError
 }

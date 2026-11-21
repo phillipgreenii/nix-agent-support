@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/backoff"
 	"github.com/phillipgreenii/pg-router/internal/config"
@@ -244,10 +244,10 @@ func TestBootCore_DescriptionRoundTripsToWireAndTUI(t *testing.T) {
 		<-accepted
 	})
 	deadline := time.Now().Add(2 * time.Second)
-	for svc.State() != conformance.Started && time.Now().Before(deadline) {
+	for svc.State() != participant.Started && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if svc.State() != conformance.Started {
+	if svc.State() != participant.Started {
 		t.Fatal("core never reached started")
 	}
 
@@ -265,8 +265,8 @@ func TestBootCore_DescriptionRoundTripsToWireAndTUI(t *testing.T) {
 	})
 
 	var out strings.Builder
-	if code := svc.Serve(core.SubcommandStatus, strings.NewReader(`{"schemaVersion":"1"}`), &out); code != conformance.ExitOK {
-		t.Fatalf("status Serve exit = %d, want %d; body=%s", code, conformance.ExitOK, out.String())
+	if code := svc.Serve(core.SubcommandStatus, strings.NewReader(`{"schemaVersion":"1"}`), &out); code != participant.ExitOK {
+		t.Fatalf("status Serve exit = %d, want %d; body=%s", code, participant.ExitOK, out.String())
 	}
 
 	var reply tui.StatusReply

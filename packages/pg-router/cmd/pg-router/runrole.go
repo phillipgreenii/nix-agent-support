@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/discover"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -88,14 +87,14 @@ func runRunRole(roleName, eventJSON string, asJSON bool) int {
 	setTestMode()
 	ctx := context.Background()
 	// Schema-validate FIRST, exactly as push-inject does (internal/emit.Emit's
-	// conformance.CheckBytes(pushInjectSchema, ...) before DecodeEvent) and
+	// schemas.CheckBytes(pushInjectSchema, ...) before DecodeEvent) and
 	// BEFORE loading config: eventqueue.DecodeEvent's own doc comment states
 	// it "deliberately does NOT validate against the JSON Schema" — skipping
 	// this step would let a typo'd field (e.g. "typ" instead of "type")
 	// silently produce a malformed event instead of a clear rejection. Doing
 	// this ahead of config.Load() means a bad event argument fails fast
 	// without the I/O cost of a config load only to discard it.
-	if err := conformance.CheckBytes("event", []byte(eventJSON)); err != nil {
+	if err := schemas.CheckBytes("event", []byte(eventJSON)); err != nil {
 		fmt.Fprintln(os.Stderr, "run-role:", err)
 		return exitGeneric
 	}

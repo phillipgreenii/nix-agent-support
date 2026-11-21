@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 func TestPoolFlag_setParsesNameDir(t *testing.T) {
@@ -48,7 +48,7 @@ func TestEmitPoolCapacity_passesOnlyDirNeverName(t *testing.T) {
 		calls = append(calls, dirs)
 		return nil
 	})
-	if code != conformance.ExitOK || buf.Len() != 0 {
+	if code != participant.ExitOK || buf.Len() != 0 {
 		t.Fatalf("code=%d out=%q, want ExitOK and no output", code, buf.String())
 	}
 	want := "/state/pg-router-ccpool-review,/state/pg-router-ccpool-worker"
@@ -68,7 +68,7 @@ func TestEmitPoolCapacity_failureIsReportedWithRoles(t *testing.T) {
 	code := emitPoolCapacity(&buf, pools, func(context.Context, []string) error {
 		return errors.New("pool dir unreadable")
 	})
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want ExitError", code)
 	}
 	if !strings.Contains(buf.String(), "feedback") || !strings.Contains(buf.String(), "worker") || !strings.Contains(buf.String(), "pool dir unreadable") {

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	apistatus "github.com/phillipgreenii/pg-router/api/status"
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
@@ -44,11 +44,11 @@ func runStatus(args []string) int {
 		return exitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "status:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "status: unexpected argument:", fs.Arg(0))
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 
 	ref, err := locateCore(*socket, *token)
@@ -74,9 +74,9 @@ func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
 	reply, code, err := client.Call(context.Background(), core.SubcommandStatus, request, core.CallOptions{})
 	if err != nil {
 		fmt.Fprintf(stderr, "status: %v\n", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if code == conformance.ExitBusy {
+	if code == participant.ExitBusy {
 		// The core's own admission-control refusal (Task 3.10): a saturated
 		// read semaphore declines a status/mon.read call immediately rather
 		// than blocking. Unlike a participant's own pre-accept busy decline
@@ -92,7 +92,7 @@ func status(stdout, stderr io.Writer, asJSON bool, ref core.Ref) int {
 	var st statusReply
 	if diagErr := core.DiscriminateReply(reply, core.StatusReplySchema, &st); diagErr != nil {
 		fmt.Fprintf(stderr, "status: %v\n", diagErr)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if asJSON {
 		fmt.Fprintln(stdout, string(reply))

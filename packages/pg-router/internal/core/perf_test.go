@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 )
@@ -88,7 +88,7 @@ func TestStatusVerbAllocBudget(t *testing.T) {
 	}
 
 	svc := &Service{
-		state:        conformance.Started, // INV-INTF-1: Serve only answers in `started`.
+		state:        participant.Started, // INV-INTF-1: Serve only answers in `started`.
 		q:            q,
 		bindings:     testBindings(),
 		reg:          NewRegistry(nil),

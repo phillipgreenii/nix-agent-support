@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/config"
 )
 
@@ -312,7 +312,7 @@ func TestDoctor_RunningCoreReportsLevelsUnavailableRolesAndProgress(t *testing.T
 	go func() { accepted <- f.svc.Accept(ctx) }()
 	t.Cleanup(func() { cancel(); <-accepted })
 	deadline := time.Now().Add(2 * time.Second)
-	for f.svc.State() != conformance.Started && time.Now().Before(deadline) {
+	for f.svc.State() != participant.Started && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 

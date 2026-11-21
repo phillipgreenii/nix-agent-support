@@ -4,7 +4,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -18,7 +18,7 @@ import (
 //
 // Exit 0 with a reply means "ran" (an empty problems list means valid, and
 // problems are listed, never an exit code). A request without a usable role is
-// an error reply with conformance.ExitUsage.
+// an error reply with participant.ExitUsage.
 func runValidate(args []string) int {
 	if exit, done := noArgs("validate", args); done {
 		return exit
@@ -41,5 +41,5 @@ func serveValidate(stdin io.Reader, stdout io.Writer) int {
 		"problems":      problems,
 		"warnings":      []string{},
 	})
-	return conformance.ExitOK
+	return participant.ExitOK
 }

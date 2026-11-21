@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/internal/handlers/corecall"
+	"github.com/phillipgreenii/pg-router/api/participant/coreclient"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 )
@@ -16,8 +16,8 @@ import (
 // host's live configuration, so TestMain unsets them.
 var ambientEnvInputs = []string{
 	rolefile.EnvConfig,
-	corecall.EnvSocket,
-	corecall.EnvToken,
+	coreclient.EnvSocket,
+	coreclient.EnvToken,
 	"CCPOOL_POOL",
 }
 

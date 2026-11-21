@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/conformance"
-	"github.com/phillipgreenii/pg-router/internal/handlers/corecall"
+	"github.com/phillipgreenii/pg-router/api/participant"
+	"github.com/phillipgreenii/pg-router/api/participant/coreclient"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 )
 
@@ -21,8 +21,8 @@ import (
 var ambientEnvInputs = []string{
 	rolefile.EnvConfig,
 	envQueryConfig,
-	corecall.EnvSocket,
-	corecall.EnvToken,
+	coreclient.EnvSocket,
+	coreclient.EnvToken,
 	"CCPOOL_POOL",
 }
 
@@ -84,44 +84,44 @@ func TestIsolateAmbientEnv(t *testing.T) {
 }
 
 func TestRun_SubcommandSet(t *testing.T) {
-	if got := run(nil); got != conformance.ExitUsage {
-		t.Errorf("no subcommand: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run(nil); got != participant.ExitUsage {
+		t.Errorf("no subcommand: exit %d, want %d", got, participant.ExitUsage)
 	}
 	for _, ok := range []string{"help", "version"} {
-		if got := run([]string{ok}); got != conformance.ExitOK {
+		if got := run([]string{ok}); got != participant.ExitOK {
 			t.Errorf("%s: exit %d, want 0", ok, got)
 		}
 	}
 	// An unknown subcommand is a usage error, never a stub.
-	if got := run([]string{"bogus"}); got != conformance.ExitUsage {
-		t.Errorf("bogus: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run([]string{"bogus"}); got != participant.ExitUsage {
+		t.Errorf("bogus: exit %d, want %d", got, participant.ExitUsage)
 	}
 	// The ccpool-specific subcommands are real: with no arguments, split and
 	// pool-capacity are usage errors from their own parsers (not "unknown
 	// subcommand"), and pool-capacity -h prints help with exit 0.
 	for _, sub := range []string{"pool-capacity", "janitor", "split"} {
-		if got := run([]string{sub}); got != conformance.ExitUsage {
-			t.Errorf("%s with no arguments: exit %d, want %d", sub, got, conformance.ExitUsage)
+		if got := run([]string{sub}); got != participant.ExitUsage {
+			t.Errorf("%s with no arguments: exit %d, want %d", sub, got, participant.ExitUsage)
 		}
 	}
-	if got := run([]string{"pool-capacity", "-h"}); got != conformance.ExitOK {
+	if got := run([]string{"pool-capacity", "-h"}); got != participant.ExitOK {
 		t.Errorf("pool-capacity -h: exit %d, want 0", got)
 	}
-	if got := run([]string{"split", "--help"}); got != conformance.ExitOK {
+	if got := run([]string{"split", "--help"}); got != participant.ExitOK {
 		t.Errorf("split --help: exit %d, want 0", got)
 	}
-	if got := run([]string{"query", "stray"}); got != conformance.ExitUsage {
-		t.Errorf("query with an argument: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run([]string{"query", "stray"}); got != participant.ExitUsage {
+		t.Errorf("query with an argument: exit %d, want %d", got, participant.ExitUsage)
 	}
 	// Requests are JSON on stdin, never arguments.
 	for _, sub := range []string{"dispatch", "postStartup", "preShutdown", "validate"} {
-		if got := run([]string{sub, "stray"}); got != conformance.ExitUsage {
-			t.Errorf("%s with an argument: exit %d, want %d", sub, got, conformance.ExitUsage)
+		if got := run([]string{sub, "stray"}); got != participant.ExitUsage {
+			t.Errorf("%s with an argument: exit %d, want %d", sub, got, participant.ExitUsage)
 		}
 	}
 	// origin keeps its old subcommands: the verb is required.
-	if got := run([]string{"origin"}); got != conformance.ExitUsage {
-		t.Errorf("origin without a verb: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run([]string{"origin"}); got != participant.ExitUsage {
+		t.Errorf("origin without a verb: exit %d, want %d", got, participant.ExitUsage)
 	}
 }
 
@@ -179,8 +179,8 @@ func runCapturingStderr(t *testing.T, args []string) (int, string) {
 // code alone cannot tell them apart. The stderr message does.
 func TestRun_DispatchesEachSubcommandToItsOwnHandler(t *testing.T) {
 	code, stderr := runCapturingStderr(t, []string{"bogus"})
-	if code != conformance.ExitUsage || !strings.Contains(stderr, "unknown subcommand") {
-		t.Fatalf("bogus: exit %d, stderr %q; want exit %d and an unknown-subcommand message", code, stderr, conformance.ExitUsage)
+	if code != participant.ExitUsage || !strings.Contains(stderr, "unknown subcommand") {
+		t.Fatalf("bogus: exit %d, stderr %q; want exit %d and an unknown-subcommand message", code, stderr, participant.ExitUsage)
 	}
 }
 

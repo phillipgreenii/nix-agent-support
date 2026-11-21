@@ -6,7 +6,7 @@
 // reply writers, and the pre-accept decline vocabulary.
 //
 // The failure-reason strings (BusyReason*), the decline kind values
-// (DeclineKind*) and exit code 9 (conformance.ExitBusy) are a
+// (DeclineKind*) and exit code 9 (participant.ExitBusy) are a
 // handler-to-alert contract: they MUST stay byte for byte as they are.
 //
 // Moved verbatim out of package main of cmd/pg-router-handler-ccpool (a
@@ -23,54 +23,22 @@ import (
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/pg-failsig"
-	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
-// DispatchRequest/DispatchEvent decode the handler.dispatch wire message
-// (packages/pg-router/schemas/handler.dispatch.schema.json /
-// .../event.schema.json).
-type DispatchRequest struct {
-	SchemaVersion string        `json:"schemaVersion"`
-	ID            string        `json:"id"`
-	Event         DispatchEvent `json:"event"`
-}
-
-// DispatchEvent is the event member of a DispatchRequest.
-type DispatchEvent struct {
-	ID      string         `json:"id"`
-	Type    string         `json:"type"`
-	Payload map[string]any `json:"payload"`
-}
-
-// LifecycleRequest mirrors
-// packages/pg-router/schemas/handler.postStartup.schema.json and
-// .../handler.preShutdown.schema.json (pg2-oju6w.15) — both hooks share one
-// wire shape (no event, no deferred branch), so one type backs both.
-type LifecycleRequest struct {
-	SchemaVersion string `json:"schemaVersion"`
-	ID            string `json:"id"`
-}
-
 // OutcomeReply builds the inline-outcome handler.dispatch-reply. startedAt is
-// the launch time of a session this dispatch adopted (report.Result.StartedAt,
+// the launch time of a session this dispatch adopted (participant.Report.StartedAt,
 // DEC-EVENT-5, INV-CCH-30): the reply carries it as the optional startedAt
 // (RFC3339, UTC) so the core times the dispatch from its real start and not
 // from the re-offer. A zero startedAt (a fresh session, or an adopted one that
 // recorded no launch time) omits the field entirely.
-func OutcomeReply(id, outcome string, startedAt time.Time) map[string]any {
-	reply := map[string]any{
-		"schemaVersion": schemas.SchemaVersion,
-		"id":            id,
-		"outcome":       outcome,
-	}
-	if !startedAt.IsZero() {
-		reply["startedAt"] = ccpool.FormatMetaTime(startedAt)
-	}
+func OutcomeReply(id, outcome string, startedAt time.Time) participant.DispatchReply {
+	reply := participant.DispatchReply{SchemaVersion: schemas.SchemaVersion, ID: id, Outcome: outcome}
+	reply.SetStartedAt(startedAt)
 	return reply
 }
 
@@ -80,31 +48,25 @@ func OutcomeReply(id, outcome string, startedAt time.Time) map[string]any {
 // and only for a non-empty session and supervisors of at least 1; otherwise the
 // reply is left as it is, so an older router (or a dispatch without a takeover)
 // sees the reply it always did.
-func WithSupervision(reply map[string]any, session string, supervisors int) map[string]any {
-	if session == "" || supervisors < 1 {
-		return reply
-	}
-	reply["session"] = session
-	reply["supervisors"] = supervisors
+func WithSupervision(reply participant.DispatchReply, session string, supervisors int) participant.DispatchReply {
+	reply.SetSupervision(session, supervisors)
 	return reply
 }
 
 // SkippedReply builds the inline-outcome handler.dispatch-reply of a MOOT
-// precheck outcome (INV-CCH-22, bead pg2-6t91v7): the handler accepts the event
-// and completes it without doing any work. It is an ordinary outcome reply
-// (outcome: the one-action {"verb":"skipped"} result for beadID) plus the
-// optional skipped field naming the reason tag, which is how pg-router core tells
-// it from a real completion and counts it separately
-// (pg_router_skipped_total, not pg_router_throughput_total). reason is one of the
-// executor's moot Skip* tags.
-func SkippedReply(id, reason, beadID string) map[string]any {
-	res := report.Result{Actions: []report.Action{{
-		Verb: report.Skipped,
-		Refs: []report.Ref{{Type: "bead", ID: beadID}},
+// precheck outcome (INV-CCH-22): the handler accepts the event and completes it
+// without doing any work. It is an ordinary outcome reply (outcome: the
+// one-action {"verb":"skipped"} report for beadID) plus the optional skipped
+// field naming the reason tag, which is how pg-router core tells it from a real
+// completion and counts it separately (pg_router_skipped_total, not
+// pg_router_throughput_total). reason is one of the executor's moot Skip* tags.
+func SkippedReply(id, reason, beadID string) participant.DispatchReply {
+	res := participant.Report{Actions: []participant.Action{{
+		Verb: participant.Skipped,
+		Refs: []participant.Ref{{Type: "bead", ID: beadID}},
 	}}}
-	outcome, _ := json.Marshal(res.Fields())
-	reply := OutcomeReply(id, string(outcome), time.Time{})
-	reply["skipped"] = reason
+	reply := OutcomeReply(id, participant.EncodeOutcome(res), time.Time{})
+	reply.Skipped = reason
 	return reply
 }
 
@@ -121,7 +83,7 @@ func WriteReply(w io.Writer, v any) {
 
 // WriteErrorReply writes the schema-legal error reply carrying msg.
 func WriteErrorReply(w io.Writer, msg string) {
-	WriteReply(w, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": msg})
+	WriteReply(w, participant.DispatchReply{SchemaVersion: schemas.SchemaVersion, Error: msg})
 }
 
 // BusyReason* are the short, stable classification tags WriteBusyReply
@@ -142,7 +104,7 @@ const (
 	// isolation-Ensure error branch).
 	BusyReasonLowDisk = "low-disk"
 	// BusyReasonCommandBusy (bead pg2-358u3): a "command" role's argv exited 9
-	// (conformance.ExitBusy's own code — the command's "not right now" signal),
+	// (participant.ExitBusy's own code — the command's "not right now" signal),
 	// which internal/executor/command.go turns into executor.ErrBusy. It gets
 	// its OWN tag, not at-capacity's, because the cause is opaque to this
 	// module (the command, not ccpool, decided it was busy) and the Grafana
@@ -174,9 +136,9 @@ const (
 // backpressure, fault is a condition worth an operator's look, and neutral is a
 // decline that says nothing about the dispatch's health.
 const (
-	DeclineKindBusy    = "busy"
-	DeclineKindFault   = "fault"
-	DeclineKindNeutral = "neutral"
+	DeclineKindBusy    = participant.DeclineKindBusy
+	DeclineKindFault   = participant.DeclineKindFault
+	DeclineKindNeutral = participant.DeclineKindNeutral
 )
 
 // BusyDecline is one pre-accept decline: the wire body's reason, kind and the
@@ -227,7 +189,7 @@ func BoundedTailDetail(text string) string {
 // pg2-358u3's command-busy sentinel, pg2-qaeb8's session-in-flight sentinel,
 // pg2-s3pjt's pool-unreadable sentinel and INV-CCH-34's launch-failed): ok is
 // false for any other err (including nil), matching none of them. All still map
-// to the SAME wire-level conformance.ExitBusy, so the core's retry/backoff
+// to the SAME wire-level participant.ExitBusy, so the core's retry/backoff
 // cadence never depends on which reason applied (INV-FAIL-1); the reason and the
 // kind exist so pg-router core's declined metric, status breakdown and progress
 // gauges can tell them apart.
@@ -284,11 +246,7 @@ func BusyDeclineFor(err error) (BusyDecline, bool) {
 // the core side reads it OPPORTUNISTICALLY on exit 9 and tolerates an
 // absent/empty body (DEC-WIRE-1: "no body required").
 func WriteBusyReply(w io.Writer, d BusyDecline) {
-	body := map[string]any{"schemaVersion": schemas.SchemaVersion, "reason": d.Reason, "kind": d.Kind}
-	if d.Detail != "" {
-		body["detail"] = d.Detail
-	}
-	WriteReply(w, body)
+	WriteReply(w, participant.DeclineReply{SchemaVersion: schemas.SchemaVersion, Reason: d.Reason, Kind: d.Kind, Detail: d.Detail})
 }
 
 // DeclineAndReply writes the dispatch_decline event-log record of d and then the

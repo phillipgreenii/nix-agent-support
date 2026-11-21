@@ -12,7 +12,7 @@
 //
 // # Transport
 //
-// Service implements conformance.Participant, the SAME (subcommand, stdin,
+// Service implements participant.Participant, the SAME (subcommand, stdin,
 // stdout) → exit-code boundary the CLI transport and the conformance suite use.
 // The socket is only a carrier for that boundary: Accept reads a transport frame,
 // hands the payload to Serve, and returns what Serve wrote. interfaces.md allows
@@ -66,8 +66,8 @@ import (
 
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/api/status"
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/kvstore"
@@ -78,7 +78,7 @@ import (
 )
 
 // Service is a running core: the socket listener plus the state behind it.
-var _ conformance.Participant = (*Service)(nil)
+var _ participant.Participant = (*Service)(nil)
 
 // DefaultCommand is the command name used when assembling the callback strings
 // the core hands to participants.
@@ -288,7 +288,7 @@ func (c *ListenerCounts) DeclinedByReasonSnapshot() map[string]int64 {
 // Service holds the core's live state.
 type Service struct {
 	mu       sync.Mutex
-	state    conformance.Lifecycle
+	state    participant.Lifecycle
 	closing  bool
 	q        *eventqueue.Queue
 	bindings Bindings
@@ -578,7 +578,7 @@ func Listen(ctx context.Context, opts Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		state:              conformance.Starting,
+		state:              participant.Starting,
 		q:                  opts.Queue,
 		bindings:           opts.Bindings,
 		obs:                opts.Observer,
@@ -652,7 +652,7 @@ func (s *Service) monitorSubsetResolver() MonitorSubsetResolver {
 }
 
 // State returns the core's own lifecycle state.
-func (s *Service) State() conformance.Lifecycle {
+func (s *Service) State() participant.Lifecycle {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state
@@ -743,7 +743,7 @@ func (s *Service) ingestCallbackFor(kind Kind) string {
 // its own goroutine. It returns nil on an orderly shutdown, having waited for
 // in-flight requests to finish, and the accept error otherwise.
 func (s *Service) Accept(ctx context.Context) error {
-	s.setState(conformance.Started)
+	s.setState(participant.Started)
 	stopped := make(chan struct{})
 	defer close(stopped)
 	// In-flight requests are drained, not aborted, when ctx is cancelled to stop
@@ -761,7 +761,7 @@ func (s *Service) Accept(ctx context.Context) error {
 		if err != nil {
 			if s.isClosing() {
 				s.inflight.Wait() // drain: `stopping` completes only once nothing is in flight
-				s.setState(conformance.Stopped)
+				s.setState(participant.Stopped)
 				return nil
 			}
 			return fmt.Errorf("core: accept on %s: %w", s.ref.Socket, err)
@@ -784,7 +784,7 @@ func (s *Service) Close() error {
 		return nil
 	}
 	s.closing = true
-	s.state = conformance.Stopping
+	s.state = participant.Stopping
 	s.mu.Unlock()
 
 	// Propagate the orderly-shutdown signal to every registered participant
@@ -794,7 +794,7 @@ func (s *Service) Close() error {
 	// fails for an id already gone from the registry, which Close does not
 	// treat as a shutdown error.
 	for _, reg := range s.reg.List() {
-		_ = s.reg.SetLifecycle(reg.ID, conformance.Stopping)
+		_ = s.reg.SetLifecycle(reg.ID, participant.Stopping)
 	}
 
 	// Unpublish BEFORE closing the listener: a CLI that reads the record must not
@@ -811,17 +811,17 @@ func (s *Service) Close() error {
 		errs = append(errs, fmt.Errorf("core: remove socket: %w", err))
 	}
 	for _, reg := range s.reg.List() {
-		_ = s.reg.SetLifecycle(reg.ID, conformance.Stopped)
+		_ = s.reg.SetLifecycle(reg.ID, participant.Stopped)
 	}
 	return errors.Join(errs...)
 }
 
-func (s *Service) setState(state conformance.Lifecycle) {
+func (s *Service) setState(state participant.Lifecycle) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Never walk backwards out of shutdown: a late Accept must not reopen a
 	// closing core.
-	if s.closing && state == conformance.Started {
+	if s.closing && state == participant.Started {
 		return
 	}
 	s.state = state
@@ -885,14 +885,14 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 			return
 		}
 		slog.Warn("core: malformed transport frame", "err", err)
-		s.respond(conn, conformance.ExitError, errorReply("malformed transport frame: "+err.Error()))
+		s.respond(conn, participant.ExitError, errorReply("malformed transport frame: "+err.Error()))
 		return
 	}
 	if !authorized(req.Token, s.ref.Token) {
 		// Do not log the presented token: it is attacker-controlled input that
 		// would land verbatim in the log.
 		slog.Warn("core: rejected socket request with a bad token", "subcommand", req.Subcommand)
-		s.respond(conn, conformance.ExitError, errorReply("unauthorized"))
+		s.respond(conn, participant.ExitError, errorReply("unauthorized"))
 		return
 	}
 	// Verb-classed admission control (Task 3.10 Step 4), positioned HERE —
@@ -906,7 +906,7 @@ func (s *Service) handleConn(ctx context.Context, conn net.Conn) {
 	if isReadVerb(req.Subcommand) {
 		if !s.acquireReadSlot() {
 			slog.Debug("core: read semaphore saturated, refusing", "subcommand", req.Subcommand)
-			s.respond(conn, conformance.ExitBusy, errorReply(readRefusalMessage))
+			s.respond(conn, participant.ExitBusy, errorReply(readRefusalMessage))
 			return
 		}
 		defer s.releaseReadSlot()
@@ -932,7 +932,7 @@ func (s *Service) respond(w io.Writer, code int, reply []byte) {
 	}
 }
 
-// Serve is the participant boundary (conformance.Participant): it runs one
+// Serve is the participant boundary (participant.Participant): it runs one
 // subcommand over the JSON-in / JSON-out contract and returns a coarse exit code
 // (0 ok / 1 error / 2 usage / 9 busy). Every transport funnels through here, so
 // the message schema is enforced exactly once.
@@ -947,9 +947,9 @@ func (s *Service) Serve(subcommand string, stdin io.Reader, stdout io.Writer) in
 // serve is Serve with the context of the request being served, threaded to the
 // verbs that call out (status and mon.read metric snapshots, level refresh).
 func (s *Service) serve(ctx context.Context, subcommand string, stdin io.Reader, stdout io.Writer) int {
-	if st := s.State(); st != conformance.Started {
+	if st := s.State(); st != participant.Started {
 		writeBody(stdout, errorReply(fmt.Sprintf("not accepting: core is %s", st)))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	switch subcommand {
 	case SubcommandIngestEvent:
@@ -988,7 +988,7 @@ func (s *Service) serve(ctx context.Context, subcommand string, stdin io.Reader,
 		// travels on the self-status channel (SelfStatus, registry.go). Do not add it
 		// back without a consumer.
 		writeBody(stdout, errorReply(fmt.Sprintf("unknown subcommand %q", subcommand)))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 }
 
@@ -1077,7 +1077,7 @@ func decodeStoreRequest(stdin io.Reader, stdout io.Writer, subcommand string) (s
 		writeBody(stdout, errorReply(subcommand+": read request: "+err.Error()))
 		return storeRequest{}, false
 	}
-	if err := conformance.CheckBytes(StoreRequestSchema, data); err != nil {
+	if err := schemas.CheckBytes(StoreRequestSchema, data); err != nil {
 		writeBody(stdout, errorReply(subcommand+": "+err.Error()))
 		return storeRequest{}, false
 	}
@@ -1100,10 +1100,10 @@ func writeStoreReply(stdout io.Writer, reply map[string]any, verb string) int {
 	body, err := json.Marshal(reply)
 	if err != nil { // unreachable: reply holds only JSON-safe scalars
 		writeBody(stdout, errorReply(verb+": marshal reply: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	writeBody(stdout, body)
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // handleGet runs the `get` socket verb (Task 6.7): a read verb (isReadVerb),
@@ -1119,12 +1119,12 @@ func writeStoreReply(stdout io.Writer, reply map[string]any, verb string) int {
 func (s *Service) handleGet(stdin io.Reader, stdout io.Writer) int {
 	req, ok := decodeStoreRequest(stdin, stdout, SubcommandGet)
 	if !ok {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	value, found, err := s.getStore().Get(req.Key)
 	if err != nil {
 		writeBody(stdout, errorReply("get: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	reply := map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
@@ -1145,11 +1145,11 @@ func (s *Service) handleGet(stdin io.Reader, stdout io.Writer) int {
 func (s *Service) handlePut(stdin io.Reader, stdout io.Writer) int {
 	req, ok := decodeStoreRequest(stdin, stdout, SubcommandPut)
 	if !ok {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if err := s.getStore().Put(req.Key, req.Value); err != nil {
 		writeBody(stdout, errorReply("put: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	reply := map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
@@ -1167,11 +1167,11 @@ func (s *Service) handlePut(stdin io.Reader, stdout io.Writer) int {
 func (s *Service) handleDelete(stdin io.Reader, stdout io.Writer) int {
 	req, ok := decodeStoreRequest(stdin, stdout, SubcommandDelete)
 	if !ok {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if err := s.getStore().Delete(req.Key); err != nil {
 		writeBody(stdout, errorReply("delete: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	reply := map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
@@ -1209,11 +1209,11 @@ func (s *Service) handleStatus(ctx context.Context, stdin io.Reader, stdout io.W
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		writeBody(stdout, errorReply("status: read request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if err := conformance.CheckBytes(StatusRequestSchema, data); err != nil {
+	if err := schemas.CheckBytes(StatusRequestSchema, data); err != nil {
 		writeBody(stdout, errorReply("status: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req struct {
 		Since uint64 `json:"since"`
@@ -1221,16 +1221,16 @@ func (s *Service) handleStatus(ctx context.Context, stdin io.Reader, stdout io.W
 	if err := json.Unmarshal(data, &req); err != nil {
 		// Unreachable once CheckBytes has passed — see mon.go's identical note.
 		writeBody(stdout, errorReply("status: malformed request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 
 	body, err := status.Encode(s.composeStatusReply(ctx, req.Since))
 	if err != nil { // unreachable: composeStatusReply holds only JSON-safe scalars/slices/maps
 		writeBody(stdout, errorReply("status: marshal reply: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	writeBody(stdout, body)
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // declaredTypesSorted returns every type SOME configured binding declares

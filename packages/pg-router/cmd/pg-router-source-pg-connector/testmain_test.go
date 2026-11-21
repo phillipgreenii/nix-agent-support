@@ -25,6 +25,8 @@ import (
 	"strings"
 	"testing"
 
+	apievent "github.com/phillipgreenii/pg-router/api/event"
+
 	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/cmdruntest"
 )
@@ -332,9 +334,9 @@ func (w *writerBuf) String() string { return string(w.b) }
 
 // mustUnmarshalItems decodes stdout as this adapter's own rawItem array
 // output shape.
-func mustUnmarshalItems(t *testing.T, stdout string) []rawItem {
+func mustUnmarshalItems(t *testing.T, stdout string) []apievent.Item {
 	t.Helper()
-	var items []rawItem
+	var items []apievent.Item
 	if err := json.Unmarshal([]byte(stdout), &items); err != nil {
 		t.Fatalf("unmarshal items: %v (stdout=%q)", err, stdout)
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance/golden"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -240,14 +241,14 @@ func TestDispatchReplyOptionalStartedAt(t *testing.T) {
 // --- CLI transport round-trip (boundary proven live) ----------------------
 
 func TestCLIRoundTrip_SyncOutcome(t *testing.T) {
-	h := &ReferenceHandler{State: Started}
+	h := &ReferenceHandler{State: participant.Started}
 	dispatch := loadGolden(t, "handler.dispatch")
 	reply, code, err := RoundTrip(h, "dispatch", dispatch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != ExitOK {
-		t.Fatalf("exit code = %d, want %d", code, ExitOK)
+	if code != participant.ExitOK {
+		t.Fatalf("exit code = %d, want %d", code, participant.ExitOK)
 	}
 	var rv any
 	if err := json.Unmarshal(reply, &rv); err != nil {
@@ -261,9 +262,9 @@ func TestCLIRoundTrip_SyncOutcome(t *testing.T) {
 }
 
 func TestCLIRoundTrip_DeferredAck(t *testing.T) {
-	h := &ReferenceHandler{State: Started, Deferred: true}
+	h := &ReferenceHandler{State: participant.Started, Deferred: true}
 	reply, code, _ := RoundTrip(h, "dispatch", loadGolden(t, "handler.dispatch"))
-	if code != ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit=%d", code)
 	}
 	var rv any
@@ -289,12 +290,12 @@ func TestCoarseExitCodeValues(t *testing.T) {
 		got  int
 		want int
 	}{
-		{"ok", ExitOK, 0},
-		{"unexpected error", ExitError, 1},
-		{"usage error", ExitUsage, 2},
-		{"unavailable (no running core)", ExitUnavailable, 3},
-		{"config (pre-flight precheck)", ExitConfig, 7},
-		{"busy (pre-accept decline)", ExitBusy, 9},
+		{"ok", participant.ExitOK, 0},
+		{"unexpected error", participant.ExitError, 1},
+		{"usage error", participant.ExitUsage, 2},
+		{"unavailable (no running core)", participant.ExitUnavailable, 3},
+		{"config (pre-flight precheck)", participant.ExitConfig, 7},
+		{"busy (pre-accept decline)", participant.ExitBusy, 9},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s exit code = %d, want %d", c.name, c.got, c.want)
@@ -303,29 +304,29 @@ func TestCoarseExitCodeValues(t *testing.T) {
 }
 
 func TestCLIRoundTrip_Busy(t *testing.T) {
-	h := &ReferenceHandler{State: Started, Busy: true}
+	h := &ReferenceHandler{State: participant.Started, Busy: true}
 	_, code, _ := RoundTrip(h, "dispatch", loadGolden(t, "handler.dispatch"))
-	if code != ExitBusy {
-		t.Fatalf("busy handler exit=%d, want %d", code, ExitBusy)
+	if code != participant.ExitBusy {
+		t.Fatalf("busy handler exit=%d, want %d", code, participant.ExitBusy)
 	}
 }
 
 func TestCLIRoundTrip_Malformed(t *testing.T) {
-	h := &ReferenceHandler{State: Started}
+	h := &ReferenceHandler{State: participant.Started}
 	// Send a dispatch missing its required event -> handler rejects with exit 1.
 	_, code, _ := RoundTrip(h, "dispatch", map[string]any{"schemaVersion": "1", "id": "h"})
-	if code != ExitError {
-		t.Fatalf("malformed dispatch exit=%d, want %d", code, ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("malformed dispatch exit=%d, want %d", code, participant.ExitError)
 	}
 }
 
-// Out-of-lifecycle: a participant accepts messages ONLY when Started
+// Out-of-lifecycle: a participant accepts messages ONLY when participant.Started
 // (interfaces.md lifecycle; INV-INTF-1).
 func TestOutOfLifecycle(t *testing.T) {
-	for _, st := range []Lifecycle{Starting, Stopping, Stopped} {
+	for _, st := range []participant.Lifecycle{participant.Starting, participant.Stopping, participant.Stopped} {
 		h := &ReferenceHandler{State: st}
 		_, code, _ := RoundTrip(h, "dispatch", loadGolden(t, "handler.dispatch"))
-		if code == ExitOK {
+		if code == participant.ExitOK {
 			t.Fatalf("handler in lifecycle %d accepted a message (should not)", st)
 		}
 	}
@@ -333,10 +334,10 @@ func TestOutOfLifecycle(t *testing.T) {
 
 // Idempotency: a handler tolerates the same event delivered twice (INV-EVT-2).
 func TestHandlerIdempotentDuplicate(t *testing.T) {
-	h := &ReferenceHandler{State: Started}
+	h := &ReferenceHandler{State: participant.Started}
 	d := loadGolden(t, "handler.dispatch")
 	for range 2 {
-		if _, code, _ := RoundTrip(h, "dispatch", d); code != ExitOK {
+		if _, code, _ := RoundTrip(h, "dispatch", d); code != participant.ExitOK {
 			t.Fatalf("duplicate dispatch not accepted (code=%d)", code)
 		}
 	}
@@ -363,16 +364,9 @@ func TestCheckBytes(t *testing.T) {
 	}
 }
 
-// Defensive: the cross-field rules reject a non-object value directly.
-func TestCrossFieldRules_NonObject(t *testing.T) {
-	if storeRequestRule(42) == nil {
-		t.Fatal("storeRequestRule accepted a non-object")
-	}
-}
-
 // RoundTrip surfaces a marshal error for an unmarshalable request.
 func TestRoundTripMarshalError(t *testing.T) {
-	h := &ReferenceHandler{State: Started}
+	h := &ReferenceHandler{State: participant.Started}
 	if _, _, err := RoundTrip(h, "dispatch", make(chan int)); err == nil {
 		t.Fatal("expected marshal error for unmarshalable request")
 	}
@@ -380,10 +374,10 @@ func TestRoundTripMarshalError(t *testing.T) {
 
 // Serve rejects malformed JSON on stdin (the transport's parse branch).
 func TestServeMalformedStdin(t *testing.T) {
-	h := &ReferenceHandler{State: Started}
+	h := &ReferenceHandler{State: participant.Started}
 	var out bytes.Buffer
-	if code := h.Serve("dispatch", strings.NewReader("{ not json"), &out); code != ExitError {
-		t.Fatalf("malformed stdin exit=%d, want %d", code, ExitError)
+	if code := h.Serve("dispatch", strings.NewReader("{ not json"), &out); code != participant.ExitError {
+		t.Fatalf("malformed stdin exit=%d, want %d", code, participant.ExitError)
 	}
 }
 
@@ -407,23 +401,23 @@ func TestMessageTypesNonEmpty(t *testing.T) {
 	}
 }
 
-// Lifecycle.String reports the DOC-declared state names (interfaces.md
+// participant.Lifecycle.String reports the DOC-declared state names (interfaces.md
 // "Lifecycle"), so a diagnostic or a registry view never prints an opaque integer.
 func TestLifecycleNames(t *testing.T) {
-	cases := map[Lifecycle]string{
-		Starting: "starting",
-		Started:  "started",
-		Stopping: "stopping",
-		Stopped:  "stopped",
-		Crashing: "crashing",
+	cases := map[participant.Lifecycle]string{
+		participant.Starting: "starting",
+		participant.Started:  "started",
+		participant.Stopping: "stopping",
+		participant.Stopped:  "stopped",
+		participant.Crashing: "crashing",
 	}
 	for state, want := range cases {
 		if got := state.String(); got != want {
 			t.Fatalf("Lifecycle(%d).String() = %q, want %q", int(state), got, want)
 		}
 	}
-	if got := Lifecycle(99).String(); !strings.Contains(got, "99") {
-		t.Fatalf("String of an out-of-range Lifecycle = %q, want it to name the value", got)
+	if got := participant.Lifecycle(99).String(); !strings.Contains(got, "99") {
+		t.Fatalf("String of an out-of-range participant.Lifecycle = %q, want it to name the value", got)
 	}
 }
 
@@ -431,9 +425,9 @@ func TestLifecycleNames(t *testing.T) {
 // pg2-12gr4.8): a schema-valid request gets a schema-valid reply with no problems
 // and no warnings, and a request that breaks handler.validate is an error.
 func TestCLIRoundTrip_Validate(t *testing.T) {
-	h := &ReferenceHandler{State: Started}
+	h := &ReferenceHandler{State: participant.Started}
 	reply, code, err := RoundTrip(h, "validate", loadGolden(t, "handler.validate"))
-	if err != nil || code != ExitOK {
+	if err != nil || code != participant.ExitOK {
 		t.Fatalf("validate: code=%d err=%v", code, err)
 	}
 	if err := CheckBytes("handler.validate-reply", reply); err != nil {
@@ -443,25 +437,25 @@ func TestCLIRoundTrip_Validate(t *testing.T) {
 	if err := json.Unmarshal(reply, &rv); err != nil || len(rv.Problems) != 0 || len(rv.Warnings) != 0 {
 		t.Fatalf("reply = %s (err %v), want empty problems and warnings", reply, err)
 	}
-	if _, code, _ := RoundTrip(h, "validate", map[string]any{"schemaVersion": "1"}); code != ExitError {
-		t.Fatalf("validate with no id: exit = %d, want %d", code, ExitError)
+	if _, code, _ := RoundTrip(h, "validate", map[string]any{"schemaVersion": "1"}); code != participant.ExitError {
+		t.Fatalf("validate with no id: exit = %d, want %d", code, participant.ExitError)
 	}
 }
 
 // postStartup / preShutdown are the other two subcommands the reference handler
 // serves; each replies outcome ok to a schema-valid request and errors otherwise.
 func TestCLIRoundTrip_LifecycleHooks(t *testing.T) {
-	h := &ReferenceHandler{State: Started}
+	h := &ReferenceHandler{State: participant.Started}
 	for _, sub := range []string{"postStartup", "preShutdown"} {
 		reply, code, err := RoundTrip(h, sub, loadGolden(t, "handler."+sub))
-		if err != nil || code != ExitOK {
+		if err != nil || code != participant.ExitOK {
 			t.Fatalf("%s: code=%d err=%v", sub, code, err)
 		}
 		if err := CheckBytes("handler."+sub+"-reply", reply); err != nil {
 			t.Fatalf("%s reply: %v", sub, err)
 		}
-		if _, code, _ := RoundTrip(h, sub, map[string]any{"schemaVersion": "1"}); code != ExitError {
-			t.Fatalf("%s with no id: exit = %d, want %d", sub, code, ExitError)
+		if _, code, _ := RoundTrip(h, sub, map[string]any{"schemaVersion": "1"}); code != participant.ExitError {
+			t.Fatalf("%s with no id: exit = %d, want %d", sub, code, participant.ExitError)
 		}
 	}
 }

@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
 	"github.com/phillipgreenii/pg-router/internal/handlers/parknote"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
 
@@ -371,8 +371,8 @@ func TestStall_fullTimeline_escapeThenCloseAndSingleCallRelease(t *testing.T) {
 	if rig.bd.status != "open" || rig.bd.assignee != "" {
 		t.Errorf("bead after the clear = %s/%q, want open and unassigned", rig.bd.status, rig.bd.assignee)
 	}
-	if v := verbOf(rig.e.waitFailureResult(rig.d.Role.CCPool, relBead, err)); v != report.Unclaimed {
-		t.Errorf("reported verb = %q, want %q", v, report.Unclaimed)
+	if v := verbOf(rig.e.waitFailureResult(rig.d.Role.CCPool, relBead, err)); v != participant.Unclaimed {
+		t.Errorf("reported verb = %q, want %q", v, participant.Unclaimed)
 	}
 
 	// Surfaced as two structured events, each once.
@@ -547,7 +547,7 @@ func TestStall_claimGuard(t *testing.T) {
 		assignee     string
 		wantWrites   int
 		wantPeerHeld bool
-		wantVerb     report.Verb
+		wantVerb     participant.Verb
 	}{
 		{"held by a peer", "in_progress", "someone-else", 0, true, ""},
 		{"already reassigned and open", "open", "someone-else", 0, true, ""},
@@ -629,8 +629,8 @@ func TestStall_secondConsecutiveStallAddsHumanInOneCall(t *testing.T) {
 			t.Errorf("the park note must contain %q; got %q", want, w[0])
 		}
 	}
-	if v := verbOf(rig.e.waitFailureResult(rig.d.Role.CCPool, relBead, err)); v != report.Escalated {
-		t.Errorf("verb = %q, want %q", v, report.Escalated)
+	if v := verbOf(rig.e.waitFailureResult(rig.d.Role.CCPool, relBead, err)); v != participant.Escalated {
+		t.Errorf("verb = %q, want %q", v, participant.Escalated)
 	}
 }
 
@@ -794,10 +794,10 @@ func TestWaitFailureResult_needsInputStalled(t *testing.T) {
 	cc := releaseRole(config.Default()).CCPool
 	cases := []struct {
 		err  *needsInputStalled
-		want report.Verb
+		want participant.Verb
 	}{
-		{&needsInputStalled{released: true}, report.Unclaimed},
-		{&needsInputStalled{released: true, escalated: true}, report.Escalated},
+		{&needsInputStalled{released: true}, participant.Unclaimed},
+		{&needsInputStalled{released: true, escalated: true}, participant.Escalated},
 		{&needsInputStalled{}, ""},
 	}
 	for _, c := range cases {

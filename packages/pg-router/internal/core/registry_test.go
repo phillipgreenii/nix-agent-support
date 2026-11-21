@@ -11,7 +11,7 @@ import (
 
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 func fixedClock(t time.Time) func() time.Time { return func() time.Time { return t } }
@@ -26,7 +26,7 @@ func TestRegistry_RegisterStartsUnroutable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if reg.State != conformance.Starting {
+	if reg.State != participant.Starting {
 		t.Fatalf("state = %s, want starting", reg.State)
 	}
 	if reg.Self != SelfHealthy {
@@ -60,7 +60,7 @@ func TestRegistry_ReRegisterReplaces(t *testing.T) {
 	if _, err := r.Register("h1", KindHandler, "cb-old", "self-old"); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := r.SetLifecycle("h1", conformance.Started); err != nil {
+	if err := r.SetLifecycle("h1", participant.Started); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
 	if _, err := r.Register("h1", KindHandler, "cb-new", "self-new"); err != nil {
@@ -70,7 +70,7 @@ func TestRegistry_ReRegisterReplaces(t *testing.T) {
 	if !ok {
 		t.Fatal("registration vanished")
 	}
-	if got.State != conformance.Starting {
+	if got.State != participant.Starting {
 		t.Fatalf("state = %s, want the re-registration to reset to starting", got.State)
 	}
 	if got.Callback != "cb-new" {
@@ -89,7 +89,7 @@ func TestRegistry_LifecycleAndAvailability(t *testing.T) {
 	if _, err := r.Register("h1", KindHandler, "", ""); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := r.SetLifecycle("h1", conformance.Started); err != nil {
+	if err := r.SetLifecycle("h1", participant.Started); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
 	if !r.Available("h1") {
@@ -113,7 +113,7 @@ func TestRegistry_LifecycleAndAvailability(t *testing.T) {
 	if err := r.SetSelfStatus("h1", SelfHealthy); err != nil {
 		t.Fatalf("SetSelfStatus: %v", err)
 	}
-	if err := r.SetLifecycle("h1", conformance.Stopping); err != nil {
+	if err := r.SetLifecycle("h1", participant.Stopping); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
 	if r.Available("h1") {
@@ -129,7 +129,7 @@ func TestRegistry_SetUnavailableRecordsReasonAndSelfReportClearsIt(t *testing.T)
 	if _, err := r.RegisterInProcess("h1", KindHandler); err != nil {
 		t.Fatalf("RegisterInProcess: %v", err)
 	}
-	if err := r.SetLifecycle("h1", conformance.Started); err != nil {
+	if err := r.SetLifecycle("h1", participant.Started); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
 	if err := r.SetUnavailable("h1", "pool dir missing"); err != nil {
@@ -156,7 +156,7 @@ func TestRegistry_SetUnavailableRecordsReasonAndSelfReportClearsIt(t *testing.T)
 
 func TestRegistry_UnknownParticipant(t *testing.T) {
 	r := NewRegistry(nil)
-	if err := r.SetLifecycle("nope", conformance.Started); !errors.Is(err, ErrUnknownParticipant) {
+	if err := r.SetLifecycle("nope", participant.Started); !errors.Is(err, ErrUnknownParticipant) {
 		t.Fatalf("SetLifecycle err = %v, want ErrUnknownParticipant", err)
 	}
 	if err := r.SetSelfStatus("nope", SelfHealthy); !errors.Is(err, ErrUnknownParticipant) {
@@ -256,7 +256,7 @@ func TestRegistry_ConcurrentUse(t *testing.T) {
 				t.Errorf("Register: %v", err)
 				return
 			}
-			_ = r.SetLifecycle(id, conformance.Started)
+			_ = r.SetLifecycle(id, participant.Started)
 			_ = r.SetSelfStatus(id, SelfDegraded)
 			_ = r.Available(id)
 			_ = r.List()
@@ -292,7 +292,7 @@ func TestParseSelfStatusAndKind(t *testing.T) {
 // interfaces.md "Self-status" is "any participant", not sources only).
 func TestService_RegisterHandsOutTheCallback(t *testing.T) {
 	svc := &Service{
-		state:   conformance.Started,
+		state:   participant.Started,
 		reg:     NewRegistry(nil),
 		command: "pg-router",
 		ref:     Ref{Socket: "/s/core.sock", Token: "tok"},
@@ -342,7 +342,7 @@ func TestService_RegisterResolvesMonitorSubsetForMonitorKindOnly(t *testing.T) {
 		}[id]
 	})
 	svc := &Service{
-		state:          conformance.Started,
+		state:          participant.Started,
 		reg:            NewRegistry(nil),
 		command:        "pg-router",
 		ref:            Ref{Socket: "/s/core.sock", Token: "tok"},
@@ -378,7 +378,7 @@ func TestService_RegisterResolvesMonitorSubsetForMonitorKindOnly(t *testing.T) {
 // kind=monitor registration to an empty subset, not panic.
 func TestService_RegisterMonitorSubsetDefaultsToEmptyWithNoResolver(t *testing.T) {
 	svc := &Service{
-		state:   conformance.Started,
+		state:   participant.Started,
 		reg:     NewRegistry(nil),
 		command: "pg-router",
 		ref:     Ref{Socket: "/s/core.sock", Token: "tok"},

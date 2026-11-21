@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 )
@@ -43,7 +43,7 @@ func parseGateFlags(fs *flag.FlagSet, name string, args []string) (pos []string,
 		return nil, exitOK, false
 	case err != nil:
 		fmt.Fprintln(os.Stderr, name+":", err)
-		return nil, conformance.ExitUsage, false
+		return nil, participant.ExitUsage, false
 	}
 	return pos, exitOK, true
 }
@@ -73,17 +73,17 @@ func callVerb(stderr io.Writer, ref core.Ref, verb, replySchema string, req map[
 	reply, code, err := client.Call(context.Background(), verb, payload, opts)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", verb, err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if code == conformance.ExitBusy {
+	if code == participant.ExitBusy {
 		fmt.Fprintf(stderr, "%s: %s\n", verb, busyRefusalMessage(reply))
 		return code
 	}
 	if diagErr := core.DiscriminateReply(reply, replySchema, out); diagErr != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", verb, diagErr)
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		fmt.Fprintf(stderr, "%s: core exited %d\n", verb, code)
 		return code
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -158,11 +159,11 @@ func statusReplyOf(t *testing.T, svc *core.Service) tui.StatusReply {
 	go func() { accepted <- svc.Accept(ctx) }()
 	t.Cleanup(func() { cancel(); <-accepted })
 	deadline := time.Now().Add(2 * time.Second)
-	for svc.State() != conformance.Started && time.Now().Before(deadline) {
+	for svc.State() != participant.Started && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	var out strings.Builder
-	if code := svc.Serve(core.SubcommandStatus, strings.NewReader(`{"schemaVersion":"1"}`), &out); code != conformance.ExitOK {
+	if code := svc.Serve(core.SubcommandStatus, strings.NewReader(`{"schemaVersion":"1"}`), &out); code != participant.ExitOK {
 		t.Fatalf("status exit = %d: %s", code, out.String())
 	}
 	if err := conformance.CheckBytes(core.StatusReplySchema, []byte(out.String())); err != nil {
@@ -255,11 +256,11 @@ func TestStatus_ListenerProgressComesFromTheGaugeState(t *testing.T) {
 	go func() { accepted <- f.svc.Accept(ctx) }()
 	t.Cleanup(func() { cancel(); <-accepted })
 	deadline := time.Now().Add(2 * time.Second)
-	for f.svc.State() != conformance.Started && time.Now().Before(deadline) {
+	for f.svc.State() != participant.Started && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	var out strings.Builder
-	if code := f.svc.Serve(core.SubcommandStatus, strings.NewReader(`{"schemaVersion":"1"}`), &out); code != conformance.ExitOK {
+	if code := f.svc.Serve(core.SubcommandStatus, strings.NewReader(`{"schemaVersion":"1"}`), &out); code != participant.ExitOK {
 		t.Fatalf("status exit = %d: %s", code, out.String())
 	}
 	if err := conformance.CheckBytes(core.StatusReplySchema, []byte(out.String())); err != nil {

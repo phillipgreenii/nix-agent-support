@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/tui"
 )
 
@@ -132,18 +132,18 @@ func TestRunTUI_RelaysTUIRunFailure(t *testing.T) {
 	})
 	dir := shortDir(t)
 	code := runTUI([]string{"--socket", filepath.Join(dir, "gone.sock")})
-	if code != conformance.ExitError {
-		t.Fatalf("runTUI with a failing tui.Run = %d, want %d/ExitError", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("runTUI with a failing tui.Run = %d, want %d/ExitError", code, participant.ExitError)
 	}
 }
 
 // A usage error on `tui` exits 2, the same fail-fast contract every other
 // operator subcommand follows (pg2-52rn).
 func TestRunTUI_UsageErrors(t *testing.T) {
-	if code := runTUI([]string{"--nope"}); code != conformance.ExitUsage {
-		t.Fatalf("unknown flag exit = %d, want %d/usage", code, conformance.ExitUsage)
+	if code := runTUI([]string{"--nope"}); code != participant.ExitUsage {
+		t.Fatalf("unknown flag exit = %d, want %d/usage", code, participant.ExitUsage)
 	}
-	if code := runTUI([]string{"extra-positional"}); code != conformance.ExitUsage {
-		t.Fatalf("positional exit = %d, want %d/usage", code, conformance.ExitUsage)
+	if code := runTUI([]string{"extra-positional"}); code != participant.ExitUsage {
+		t.Fatalf("positional exit = %d, want %d/usage", code, participant.ExitUsage)
 	}
 }

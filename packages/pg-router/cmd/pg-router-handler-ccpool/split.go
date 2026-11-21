@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 )
 
@@ -47,14 +47,14 @@ func runSplit(args []string) int {
 func runSplitWith(args []string, stdin io.Reader, stdout, stderr io.Writer, br beads.Runner) int {
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
 		fmt.Fprint(stdout, splitHelp)
-		return conformance.ExitOK
+		return participant.ExitOK
 	}
 	if len(args) == 4 && args[2] == "--file" {
 		return runSplitInput(args[0], args[1], args[3], stdin, stdout, stderr, br)
 	}
 	if len(args) != 2 {
 		fmt.Fprintln(stderr, "split: usage: split <apply|unsplittable> <bead-id> [--file <path>] (input on stdin by default)")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	return runSplitInput(args[0], args[1], "", stdin, stdout, stderr, br)
 }
@@ -64,7 +64,7 @@ func runSplitWith(args []string, stdin io.Reader, stdout, stderr io.Writer, br b
 func runSplitInput(verb, id, path string, stdin io.Reader, stdout, stderr io.Writer, br beads.Runner) int {
 	if !beads.IsID(id) {
 		fmt.Fprintf(stderr, "split: invalid bead id %q\n", id)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	var raw []byte
 	var err error
@@ -75,7 +75,7 @@ func runSplitInput(verb, id, path string, stdin io.Reader, stdout, stderr io.Wri
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "split: read input:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	ctx := context.Background()
 	switch verb {
@@ -83,7 +83,7 @@ func runSplitInput(verb, id, path string, stdin io.Reader, stdout, stderr io.Wri
 		plan, err := beads.DecodeSplitPlan(raw)
 		if err != nil {
 			fmt.Fprintln(stderr, "split apply:", err)
-			return conformance.ExitUsage
+			return participant.ExitUsage
 		}
 		ids, err := beads.ApplySplit(ctx, br, id, plan)
 		for _, c := range ids {
@@ -91,17 +91,17 @@ func runSplitInput(verb, id, path string, stdin io.Reader, stdout, stderr io.Wri
 		}
 		if err != nil {
 			fmt.Fprintln(stderr, "split apply:", err)
-			return conformance.ExitError
+			return participant.ExitError
 		}
-		return conformance.ExitOK
+		return participant.ExitOK
 	case "unsplittable":
 		if err := beads.MarkUnsplittable(ctx, br, id, string(raw)); err != nil {
 			fmt.Fprintln(stderr, "split unsplittable:", err)
-			return conformance.ExitError
+			return participant.ExitError
 		}
-		return conformance.ExitOK
+		return participant.ExitOK
 	default:
 		fmt.Fprintf(stderr, "split: unknown verb %q (want apply|unsplittable)\n", verb)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 }

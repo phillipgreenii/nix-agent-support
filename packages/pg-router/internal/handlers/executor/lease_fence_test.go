@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/budget"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
 )
 
@@ -300,7 +300,7 @@ func TestLeaseFence_secondDispatchSupersedesFirst(t *testing.T) {
 		Thresholds: budget.Thresholds{Reminder: 0.725, Cancel: 0.90, Hard: 1.00},
 	}
 	type outcome struct {
-		res report.Result
+		res participant.Report
 		err error
 	}
 	doneA := make(chan outcome, 1)

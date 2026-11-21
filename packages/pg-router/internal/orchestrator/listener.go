@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/backoff"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
-	"github.com/phillipgreenii/pg-router/internal/report"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
@@ -483,7 +483,7 @@ func (l *roleListener) redrive(evt eventqueue.Event, err error) bool {
 // role, or run-to-completion for a command role). The call is still
 // synchronous end-to-end, so an ACCEPTED OfferResult and "worked to
 // completion" coincide here — there is no deferred/async form on this
-// bridge. The dispatch's own report.Result — the handler's opaque
+// bridge. The dispatch's own participant.Report — the handler's opaque
 // reply.Outcome, stored verbatim rather than re-derived from bead status
 // (Task 5.5) — is logged/emitted exactly as it was under the retired
 // drain()/DrainOnce path, via the SAME Orchestrator helpers. Task 2.2 widened the signature to
@@ -668,7 +668,7 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 		// failed attempt (at INFO with will_retry=true, bead pg2-974a9m: it is
 		// not a terminal failure); the event is NOT accepted, so it is not settled.
 		meta.WillRetry = true
-		l.o.emitResult(l.ctx, l.role, d.Item.ID, report.Result{}, err, meta)
+		l.o.emitResult(l.ctx, l.role, d.Item.ID, participant.Report{}, err, meta)
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailDispatchRetry}
 	}
 	l.retries.forget(evt.ID)

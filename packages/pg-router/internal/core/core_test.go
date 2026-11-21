@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -25,8 +26,8 @@ func TestServe_RegisterSubcommand(t *testing.T) {
 	var out strings.Builder
 	req := `{"schemaVersion":"1","id":"role-triage","kind":"handler"}`
 	code := svc.Serve(SubcommandRegister, strings.NewReader(req), &out)
-	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want %d; body=%s", code, conformance.ExitOK, out.String())
+	if code != participant.ExitOK {
+		t.Fatalf("exit = %d, want %d; body=%s", code, participant.ExitOK, out.String())
 	}
 	var reply map[string]any
 	if err := json.Unmarshal([]byte(out.String()), &reply); err != nil {
@@ -57,7 +58,7 @@ func TestClose_PropagatesStoppingStoppedToRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := svc.Registry().SetLifecycle(reg.ID, conformance.Started); err != nil {
+	if err := svc.Registry().SetLifecycle(reg.ID, participant.Started); err != nil {
 		t.Fatalf("SetLifecycle(started): %v", err)
 	}
 
@@ -69,8 +70,8 @@ func TestClose_PropagatesStoppingStoppedToRegistry(t *testing.T) {
 	if !ok {
 		t.Fatal("participant p1 missing from registry after Close")
 	}
-	if got.State != conformance.Stopped {
-		t.Fatalf("State after Close = %v, want %v", got.State, conformance.Stopped)
+	if got.State != participant.Stopped {
+		t.Fatalf("State after Close = %v, want %v", got.State, participant.Stopped)
 	}
 }
 
@@ -90,7 +91,7 @@ func TestSocketRoundTrip_IngestEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%s", code, reply)
 	}
 	var decoded map[string]any
@@ -110,7 +111,7 @@ func TestSocketRoundTrip_IngestEvent(t *testing.T) {
 
 // The SOCKET transport and the IN-PROCESS participant boundary must produce
 // byte-identical replies and the same exit code: the socket is a carrier for
-// conformance.Participant, not a second implementation with its own semantics.
+// participant.Participant, not a second implementation with its own semantics.
 func TestSocketAndInProcessTransportsAgree(t *testing.T) {
 	requests := []string{
 		oneEventRequest,
@@ -147,15 +148,15 @@ func TestSocketAndInProcessTransportsAgree(t *testing.T) {
 	}
 }
 
-// Service must satisfy the EXISTING conformance.Participant transport so the
+// Service must satisfy the EXISTING participant.Participant transport so the
 // declared suite can drive it directly (INV-INTF-2) — no bespoke harness.
 func TestService_IsAConformanceParticipant(t *testing.T) {
-	var p conformance.Participant = startedService(t)
+	var p participant.Participant = startedService(t)
 	reply, code, err := conformance.RoundTrip(p, SubcommandIngestEvent, json.RawMessage(oneEventRequest))
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%s", code, reply)
 	}
 	var decoded map[string]any
@@ -190,7 +191,7 @@ func TestSocket_ConcurrentCallers(t *testing.T) {
 				t.Errorf("Call: %v", err)
 				return
 			}
-			if code != conformance.ExitOK {
+			if code != participant.ExitOK {
 				t.Errorf("exit = %d, want 0", code)
 			}
 		}(i)
@@ -207,14 +208,14 @@ func TestSocket_ConcurrentCallers(t *testing.T) {
 func TestRespond_BodylessReplyIsNull(t *testing.T) {
 	svc := startedService(t)
 	var out strings.Builder
-	svc.respond(&out, conformance.ExitBusy, nil)
+	svc.respond(&out, participant.ExitBusy, nil)
 
 	var resp wireResponse
 	if err := json.Unmarshal([]byte(out.String()), &resp); err != nil {
 		t.Fatalf("frame %q is not JSON: %v", out.String(), err)
 	}
-	if resp.ExitCode != conformance.ExitBusy {
-		t.Fatalf("exit = %d, want %d", resp.ExitCode, conformance.ExitBusy)
+	if resp.ExitCode != participant.ExitBusy {
+		t.Fatalf("exit = %d, want %d", resp.ExitCode, participant.ExitBusy)
 	}
 	if string(resp.Reply) != "null" {
 		t.Fatalf("reply = %s, want null for a body-less response", resp.Reply)
@@ -234,7 +235,7 @@ const statusRequest = `{"schemaVersion":"1"}`
 func startedServiceForStatus(t *testing.T, ring *activity.Ring) *Service {
 	t.Helper()
 	return &Service{
-		state:        conformance.Started,
+		state:        participant.Started,
 		q:            newQueue(t),
 		bindings:     testBindings(),
 		reg:          NewRegistry(nil),
@@ -268,13 +269,13 @@ func serveStatus(t *testing.T, svc *Service, request string) (map[string]any, in
 // with the protocol error envelope (Task 3.8 Acceptance).
 func TestServeStatus_LifecycleTable(t *testing.T) {
 	cases := []struct {
-		state    conformance.Lifecycle
+		state    participant.Lifecycle
 		wantCode int
 	}{
-		{conformance.Starting, conformance.ExitError},
-		{conformance.Started, conformance.ExitOK},
-		{conformance.Stopping, conformance.ExitError},
-		{conformance.Stopped, conformance.ExitError},
+		{participant.Starting, participant.ExitError},
+		{participant.Started, participant.ExitOK},
+		{participant.Stopping, participant.ExitError},
+		{participant.Stopped, participant.ExitError},
 	}
 	for _, tc := range cases {
 		t.Run(tc.state.String(), func(t *testing.T) {
@@ -284,7 +285,7 @@ func TestServeStatus_LifecycleTable(t *testing.T) {
 			if code != tc.wantCode {
 				t.Fatalf("state=%s: exit = %d, want %d; reply=%v", tc.state, code, tc.wantCode, reply)
 			}
-			if tc.wantCode == conformance.ExitOK {
+			if tc.wantCode == participant.ExitOK {
 				if err := conformance.Check(StatusReplySchema, reply); err != nil {
 					t.Fatalf("reply failed its own schema: %v", err)
 				}
@@ -305,7 +306,7 @@ func TestServeStatus_LifecycleTable(t *testing.T) {
 func TestServeStatus_NilTickBootWindow(t *testing.T) {
 	svc := startedServiceForStatus(t, nil)
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -361,7 +362,7 @@ func TestServeStatus_ComposesLiveState(t *testing.T) {
 	})
 
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -416,7 +417,7 @@ func TestServeStatus_ActivityDroppedFalseWhenNothingEvicted(t *testing.T) {
 
 	// since omitted (statusRequest): the zero-value/no-cursor case.
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -429,7 +430,7 @@ func TestServeStatus_ActivityDroppedFalseWhenNothingEvicted(t *testing.T) {
 	// since=1 names the one retained entry itself — nothing between since and
 	// what's retained was ever evicted.
 	reply, code = serveStatus(t, svc, `{"schemaVersion":"1","since":1}`)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if reply["activityDropped"] != false {
@@ -444,7 +445,7 @@ func TestServeStatus_ActivityDroppedFalseWhenNothingEvicted(t *testing.T) {
 func TestServeStatus_ActivityDroppedFalseWithNoRing(t *testing.T) {
 	svc := startedServiceForStatus(t, nil)
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -471,7 +472,7 @@ func TestServeStatus_ActivityDroppedTrueAfterEviction(t *testing.T) {
 	svc := startedServiceForStatus(t, ring)
 
 	reply, code := serveStatus(t, svc, `{"schemaVersion":"1","since":1}`)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -586,7 +587,7 @@ func TestStatusRacesDispatchAt10k(t *testing.T) {
 	wg.Wait()
 
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("final status exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -629,7 +630,7 @@ func TestRingAppendRacesSnapshotBuild(t *testing.T) {
 	wg.Wait()
 
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("final status exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -674,7 +675,7 @@ func TestServeStatus_ThreeWayConcurrency(t *testing.T) {
 	wg.Wait()
 
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("final status exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -691,7 +692,7 @@ func TestServeStatus_QueueLogReportsLimitState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router", startedAt: time.Now()}
+	svc := &Service{state: participant.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router", startedAt: time.Now()}
 
 	for _, tc := range []struct {
 		name       string
@@ -708,7 +709,7 @@ func TestServeStatus_QueueLogReportsLimitState(t *testing.T) {
 			mem.SetLogSize(tc.size)
 			q.EnforceLogLimits()
 			reply, code := serveStatus(t, svc, statusRequest)
-			if code != conformance.ExitOK {
+			if code != participant.ExitOK {
 				t.Fatalf("exit = %d; reply=%v", code, reply)
 			}
 			if err := conformance.Check(StatusReplySchema, reply); err != nil {

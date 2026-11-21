@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -52,7 +52,7 @@ import (
 func runLog(args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "log: a subcommand is required (compact)")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	switch args[0] {
 	case "compact":
@@ -62,7 +62,7 @@ func runLog(args []string) int {
 		return exitOK
 	}
 	fmt.Fprintf(os.Stderr, "log: unknown subcommand %q (want compact)\n", args[0])
-	return conformance.ExitUsage
+	return participant.ExitUsage
 }
 
 // runLogCompact implements `log compact [--dry-run] [--json]`.
@@ -76,7 +76,7 @@ func runLogCompact(args []string) int {
 	}
 	if len(pos) > 0 {
 		fmt.Fprintln(os.Stderr, "log compact: unexpected argument:", pos[0])
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	return logCompact(os.Stdout, os.Stderr, logCompactOpts{
 		dryRun: *dryRun, asJSON: *asJSON, socket: *socket, token: *token,
@@ -129,7 +129,7 @@ func logCompact(stdout, stderr io.Writer, o logCompactOpts) int {
 			// No daemon: fall through to the offline path.
 		default:
 			reportNoCore(stderr, "log compact", err)
-			return conformance.ExitError
+			return participant.ExitError
 		}
 	}
 
@@ -178,7 +178,7 @@ func logCompactOffline(stderr io.Writer, o logCompactOpts) (core.LogCompactView,
 			return core.LogCompactView{}, exitBusy
 		}
 		fmt.Fprintf(stderr, "log compact: %v\n", err)
-		return core.LogCompactView{}, conformance.ExitError
+		return core.LogCompactView{}, participant.ExitError
 	}
 	// The compaction deleted these active legacy gates (the removed gate
 	// mechanism); the daemon logs each at startup, but an offline run leaves

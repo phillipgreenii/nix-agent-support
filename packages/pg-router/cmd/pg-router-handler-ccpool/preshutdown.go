@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -51,7 +51,7 @@ func servePreShutdown(stdin io.Reader, stdout io.Writer) int {
 	if !ok {
 		return exit
 	}
-	var req wire.LifecycleRequest
+	var req participant.LifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 	slog.Info("preShutdown: nothing to do; session cleanup runs on the janitor")
 	wire.WriteReply(stdout, map[string]any{
@@ -59,5 +59,5 @@ func servePreShutdown(stdin io.Reader, stdout io.Writer) int {
 		"id":            req.ID,
 		"outcome":       "ok",
 	})
-	return conformance.ExitOK
+	return participant.ExitOK
 }

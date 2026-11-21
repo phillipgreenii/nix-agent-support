@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"time"
 
+	apievent "github.com/phillipgreenii/pg-router/api/event"
+
 	"github.com/spf13/cobra"
 )
 
@@ -257,7 +259,7 @@ func newChangesCmd() *cobra.Command {
 		changesArgs = append(changesArgs, "--output", "json")
 		out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(), changesArgs, beadsDirEnv(beadsDir))
 		if errors.Is(err, errBudgetSkipped) {
-			return writeItems(cmd.OutOrStdout(), []rawItem{})
+			return writeItems(cmd.OutOrStdout(), []apievent.Item{})
 		}
 		if err != nil {
 			return err
@@ -321,7 +323,7 @@ func newChangesCmd() *cobra.Command {
 			}
 		}
 
-		items := make([]rawItem, 0, len(wire.Changes))
+		items := make([]apievent.Item, 0, len(wire.Changes))
 		lastOfLane := make(map[string]int)
 		for _, c := range wire.Changes {
 			var id entityIdentity
@@ -358,7 +360,7 @@ func newChangesCmd() *cobra.Command {
 			for k, v := range extras {
 				metadata[k] = v
 			}
-			item := rawItem{
+			item := apievent.Item{
 				ID:       id.ID,
 				Type:     entityType,
 				Title:    title,
@@ -388,7 +390,7 @@ func newChangesCmd() *cobra.Command {
 					fmt.Fprintf(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: change of backend %q has no succeeded source row with a next_seq\n", c.Source)
 					return errFailed
 				}
-				item.Ack = &ackRef{Lane: c.Source, Token: string(compactRaw(c.Seq))}
+				item.Ack = &apievent.Ack{Lane: c.Source, Token: string(compactRaw(c.Seq))}
 				lastOfLane[c.Source] = len(items)
 			}
 			items = append(items, item)

@@ -9,7 +9,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/emit"
@@ -60,12 +60,12 @@ func runIngestEventIO(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		return exitOK
 	case err != nil:
 		fmt.Fprintln(stderr, "ingest-event:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(stderr, "ingest-event: unexpected argument:", fs.Arg(0))
 		fmt.Fprintln(stderr, "ingest-event takes its request as JSON on stdin, never as arguments")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 
 	ref, err := locateCore(*socket, *token)
@@ -76,7 +76,7 @@ func runIngestEventIO(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 	request, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintln(stderr, "ingest-event: read request from stdin:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if len(bytes.TrimSpace(request)) == 0 {
 		// An empty stdin is not a request: the core's schema wants an object
@@ -84,7 +84,7 @@ func runIngestEventIO(args []string, stdin io.Reader, stdout, stderr io.Writer) 
 		// self-status does, rather than forward nothing.
 		fmt.Fprintln(stderr, "ingest-event: no request on stdin; this is a source callback and needs a JSON object on stdin,")
 		fmt.Fprintln(stderr, `  e.g. {"schemaVersion":"1","id":"<tracking id>","events":[{"id":"<event id>","type":"<type>"}]}`)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	return callCore(stdout, stderr, ref, core.SubcommandIngestEvent, request)
 }
@@ -125,7 +125,7 @@ func callCore(stdout, stderr io.Writer, ref core.Ref, subcommand string, request
 	reply, code, err := client.Call(context.Background(), subcommand, request, core.CallOptions{})
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", subcommand, err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if diagErr := core.DiscriminateReply(reply, replySchemaFor(subcommand), nil); diagErr != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", subcommand, diagErr)

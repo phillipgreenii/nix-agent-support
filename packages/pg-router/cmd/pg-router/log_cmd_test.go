@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -326,8 +327,8 @@ func TestLogCompact_ExplicitSocketNeverFallsBackOffline(t *testing.T) {
 	path := writeBloatedLog(t, dir, 20)
 	sum := fileSum(t, path)
 	_, errOut, code := runLogCompactCapture(t, logCompactOpts{logDir: dir, socket: filepath.Join(dir, "nope.sock"), token: "t"})
-	if code != conformance.ExitUnavailable {
-		t.Fatalf("exit = %d, want %d; stderr=%s", code, conformance.ExitUnavailable, errOut)
+	if code != participant.ExitUnavailable {
+		t.Fatalf("exit = %d, want %d; stderr=%s", code, participant.ExitUnavailable, errOut)
 	}
 	if fileSum(t, path) != sum || dirNames(t, dir) != "queue.jsonl" {
 		t.Fatalf("an unreachable explicit socket fell back to touching the log: %s", dirNames(t, dir))
@@ -367,8 +368,8 @@ func TestRunLog_usageErrors(t *testing.T) {
 		{"compact", "extra"},
 		{"compact", "--no-such-flag"},
 	} {
-		if got := runLog(args); got != conformance.ExitUsage {
-			t.Errorf("runLog(%v) = %d, want %d (usage)", args, got, conformance.ExitUsage)
+		if got := runLog(args); got != participant.ExitUsage {
+			t.Errorf("runLog(%v) = %d, want %d (usage)", args, got, participant.ExitUsage)
 		}
 	}
 }

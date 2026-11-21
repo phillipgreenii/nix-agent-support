@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
 
@@ -169,7 +169,7 @@ func TestWaitDoneRelease_unclaimedEndTwoStrikes(t *testing.T) {
 	if hasUpdateContaining(bd, "--add-label human") {
 		t.Errorf("strike one must NOT add human; updates=%v", bd.Updates)
 	}
-	if got := e.waitFailureResult(releaseRole(cfg).CCPool, relBead, err); got.Actions[0].Verb != report.Unclaimed {
+	if got := e.waitFailureResult(releaseRole(cfg).CCPool, relBead, err); got.Actions[0].Verb != participant.Unclaimed {
 		t.Errorf("strike one reports %+v, want Unclaimed", got)
 	}
 
@@ -186,7 +186,7 @@ func TestWaitDoneRelease_unclaimedEndTwoStrikes(t *testing.T) {
 	if !dtest.HasUpdate(bd, "update zr-d --add-label human") {
 		t.Errorf("strike two must add human; updates=%v", bd.Updates)
 	}
-	if got := e.waitFailureResult(releaseRole(cfg).CCPool, relBead, err); got.Actions[0].Verb != report.Escalated {
+	if got := e.waitFailureResult(releaseRole(cfg).CCPool, relBead, err); got.Actions[0].Verb != participant.Escalated {
 		t.Errorf("strike two reports %+v, want Escalated", got)
 	}
 }
@@ -388,7 +388,7 @@ func TestFinishWaitRelease(t *testing.T) {
 		bd := &dtest.ScriptBD{StatusSeq: map[string][]string{relBead: {"open"}}}
 		e := newExec(&dtest.FakeCC{}, bd, cfg)
 		res, err := e.finishWait(context.Background(), cc, d, relSession, "", &unclaimedEnd{escalated: true})
-		if !errors.Is(err, ErrUnclaimedEnd) || len(res.Actions) != 1 || res.Actions[0].Verb != report.Escalated {
+		if !errors.Is(err, ErrUnclaimedEnd) || len(res.Actions) != 1 || res.Actions[0].Verb != participant.Escalated {
 			t.Fatalf("got %+v, %v", res, err)
 		}
 	})

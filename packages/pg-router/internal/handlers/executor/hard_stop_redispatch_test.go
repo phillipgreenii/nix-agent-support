@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
 	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
 )
@@ -178,7 +178,7 @@ func TestDispatch_budgetHardStop_thenRedispatchLaunchesFreshSession(t *testing.T
 	launched1 := time.Unix(0, 0)
 	launched2 := launched1.Add(5 * time.Hour)
 
-	dispatch := func(ext string, now time.Time, bd *dtest.ScriptBD, snap usage.Snapshot) (report.Result, error) {
+	dispatch := func(ext string, now time.Time, bd *dtest.ScriptBD, snap usage.Snapshot) (participant.Report, error) {
 		clk := &dtest.ManualClock{T: now}
 		origTick := clk.TickAdvancing()
 		deps := newExecCC(cc, bd, cfg).deps
@@ -205,7 +205,7 @@ func TestDispatch_budgetHardStop_thenRedispatchLaunchesFreshSession(t *testing.T
 	if !errors.Is(err1, watchdog.ErrBudgetExceeded) {
 		t.Fatalf("precondition: the first dispatch must end in the watchdog's budget hard stop, got %v", err1)
 	}
-	if v := verbOf(res1); v != report.Unclaimed {
+	if v := verbOf(res1); v != participant.Unclaimed {
 		t.Errorf("a budget hard stop unclaims its bead, got verb %q", v)
 	}
 	stopped, ok := cc.session("sess-1")

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/emit"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -58,7 +58,7 @@ func TestPushInject_AtTheHardLogLimitShowsLogFullAndExits1(t *testing.T) {
 	mem.SetLogSize(1000)
 	var stdout, stderr strings.Builder
 	code := pushInject(&stdout, &stderr, false, loc, emit.SocketEnqueuer{}, testPushEvent)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 (the prefix is the contract, not a distinct exit code)", code)
 	}
 	for _, want := range []string{
@@ -78,7 +78,7 @@ func TestPushInject_AtTheHardLogLimitShowsLogFullAndExits1(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := pushInject(&stdout, &stderr, true, loc, emit.SocketEnqueuer{}, testPushEvent); code != conformance.ExitError {
+	if code := pushInject(&stdout, &stderr, true, loc, emit.SocketEnqueuer{}, testPushEvent); code != participant.ExitError {
 		t.Fatalf("--json exit = %d, want 1", code)
 	}
 	var got struct {

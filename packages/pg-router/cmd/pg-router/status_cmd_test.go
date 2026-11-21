@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	apistatus "github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -22,13 +23,13 @@ func TestStatus_DeliversToTheRunningCore(t *testing.T) {
 	svc := startCore(t, dir)
 
 	code := callCore(new(strings.Builder), new(strings.Builder), svc.Ref(), core.SubcommandIngestEvent, []byte(testIngestRequest))
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("seed ingest exit = %d, want 0", code)
 	}
 
 	var stdout, stderr strings.Builder
 	code = status(&stdout, &stderr, false, svc.Ref())
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
@@ -47,7 +48,7 @@ func TestStatus_JSONOutput(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := status(&stdout, &stderr, true, svc.Ref())
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
 	if err := conformance.CheckBytes(core.StatusReplySchema, []byte(strings.TrimSpace(stdout.String()))); err != nil {
@@ -60,7 +61,7 @@ func TestStatus_JSONOutput(t *testing.T) {
 func TestStatus_NoRunningCoreIsExit3(t *testing.T) {
 	var stdout, stderr strings.Builder
 	code := status(&stdout, &stderr, false, core.Ref{Socket: shortDir(t) + "/gone.sock"})
-	if code != conformance.ExitUnavailable {
+	if code != participant.ExitUnavailable {
 		t.Fatalf("exit = %d, want 3 (unavailable)", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {
@@ -82,8 +83,8 @@ func TestStatus_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := status(&stdout, &stderr, false, badRef)
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d", code, participant.ExitError)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want nothing rendered for a discriminated refusal", stdout.String())
@@ -117,7 +118,7 @@ func TestStatus_RefusedBySaturatedReadSemaphore(t *testing.T) {
 		var req json.RawMessage
 		_ = json.NewDecoder(conn).Decode(&req)
 		_ = json.NewEncoder(conn).Encode(map[string]any{
-			"exitCode": conformance.ExitBusy,
+			"exitCode": participant.ExitBusy,
 			"reply": map[string]any{
 				"schemaVersion": "1",
 				"error":         "too many concurrent status/mon.read calls in flight; retry",
@@ -127,8 +128,8 @@ func TestStatus_RefusedBySaturatedReadSemaphore(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := status(&stdout, &stderr, false, core.Ref{Socket: sock, Token: "t"})
-	if code != conformance.ExitBusy {
-		t.Fatalf("exit = %d, want %d", code, conformance.ExitBusy)
+	if code != participant.ExitBusy {
+		t.Fatalf("exit = %d, want %d", code, participant.ExitBusy)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want nothing rendered for a busy refusal", stdout.String())
@@ -147,8 +148,8 @@ func TestRunStatus_UsageErrorExitsUsageNotBusy(t *testing.T) {
 	}
 	for desc, args := range cases {
 		t.Run(desc, func(t *testing.T) {
-			if code := runStatus(args); code != conformance.ExitUsage {
-				t.Fatalf("exit = %d, want %d/usage (never %d/busy)", code, conformance.ExitUsage, conformance.ExitBusy)
+			if code := runStatus(args); code != participant.ExitUsage {
+				t.Fatalf("exit = %d, want %d/usage (never %d/busy)", code, participant.ExitUsage, participant.ExitBusy)
 			}
 		})
 	}

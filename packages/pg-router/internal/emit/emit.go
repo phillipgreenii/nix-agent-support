@@ -26,8 +26,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
+	"github.com/phillipgreenii/pg-router/schemas"
 )
 
 // pushInjectSchema is the message type the operator input is validated against
@@ -160,7 +160,7 @@ type Result struct {
 func Emit(jsonArg []byte, loc Locator, enq Enqueuer) (Result, error) {
 	// 1. Validate the operator input against the push-inject message schema
 	//    (rejects malformed JSON, missing/wrong-typed fields).
-	if err := conformance.CheckBytes(pushInjectSchema, jsonArg); err != nil {
+	if err := schemas.CheckBytes(pushInjectSchema, jsonArg); err != nil {
 		return Result{}, fmt.Errorf("emit: rejected: %w", err)
 	}
 	// 2. Parse into the core event (the wire instants are RFC3339 strings).

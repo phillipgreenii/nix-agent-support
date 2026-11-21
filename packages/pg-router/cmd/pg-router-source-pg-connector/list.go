@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"strings"
 
+	apievent "github.com/phillipgreenii/pg-router/api/event"
+
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +68,7 @@ func newListCmd() *cobra.Command {
 			[]string{entityType, "list", "--query", query, "--backend", backend, "--output", "json"},
 			beadsDirEnv(beadsDir))
 		if errors.Is(err, errBudgetSkipped) {
-			return writeItems(cmd.OutOrStdout(), []rawItem{})
+			return writeItems(cmd.OutOrStdout(), []apievent.Item{})
 		}
 		if err != nil {
 			return err
@@ -78,7 +80,7 @@ func newListCmd() *cobra.Command {
 			return errFailed
 		}
 
-		items := make([]rawItem, 0, len(wire.Entities))
+		items := make([]apievent.Item, 0, len(wire.Entities))
 		for _, raw := range wire.Entities {
 			var e listEntity
 			if err := json.Unmarshal(raw, &e); err != nil {
@@ -101,7 +103,7 @@ func newListCmd() *cobra.Command {
 			if title == "" {
 				title = e.ID
 			}
-			items = append(items, rawItem{
+			items = append(items, apievent.Item{
 				ID:       e.ID,
 				Type:     e.IssueType,
 				Title:    title,

@@ -20,7 +20,7 @@ instead. Bare `pg-router` (no subcommand) requires an explicit subcommand.
 (one `go.mod`, `go.sum`, `gomod2nix.toml` and `update-deps.sh`). Each keeps its own `packages/<name>`
 directory holding only `default.nix`, its own flake attribute and its own `<name>-go-tests` check;
 its sources live under `cmd/<binary>` and `internal/<member>` here (`internal/sensors/...` for the
-sensors). `members.json` lists the members and the shared set (`conformance`, `procenv`, `schemas`);
+sensors). `members.json` lists the members and the shared set (`api/...`, `conformance`, `procenv`, `schemas`);
 both the nix filesets (`members.nix`) and the boundary test read it, so a member binary's `--version`
 changes only when its own fileset changes, and a member-only edit leaves the router's unchanged.
 

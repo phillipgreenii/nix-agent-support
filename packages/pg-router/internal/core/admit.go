@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
+	"github.com/phillipgreenii/pg-router/schemas"
 )
 
 // This file holds the core's level-admission forwarder for a participant's PULL
@@ -29,7 +30,7 @@ func decodeVerb(stdin io.Reader, stdout io.Writer, verb, schema string, dst any)
 		writeBody(stdout, errorReply(verb+": read request: "+err.Error()))
 		return false
 	}
-	if err := conformance.CheckBytes(schema, data); err != nil {
+	if err := schemas.CheckBytes(schema, data); err != nil {
 		writeBody(stdout, errorReply(verb+": "+err.Error()))
 		return false
 	}
@@ -46,10 +47,10 @@ func writeJSONReply(stdout io.Writer, verb string, reply map[string]any) int {
 	body, err := json.Marshal(reply)
 	if err != nil { // unreachable: reply holds only JSON-safe scalars
 		writeBody(stdout, errorReply(verb+": marshal reply: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	writeBody(stdout, body)
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // writeJSONValue marshals any JSON-safe value to stdout (writeJSONReply for a
@@ -58,8 +59,8 @@ func writeJSONValue(stdout io.Writer, verb string, v any) int {
 	body, err := json.Marshal(v)
 	if err != nil { // unreachable: v holds only JSON-safe scalars
 		writeBody(stdout, errorReply(verb+": marshal reply: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	writeBody(stdout, body)
-	return conformance.ExitOK
+	return participant.ExitOK
 }

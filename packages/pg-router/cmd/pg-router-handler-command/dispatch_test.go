@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -69,7 +70,7 @@ func runEnvProbe(t *testing.T) (names []string, kv map[string]string) {
 	cfg := cmdConfig("/bin/sh", "-c", `env | sort > "$1"`, "probe", out)
 	req := request(t, eventWith(map[string]any{"id": "b-1", "type": "task", "title": "a title"}), "cmdrole", cfg, true)
 	exit, reply := dispatch(context.Background(), t, req)
-	if exit != conformance.ExitOK {
+	if exit != participant.ExitOK {
 		t.Fatalf("dispatch exit %d, reply %s", exit, reply)
 	}
 	return envNames(t, out)
@@ -117,7 +118,7 @@ func TestDispatch_TemplatedArgvIsOneLiteralArgument(t *testing.T) {
 	// /usr/bin/env stands in for a wrapper prefix; the probe counts its args.
 	cfg := cmdConfig("/usr/bin/env", "W=1", "/bin/sh", "-c", `printf '%s\n' "$#" "$1" > "$2"`, "probe", "{{.Item.Title}}", out)
 	req := request(t, eventWith(map[string]any{"id": "b-1", "type": "task", "title": title}), "cmdrole", cfg, true)
-	if exit, reply := dispatch(context.Background(), t, req); exit != conformance.ExitOK {
+	if exit, reply := dispatch(context.Background(), t, req); exit != participant.ExitOK {
 		t.Fatalf("dispatch exit %d, reply %s", exit, reply)
 	}
 	b, err := os.ReadFile(out)
@@ -142,7 +143,7 @@ func TestDispatch_RetryWindowedItemKeepsTheRouterID(t *testing.T) {
 	cfg := cmdConfig("/bin/sh", "-c", `printf '%s' "$1" > "$2"`, "probe", "{{.BeadID}}", out)
 	payload := map[string]any{"id": "b-1@46d60fca149d", "metadata": map[string]any{"entity_id": "b-1"}}
 	req := request(t, eventWith(payload), "cmdrole", cfg, true)
-	if exit, reply := dispatch(context.Background(), t, req); exit != conformance.ExitOK {
+	if exit, reply := dispatch(context.Background(), t, req); exit != participant.ExitOK {
 		t.Fatalf("dispatch exit %d, reply %s", exit, reply)
 	}
 	b, err := os.ReadFile(out)
@@ -208,7 +209,7 @@ func TestDispatch_CancelKillsTheWholeGroup(t *testing.T) {
 	cancel()
 	select {
 	case r := <-done:
-		if r.exit != conformance.ExitError {
+		if r.exit != participant.ExitError {
 			t.Fatalf("a cancelled payload must end in an error: exit %d, reply %s", r.exit, r.reply)
 		}
 	case <-time.After(15 * time.Second):
@@ -228,8 +229,8 @@ func TestDispatch_ExitNineIsBusyDecline(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			req := request(t, eventWith(map[string]any{"id": "b1"}), "cmdrole", cmdConfig(argv...), true)
 			exit, reply := dispatch(context.Background(), t, req)
-			if exit != conformance.ExitBusy {
-				t.Fatalf("exit = %d, want %d (busy); reply %s", exit, conformance.ExitBusy, reply)
+			if exit != participant.ExitBusy {
+				t.Fatalf("exit = %d, want %d (busy); reply %s", exit, participant.ExitBusy, reply)
 			}
 			m := decodeReply(t, reply)
 			if m["reason"] != "command-busy" || m["kind"] != "busy" {
@@ -248,8 +249,8 @@ func TestDispatch_OtherFailureIsAnErrorWithStderrTail(t *testing.T) {
 	cfg := cmdConfig("/bin/sh", "-c", `echo 'pg-wrap[env]: boom' >&2; exit 2`)
 	req := request(t, eventWith(map[string]any{"id": "b1"}), "cmdrole", cfg, true)
 	exit, reply := dispatch(context.Background(), t, req)
-	if exit != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d; reply %s", exit, conformance.ExitError, reply)
+	if exit != participant.ExitError {
+		t.Fatalf("exit = %d, want %d; reply %s", exit, participant.ExitError, reply)
 	}
 	m := decodeReply(t, reply)
 	msg, _ := m["error"].(string)
@@ -266,7 +267,7 @@ func TestDispatch_OtherFailureIsAnErrorWithStderrTail(t *testing.T) {
 func TestDispatch_SuccessReplyIsConformant(t *testing.T) {
 	req := request(t, eventWith(nil), "cmdrole", cmdConfig("/bin/sh", "-c", ":"), true)
 	exit, reply := dispatch(context.Background(), t, req)
-	if exit != conformance.ExitOK {
+	if exit != participant.ExitOK {
 		t.Fatalf("exit = %d; reply %s", exit, reply)
 	}
 	m := decodeReply(t, reply)
@@ -302,8 +303,8 @@ func TestDispatch_RoleConfigIsDecodedStrictly(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			req := request(t, eventWith(map[string]any{"id": "b1"}), "cmdrole", c.cfg, true)
 			exit, reply := dispatch(context.Background(), t, req)
-			if exit != conformance.ExitError {
-				t.Fatalf("exit = %d, want %d; reply %s", exit, conformance.ExitError, reply)
+			if exit != participant.ExitError {
+				t.Fatalf("exit = %d, want %d; reply %s", exit, participant.ExitError, reply)
 			}
 			if msg, _ := decodeReply(t, reply)["error"].(string); !strings.Contains(msg, c.want) {
 				t.Fatalf("error %q does not mention %q", msg, c.want)
@@ -316,7 +317,7 @@ func TestDispatch_RoleConfigIsDecodedStrictly(t *testing.T) {
 }
 
 // TestDispatch_RequestWithoutUsableRoleIsUsageError: no role, a role with no name
-// or a role that is not an object exits conformance.ExitUsage with an error
+// or a role that is not an object exits participant.ExitUsage with an error
 // reply; malformed JSON is an unexpected error, not usage.
 func TestDispatch_RequestWithoutUsableRoleIsUsageError(t *testing.T) {
 	ev := eventWith(nil)
@@ -327,15 +328,15 @@ func TestDispatch_RequestWithoutUsableRoleIsUsageError(t *testing.T) {
 	for name, req := range bodies {
 		t.Run(name, func(t *testing.T) {
 			exit, reply := dispatch(context.Background(), t, req)
-			if exit != conformance.ExitUsage {
-				t.Fatalf("exit = %d, want %d; reply %s", exit, conformance.ExitUsage, reply)
+			if exit != participant.ExitUsage {
+				t.Fatalf("exit = %d, want %d; reply %s", exit, participant.ExitUsage, reply)
 			}
 			if _, ok := decodeReply(t, reply)["error"].(string); !ok {
 				t.Fatalf("want an error reply, got %s", reply)
 			}
 		})
 	}
-	if exit, _ := dispatch(context.Background(), t, "{not json"); exit != conformance.ExitError {
-		t.Fatalf("malformed JSON exit = %d, want %d", exit, conformance.ExitError)
+	if exit, _ := dispatch(context.Background(), t, "{not json"); exit != participant.ExitError {
+		t.Fatalf("malformed JSON exit = %d, want %d", exit, participant.ExitError)
 	}
 }

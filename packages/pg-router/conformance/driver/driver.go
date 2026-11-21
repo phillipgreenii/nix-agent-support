@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strings"
 
+	apiparticipant "github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/conformance/golden"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -52,10 +53,10 @@ type Target struct {
 	// MonRead, when set, is invoked over the "mon.read" subcommand (INTF-MON
 	// pull direction, Task 3.6) to prove the request/reply wire shape holds
 	// live against this target, not just against a golden fixture.
-	MonRead conformance.Participant
+	MonRead apiparticipant.Participant
 	// Query, when set, is invoked over the "query" subcommand (INTF-SOURCE
 	// pull direction) the same way.
-	Query conformance.Participant
+	Query apiparticipant.Participant
 	// Command, when set, is invoked via argv (a real subprocess, os/exec or
 	// an equivalent test double) to prove a command-role participant's wire
 	// contract — the shape df-categorize/df-feedback use in
@@ -68,7 +69,7 @@ type Target struct {
 	// their own subcommands — proving the get/put/delete round-trip wire
 	// contract holds live against this target, not just against a golden
 	// fixture (Task 6.8 Contract/Produces).
-	Store conformance.Participant
+	Store apiparticipant.Participant
 }
 
 // CommandParticipant is the argv-invoked contract a command-role role speaks:
@@ -499,13 +500,13 @@ var negativeMatrix = map[string][]negativeCase{
 // conformance against a real handler, not just a golden fixture. A nil
 // participant means target carries no mon.read handler to check, so this
 // reports Skipped rather than a synthetic failure.
-func invokeMonRead(participant conformance.Participant) Result {
+func invokeMonRead(participant apiparticipant.Participant) Result {
 	return invokeCheck("invoking/mon.read", "mon.read", "mon.read-reply", participant)
 }
 
 // invokeQuery runs the query (INTF-SOURCE pull direction) request/reply pair
 // through participant the same way invokeMonRead does for mon.read.
-func invokeQuery(participant conformance.Participant) Result {
+func invokeQuery(participant apiparticipant.Participant) Result {
 	return invokeCheck("invoking/query", "source.query", "source.query-reply", participant)
 }
 
@@ -515,7 +516,7 @@ func invokeQuery(participant conformance.Participant) Result {
 // callers above (the wire verb IS the message type name here), but are kept
 // distinct parameters since that is not a general rule the driver should
 // assume.
-func invokeCheck(name, subcommand, replyType string, participant conformance.Participant) Result {
+func invokeCheck(name, subcommand, replyType string, participant apiparticipant.Participant) Result {
 	if participant == nil {
 		return Result{Name: name, Skipped: true, SkipReason: "target carries no " + subcommand + " participant"}
 	}
@@ -527,8 +528,8 @@ func invokeCheck(name, subcommand, replyType string, participant conformance.Par
 	if err != nil {
 		return Result{Name: name, Err: fmt.Errorf("%s round trip: %w", subcommand, err)}
 	}
-	if code != conformance.ExitOK {
-		return Result{Name: name, Err: fmt.Errorf("%s exit=%d, want %d", subcommand, code, conformance.ExitOK)}
+	if code != apiparticipant.ExitOK {
+		return Result{Name: name, Err: fmt.Errorf("%s exit=%d, want %d", subcommand, code, apiparticipant.ExitOK)}
 	}
 	var v any
 	if err := json.Unmarshal(reply, &v); err != nil {
@@ -546,10 +547,10 @@ func invokeCheck(name, subcommand, replyType string, participant conformance.Par
 // command role does not speak — and classifies the resulting exit code
 // against pg-router's real four-signal command-role contract:
 //
-//   - 0 (conformance.ExitOK) passes.
-//   - 9 (conformance.ExitBusy) is a graceful pre-accept decline (INV-CONC-1),
+//   - 0 (apiparticipant.ExitOK) passes.
+//   - 9 (apiparticipant.ExitBusy) is a graceful pre-accept decline (INV-CONC-1),
 //     reported as Busy, not a failure — Err stays nil.
-//   - 2 (conformance.ExitUsage) is ALSO flagged as a violation here, but for
+//   - 2 (apiparticipant.ExitUsage) is ALSO flagged as a violation here, but for
 //     a project-specific reason DEC-WIRE-1 itself does not state:
 //     df-categorize/df-feedback's real command-role handlers shell out to
 //     pg-connector, whose own exit codes 2/3 carry an unrelated fan-out
@@ -572,11 +573,11 @@ func invokeCommand(ctx context.Context, participant CommandParticipant) Result {
 		return Result{Name: name, Err: fmt.Errorf("command role: %w", err)}
 	}
 	switch code {
-	case conformance.ExitOK:
+	case apiparticipant.ExitOK:
 		return Result{Name: name}
-	case conformance.ExitBusy:
+	case apiparticipant.ExitBusy:
 		return Result{Name: name, Busy: true}
-	case conformance.ExitUsage:
+	case apiparticipant.ExitUsage:
 		return Result{Name: name, Err: fmt.Errorf("command role exited %d: usage error; df-categorize/df-feedback shell out to pg-connector, whose own exit codes 2/3 carry an unrelated meaning, so a command role must not pass this code through unchanged", code)}
 	default:
 		return Result{Name: name, Err: fmt.Errorf("command role exited %d", code)}
@@ -594,7 +595,7 @@ func invokeCommand(ctx context.Context, participant CommandParticipant) Result {
 // storeCase's old unconditional "enabled by Task 6.0" skip is gone now that
 // INTF-STORE is realized (Task 6.7) — this task's own driver_test.go change
 // replaces that assertion (Task 6.8 Contract).
-func invokeStore(participant conformance.Participant) Result {
+func invokeStore(participant apiparticipant.Participant) Result {
 	const name = "invoking/store"
 	if participant == nil {
 		return Result{Name: name, Skipped: true, SkipReason: "target carries no store participant"}
@@ -648,7 +649,7 @@ func invokeStore(participant conformance.Participant) Result {
 // Binding decision 3: three distinct socket verbs, never one "store" verb
 // branching on op) — and returns the decoded, schema-validated store.reply
 // body.
-func storeStep(participant conformance.Participant, op, key, value string) (map[string]any, error) {
+func storeStep(participant apiparticipant.Participant, op, key, value string) (map[string]any, error) {
 	req := map[string]any{
 		"schemaVersion": "1",
 		"id":            "invoking/store",
@@ -662,8 +663,8 @@ func storeStep(participant conformance.Participant, op, key, value string) (map[
 	if err != nil {
 		return nil, fmt.Errorf("%s round trip: %w", op, err)
 	}
-	if code != conformance.ExitOK {
-		return nil, fmt.Errorf("%s exit=%d, want %d", op, code, conformance.ExitOK)
+	if code != apiparticipant.ExitOK {
+		return nil, fmt.Errorf("%s exit=%d, want %d", op, code, apiparticipant.ExitOK)
 	}
 	var v any
 	if err := json.Unmarshal(reply, &v); err != nil {

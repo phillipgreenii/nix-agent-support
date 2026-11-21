@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -92,7 +92,7 @@ func TestRunUntilIdleBody_pausedReachableAnswersIngestNoDispatch(t *testing.T) {
 	var stdout, stderr strings.Builder
 	code := callCore(&stdout, &stderr, ref, core.SubcommandIngestEvent,
 		[]byte(`{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"t1"}]}`))
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("ingest-event while paused: exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
 	var reply map[string]any

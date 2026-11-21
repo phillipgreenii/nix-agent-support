@@ -40,13 +40,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/budget"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
 	"github.com/phillipgreenii/pg-router/internal/handlers/recordertest"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
 	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
@@ -420,14 +420,14 @@ func realRole(name string) roles.Role {
 }
 
 // dispatch runs one real Dispatch against the pool with a scripted bead.
-func (p *realPool) dispatch(role roles.Role, bead, eventID, head, ext string, status ...string) (report.Result, error) {
+func (p *realPool) dispatch(role roles.Role, bead, eventID, head, ext string, status ...string) (participant.Report, error) {
 	p.t.Helper()
 	return p.dispatchAt(0, p.cc, role, bead, eventID, head, ext, status...)
 }
 
 // dispatchAt is dispatch through cc on a clock running ahead of real time by
 // offset (every row then reads offset older); 0 is the real clock.
-func (p *realPool) dispatchAt(offset time.Duration, cc ccpool.Runner, role roles.Role, bead, eventID, head, ext string, status ...string) (report.Result, error) {
+func (p *realPool) dispatchAt(offset time.Duration, cc ccpool.Runner, role roles.Role, bead, eventID, head, ext string, status ...string) (participant.Report, error) {
 	p.t.Helper()
 	it := item.Item{ID: bead}
 	if head != "" {

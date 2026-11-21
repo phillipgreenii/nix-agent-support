@@ -12,7 +12,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
@@ -62,8 +62,8 @@ func TestDispatch_gatedOriginDeclinesWithoutBeadsCalls(t *testing.T) {
 	cfgPath, stateDir, calls := originFixture(t, missing)
 	r := workerWithIsolation(t, `{}`)
 	code, out := dispatchWith(t, r.name, r.cfg, cfgPath, dtest.DefaultEvent)
-	if code != conformance.ExitBusy {
-		t.Fatalf("exit = %d, want ExitBusy (%d); stdout=%q", code, conformance.ExitBusy, out)
+	if code != participant.ExitBusy {
+		t.Fatalf("exit = %d, want ExitBusy (%d); stdout=%q", code, participant.ExitBusy, out)
 	}
 	if reply := decodeReply(t, out); reply["reason"] != "origin-unavailable" {
 		t.Fatalf("reply = %q, want reason origin-unavailable", out)
@@ -110,7 +110,7 @@ func TestDispatch_pathIsolationIsGatedByItsOwnPathOnly(t *testing.T) {
 
 	atWatched := workerWithIsolation(t, fmt.Sprintf(`{"type":"path","path":%q}`, missing))
 	code, out := dispatchWith(t, atWatched.name, atWatched.cfg, cfgPath, dtest.DefaultEvent)
-	if code != conformance.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
+	if code != participant.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
 		t.Fatalf("a path role at the watched repo root must still be gated; exit=%d out=%q", code, out)
 	}
 }
@@ -145,7 +145,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	cfgPath, stateDir, _ := originFixture(t, missing)
 
 	var out, errb bytes.Buffer
-	if code := testWiring().runOriginTo([]string{"status", "--config", cfgPath}, &out, &errb); code != conformance.ExitOK {
+	if code := testWiring().runOriginTo([]string{"status", "--config", cfgPath}, &out, &errb); code != participant.ExitOK {
 		t.Fatalf("status exit = %d stderr=%s", code, errb.String())
 	}
 	wantUnchecked := "KEY                   CLASS      GATED  IGNORED  SINCE  FAILURES  LAST_ERROR\n" +
@@ -155,7 +155,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := testWiring().runOriginTo([]string{"ignore", "--config", cfgPath, "git.example.test/o/a"}, &out, &errb); code != conformance.ExitOK {
+	if code := testWiring().runOriginTo([]string{"ignore", "--config", cfgPath, "git.example.test/o/a"}, &out, &errb); code != participant.ExitOK {
 		t.Fatalf("ignore exit = %d stderr=%s", code, errb.String())
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "origin-state", "git.example.test__o__a.disable")); err != nil {
@@ -168,7 +168,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := testWiring().runOriginTo([]string{"status", "--config", cfgPath}, &out, &errb); code != conformance.ExitOK {
+	if code := testWiring().runOriginTo([]string{"status", "--config", cfgPath}, &out, &errb); code != participant.ExitOK {
 		t.Fatalf("status exit = %d", code)
 	}
 	if !strings.Contains(out.String(), "unchecked  false  true") {
@@ -176,7 +176,7 @@ func TestOrigin_statusGoldenAndKillSwitch(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := testWiring().runOriginTo([]string{"unignore", "--config", cfgPath, "git.example.test/o/a"}, &out, &errb); code != conformance.ExitOK {
+	if code := testWiring().runOriginTo([]string{"unignore", "--config", cfgPath, "git.example.test/o/a"}, &out, &errb); code != participant.ExitOK {
 		t.Fatalf("unignore exit = %d", code)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "origin-state", "git.example.test__o__a.disable")); err == nil {
@@ -195,8 +195,8 @@ func TestOrigin_usageErrors(t *testing.T) {
 		"traversal key":    {"ignore", "--config", cfgPath, "../../etc/passwd"},
 	} {
 		var out, errb bytes.Buffer
-		if code := testWiring().runOriginTo(args, &out, &errb); code != conformance.ExitUsage {
-			t.Errorf("%s: exit = %d, want ExitUsage (%d)", name, code, conformance.ExitUsage)
+		if code := testWiring().runOriginTo(args, &out, &errb); code != participant.ExitUsage {
+			t.Errorf("%s: exit = %d, want ExitUsage (%d)", name, code, participant.ExitUsage)
 		}
 	}
 }
@@ -229,7 +229,7 @@ func TestOrigin_statusListsGuardRoots(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	args := []string{"status", "--config", cfgPath, "--role", writeRole(wsRoot), "--role", writeRole(gone)}
-	if code := w.runOriginTo(args, &out, &errb); code != conformance.ExitOK {
+	if code := w.runOriginTo(args, &out, &errb); code != participant.ExitOK {
 		t.Fatalf("status exit = %d stderr=%s", code, errb.String())
 	}
 	got := out.String()

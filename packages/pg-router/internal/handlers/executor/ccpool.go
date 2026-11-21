@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-failsig"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/budget"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
@@ -21,7 +22,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
 	"github.com/phillipgreenii/pg-router/internal/handlers/prompt"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
 	"github.com/phillipgreenii/pg-router/internal/handlers/worktree"
@@ -33,7 +33,7 @@ const purgeCloseTimeout = 2 * time.Minute
 
 type ccpoolExecutor struct{}
 
-func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps) (report.Result, error) {
+func (ccpoolExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps) (participant.Report, error) {
 	// The dispatch's own cancel-with-cause: the lease refresh cancels it with
 	// ErrSuperseded when a newer dispatch takes the session over (lease.go).
 	ctx, cancel := context.WithCancelCause(ctx)
@@ -221,7 +221,7 @@ func (e *LaunchFailedError) Is(target error) bool { return target == ErrLaunchFa
 // rendered nudge (async), then wait for completion — racing the budget watchdog when
 // the role carries a finite budget. The session is addressed by ExternalID; the
 // stable DisplayName is passed only as ccpool --name.
-func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, error) {
+func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (participant.Report, error) {
 	r.ownerID = d.DispatchID
 	if r.ownerID == "" {
 		r.ownerID = r.deps.ExternalID
@@ -247,11 +247,11 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// alert counts, and is logged at WARN.
 			slog.Warn("dispatch declined: the pool's sessions cannot be read; treating it as an attempt in flight",
 				"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "why", plan.why)
-			return report.Result{}, fmt.Errorf("%w: %s", ErrPoolUnreadable, plan.describe())
+			return participant.Report{}, fmt.Errorf("%w: %s", ErrPoolUnreadable, plan.describe())
 		}
 		slog.Info("dispatch declined: an earlier attempt of this bead and role is in flight",
 			"role", d.Role.Name, "bead", d.Item.ID, "event", d.EventID, "session", plan.session, "why", plan.why)
-		return report.Result{}, fmt.Errorf("%w: %s", ErrSessionInFlight, plan.describe())
+		return participant.Report{}, fmt.Errorf("%w: %s", ErrSessionInFlight, plan.describe())
 	case verdictAbsorb:
 		// Take the per-session lock and refresh the supervision lease BEFORE
 		// waiting, so a concurrent orphan reconcile either already finished (the
@@ -259,18 +259,18 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		// offer decide afresh) or sees the fresh lease and stands down (INV-CCH-18).
 		existing, ok, err := r.takeOverForAbsorb(ctx, plan.absorb, d.EventID)
 		if err != nil {
-			return report.Result{}, fmt.Errorf("absorb %s: %w", display, err)
+			return participant.Report{}, fmt.Errorf("absorb %s: %w", display, err)
 		}
 		if !ok {
 			slog.Info("dispatch declined: the turn to absorb changed while taking it over",
 				"role", d.Role.Name, "bead", d.Item.ID, "session", plan.absorb.ExternalID)
-			return report.Result{}, fmt.Errorf("%w: session %s changed while being taken over", ErrSessionInFlight, plan.absorb.ExternalID)
+			return participant.Report{}, fmt.Errorf("%w: session %s changed while being taken over", ErrSessionInFlight, plan.absorb.ExternalID)
 		}
 		return r.absorbDuplicate(ctx, d, existing)
 	}
 	for _, s := range plan.leftovers {
 		if err := r.closeLeftover(ctx, d, s); err != nil {
-			return report.Result{}, err
+			return participant.Report{}, err
 		}
 	}
 
@@ -283,7 +283,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	capacity, capErr := r.deps.CC.Capacity(ctx)
 	if capErr != nil {
 		slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
-		return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
+		return participant.Report{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
 	}
 	// Capacity pressure (INV-CCH-41): a full pool with no
 	// usage limit in force is reconciled once (closed-bead sessions) and capacity
@@ -294,7 +294,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		capacity, reconcileNote, capErr = r.reconcileForCapacity(ctx, d, capacity)
 		if capErr != nil {
 			slog.Warn("dispatch declined: pool capacity unknown", "role", d.Role.Name, "bead", d.Item.ID, "err", capErr)
-			return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
+			return participant.Report{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
 		}
 	}
 	if capacity.Free == 0 {
@@ -307,7 +307,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// event's TTL expires. No bead is touched.
 			slog.Info("dispatch declined: usage limit hit", "role", d.Role.Name, "bead", d.Item.ID,
 				"window", ul.Window, "used_pct", ul.UsedPct, "resets_at", ul.ResetsAt)
-			return report.Result{}, fmt.Errorf("%w: usage limit %s hit until %s",
+			return participant.Report{}, fmt.Errorf("%w: usage limit %s hit until %s",
 				ErrPoolAtCapacity, ul.Window, ul.ResetsAt.Format(time.RFC3339))
 		}
 		slog.Info("dispatch declined: pool at capacity", "role", d.Role.Name, "bead", d.Item.ID,
@@ -316,7 +316,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		if reconcileNote != "" {
 			detail += " (" + reconcileNote + ")"
 		}
-		return report.Result{}, fmt.Errorf("%w: %s", ErrPoolAtCapacity, detail)
+		return participant.Report{}, fmt.Errorf("%w: %s", ErrPoolAtCapacity, detail)
 	}
 
 	// Prepare WORKSPACE_ROOT per the role's isolation strategy (roles.IsolationConfig;
@@ -347,13 +347,13 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	if usesWorktreeIsolation(cc.Isolation) && !useGWM && !preexisting {
 		if _, fErr := r.deps.checkFreeSpace(); fErr != nil {
 			slog.Warn("dispatch declined: free space below the worktree floor", "role", d.Role.Name, "bead", d.Item.ID, "err", fErr)
-			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, fErr)
+			return participant.Report{}, fmt.Errorf("isolation %s: %w", d.Item.ID, fErr)
 		}
 	}
 	var wt string
 	var wtErr error
 	if useGWM {
-		var res report.Result
+		var res participant.Report
 		wt, res, wtErr = r.leaseWorktree(ctx, d, cc)
 		if wtErr != nil {
 			return res, wtErr
@@ -378,13 +378,13 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// — the core simply re-offers later with backoff, same as
 			// ErrPoolAtCapacity.
 			slog.Warn("dispatch declined: low disk space preparing isolation", "role", d.Role.Name, "bead", d.Item.ID, "err", wtErr)
-			return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
+			return participant.Report{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
 		}
 		// Any other isolation failure (a per-bead worktree defect, before any
 		// session exists) is NOT a decline: it is an accepted failure (exit 1)
 		// that mutates no bead and carries no label. The old launch-failure label
 		// stamp and the second-failure human escalation are retired.
-		return report.Result{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
+		return participant.Report{}, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
 	}
 
 	// Handler-side pre-fetch (bead pg2-hh32y): pin the worktree to the item's
@@ -458,17 +458,17 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// escalation to human. The abandoned session and worktree are already
 			// reclaimed above; the busy decline re-offers the event with backoff.
 			slog.Info("dispatch declined: usage limit hit at launch", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
-			return report.Result{}, fmt.Errorf("%w: ensure %s: %v", ErrPoolAtCapacity, r.deps.ExternalID, err)
+			return participant.Report{}, fmt.Errorf("%w: ensure %s: %v", ErrPoolAtCapacity, r.deps.ExternalID, err)
 		}
 		launchErr := fmt.Errorf("ensure %s: %w", r.deps.ExternalID, err)
 		if ctx.Err() != nil {
 			// The handler's own context is cancelled (shutdown): no decline. Core
 			// checks busy before shutdown in Offer, so a shutdown declined here
 			// would be counted as a fault. The error returns as a plain failure.
-			return report.Result{}, launchErr
+			return participant.Report{}, launchErr
 		}
 		slog.Warn("dispatch declined: the session failed before it was ready", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
-		return report.Result{}, &LaunchFailedError{Tail: failsig.Redact(err.Error()), Err: launchErr}
+		return participant.Report{}, &LaunchFailedError{Tail: failsig.Redact(err.Error()), Err: launchErr}
 	}
 	// The dispatch is accepted once ccpool new returned ready (INV-CCH-35).
 	r.emitCCPoolStart(d, RouteLaunched, r.deps.ExternalID)
@@ -502,7 +502,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		err = nil
 	}
 	if err != nil {
-		var res report.Result
+		var res participant.Report
 		// A confirmed dropped nudge (exit 7): the model never ingested the task, so
 		// hand the bead back unclaimed regardless of on_dispatch_fail — leaving it
 		// claimed would let the budget watchdog later nudge a context-less model
@@ -520,14 +520,14 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// the Close above did not actually stop the session.
 			r.reclaimAbandonedWorktree(ctx, cc, d.Item.ID, wt, !preexisting)
 			if released {
-				res = failureAction(report.Unclaimed, d.Item.ID)
+				res = failureAction(participant.Unclaimed, d.Item.ID)
 			}
 			return res, fmt.Errorf("send %s: prompt not ingested (the model started no turn within the confirm window, or the session was not live; session closed, claim released: %v): %w", r.deps.ExternalID, notIngestedCause(err), err)
 		}
 		// J-dispatch-fail: apply the role's configured on_dispatch_fail action.
 		if cc.OnDispatchFail == roles.DispatchUnclaim {
 			if r.releaseAfterFailedSend(ctx, d.Item.ID) {
-				res = failureAction(report.Unclaimed, d.Item.ID)
+				res = failureAction(participant.Unclaimed, d.Item.ID)
 			}
 		}
 		return res, fmt.Errorf("send %s: %w", r.deps.ExternalID, err)
@@ -651,28 +651,28 @@ func (r *ccpoolRun) reclaimAbandonedWorktree(ctx context.Context, cc *roles.CCPo
 // (ErrUnclaimedEnd) unclaimed on its first strike, escalated on its second; a
 // peer-held bead (ErrPeerHeld) no verb at all; any other failure went through fail →
 // complete.OnFailure(OnFailure). nil/ctx errors → no verb. (pg2-kj7j, INV-CCH-7)
-func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err error) report.Result {
+func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err error) participant.Report {
 	if err == nil {
-		return report.Result{}
+		return participant.Report{}
 	}
 	if errors.Is(err, watchdog.ErrBudgetExceeded) {
-		return failureAction(report.Unclaimed, beadID)
+		return failureAction(participant.Unclaimed, beadID)
 	}
 	if errors.Is(err, ErrPeerHeld) {
 		// A peer holds the bead: no verb, and no on_failure (INV-CCH-28).
-		return report.Result{}
+		return participant.Report{}
 	}
 	if errors.Is(err, ErrUnclaimedEnd) {
 		var ue *unclaimedEnd
 		if errors.As(err, &ue) && ue.exempt {
 			// A usage or spend limit or an API outage (INV-CCH-28): no strike and
 			// no bead write, so no verb.
-			return report.Result{}
+			return participant.Report{}
 		}
 		if ue != nil && ue.escalated {
-			return failureAction(report.Escalated, beadID)
+			return failureAction(participant.Escalated, beadID)
 		}
-		return failureAction(report.Unclaimed, beadID)
+		return failureAction(participant.Unclaimed, beadID)
 	}
 	if errors.Is(err, ErrNeedsInputStalled) {
 		// The stall bound (INV-CCH-29) released the claim in one call (Unclaimed),
@@ -681,22 +681,22 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 		var ns *needsInputStalled
 		switch {
 		case errors.As(err, &ns) && ns.escalated:
-			return failureAction(report.Escalated, beadID)
+			return failureAction(participant.Escalated, beadID)
 		case ns != nil && ns.released:
-			return failureAction(report.Unclaimed, beadID)
+			return failureAction(participant.Unclaimed, beadID)
 		}
-		return report.Result{}
+		return participant.Report{}
 	}
 	if errors.Is(err, ErrExternallyClosed) {
 		var ec *externallyClosed
 		if errors.As(err, &ec) && ec.escalated {
-			return failureAction(report.Escalated, beadID)
+			return failureAction(participant.Escalated, beadID)
 		}
 		if ec != nil && ec.releaseErr != nil {
 			// The release did not land, so no unclaim verb is claimed (pg2-ybkav).
-			return report.Result{}
+			return participant.Report{}
 		}
-		return failureAction(report.Unclaimed, beadID)
+		return failureAction(participant.Unclaimed, beadID)
 	}
 	if errors.Is(err, ErrSessionDied) {
 		// complete.OnDeath released the claim under either on_failure, so the
@@ -705,21 +705,21 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 		// (the label rides the same update), so no verb is claimed (pg2-qyc3h).
 		var sd *sessionDied
 		if errors.As(err, &sd) && sd.releaseErr != nil {
-			return report.Result{}
+			return participant.Report{}
 		}
-		res := failureAction(report.Unclaimed, beadID)
+		res := failureAction(participant.Unclaimed, beadID)
 		if cc.OnFailure == roles.AddHuman && (sd == nil || !sd.exempt) {
-			res.Actions = append([]report.Action{{Verb: report.Escalated, Refs: res.Actions[0].Refs}}, res.Actions...)
+			res.Actions = append([]participant.Action{{Verb: participant.Escalated, Refs: res.Actions[0].Refs}}, res.Actions...)
 		}
 		return res
 	}
 	switch cc.OnFailure {
 	case roles.Unclaim:
-		return failureAction(report.Unclaimed, beadID)
+		return failureAction(participant.Unclaimed, beadID)
 	case roles.AddHuman:
-		return failureAction(report.Escalated, beadID)
+		return failureAction(participant.Escalated, beadID)
 	}
-	return report.Result{}
+	return participant.Report{}
 }
 
 // budgetWaitMargin is how long past a role's time budget waitDone keeps waiting
@@ -758,13 +758,13 @@ func budgetUnlimited(b budget.Budget) bool {
 // It then closes (non-purge) the settled session this dispatch launched or
 // absorbed (closeSettledSession, INV-CCH-17, ADR 0082), so a finished session
 // does not hold a counted slot of a max_sessions=1 pool until idle_ttl.
-func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
+func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (participant.Report, error) {
 	if r.superseded.Load() {
 		// A newer dispatch took this session over (lease.go): stop without a
 		// terminal action -- no session close, no worktree removal, no failure
 		// report. The newer dispatch owns the session's end.
 		r.finished, r.waitErr = true, ErrSuperseded
-		return report.Result{}, fmt.Errorf("session %s: %w", name, ErrSuperseded)
+		return participant.Report{}, fmt.Errorf("session %s: %w", name, ErrSuperseded)
 	}
 	lost := r.gwm.lost.Load() && werr == nil
 	if lost {
@@ -786,9 +786,9 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 	if lost {
 		// The worktree went away under a session that otherwise finished: a
 		// dispatch failure, with the role's on_dispatch_fail action.
-		var res report.Result
+		var res participant.Report
 		if cc.OnDispatchFail == roles.DispatchUnclaim && r.releaseAfterFailedSend(ctx, d.Item.ID) {
-			res = failureAction(report.Unclaimed, d.Item.ID)
+			res = failureAction(participant.Unclaimed, d.Item.ID)
 		}
 		return res, werr
 	}
@@ -1459,7 +1459,7 @@ func dispatchHeadSHA(it item.Item) string {
 // comment). Mirrors run()'s own tail (budget-gated watchdog race +
 // waitFailureResult) so the terminal verb reported here is identical to what a
 // first-time dispatch of the same work would have reported.
-func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
+func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (participant.Report, error) {
 	r.noteSession(existing)
 	cc := d.Role.CCPool
 	// Adopting a live session is the other way a dispatch is accepted (INV-CCH-35).

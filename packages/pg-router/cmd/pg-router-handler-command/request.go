@@ -8,8 +8,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
+	"github.com/phillipgreenii/pg-router/schemas"
 )
 
 // readRequest reads one request from stdin, checks it against the named wire
@@ -17,32 +18,32 @@ import (
 // names. On any failure it has already written the schema-legal error reply
 // and returns the exit code to use (ok false):
 //
-//   - unreadable stdin, malformed JSON or a schema violation: conformance.ExitError;
-//   - a request without a usable role object: conformance.ExitUsage.
+//   - unreadable stdin, malformed JSON or a schema violation: participant.ExitError;
+//   - a request without a usable role object: participant.ExitUsage.
 func readRequest(name, schema string, stdin io.Reader, stdout io.Writer) (raw []byte, ro roleObject, exit int, ok bool) {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, name+": read request from stdin:", err)
-		return nil, roleObject{}, conformance.ExitError, false
+		return nil, roleObject{}, participant.ExitError, false
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
 		wire.WriteErrorReply(stdout, "malformed JSON: "+err.Error())
-		return nil, roleObject{}, conformance.ExitError, false
+		return nil, roleObject{}, participant.ExitError, false
 	}
-	if err := conformance.Check(schema, v); err != nil {
+	if err := schemas.Check(schema, v); err != nil {
 		wire.WriteErrorReply(stdout, err.Error())
-		return nil, roleObject{}, conformance.ExitError, false
+		return nil, roleObject{}, participant.ExitError, false
 	}
 	ro, err = parseRole(raw)
 	if err != nil {
 		wire.WriteErrorReply(stdout, err.Error())
 		if errors.Is(err, errNoRole) {
-			return nil, roleObject{}, conformance.ExitUsage, false
+			return nil, roleObject{}, participant.ExitUsage, false
 		}
-		return nil, roleObject{}, conformance.ExitError, false
+		return nil, roleObject{}, participant.ExitError, false
 	}
-	return raw, ro, conformance.ExitOK, true
+	return raw, ro, participant.ExitOK, true
 }
 
 // noArgs parses a subcommand's flags: none beyond -h. It returns done true with
@@ -61,15 +62,15 @@ func parseFlags(name string, fs *flag.FlagSet, args []string) (exit int, done bo
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
-		return conformance.ExitOK, true
+		return participant.ExitOK, true
 	case err != nil:
 		fmt.Fprintln(os.Stderr, name+":", err)
-		return conformance.ExitUsage, true
+		return participant.ExitUsage, true
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, name+": unexpected argument:", fs.Arg(0))
 		fmt.Fprintln(os.Stderr, name+" takes its request as JSON on stdin, never as arguments")
-		return conformance.ExitUsage, true
+		return participant.ExitUsage, true
 	}
-	return conformance.ExitOK, false
+	return participant.ExitOK, false
 }

@@ -5,8 +5,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/api/status"
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -115,12 +115,12 @@ func (s *Service) handleLogCompact(stdin io.Reader, stdout io.Writer) int {
 		DryRun bool `json:"dryRun"`
 	}
 	if !decodeVerb(stdin, stdout, SubcommandLogCompact, LogCompactRequestSchema, &req) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	res, err := s.q.CompactManual(req.DryRun)
 	if err != nil {
 		writeBody(stdout, errorReply(SubcommandLogCompact+": "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	view := NewLogCompactView(res, s.q.LimitStatus().HardBytes, ViaDaemon)
 	return writeJSONValue(stdout, SubcommandLogCompact, view)

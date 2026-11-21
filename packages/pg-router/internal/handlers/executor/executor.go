@@ -14,6 +14,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
@@ -22,7 +23,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
 	"github.com/phillipgreenii/pg-router/internal/handlers/parknote"
 	"github.com/phillipgreenii/pg-router/internal/handlers/query"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
 	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
@@ -57,7 +57,7 @@ type DispatchContext struct {
 
 // Executor dispatches one item for a role and reports the failure action it took.
 type Executor interface {
-	Dispatch(ctx context.Context, d DispatchContext, deps Deps) (report.Result, error)
+	Dispatch(ctx context.Context, d DispatchContext, deps Deps) (participant.Report, error)
 }
 
 // Deps is the explicit seam bag the executor needs from the orchestrator. Fields
@@ -214,6 +214,6 @@ func NewCCPool() Executor { return ccpoolExecutor{} }
 func NewCommand() Executor { return commandExecutor{} }
 
 // failureAction builds a single-bead Result for one failure verb.
-func failureAction(verb report.Verb, beadID string) report.Result {
-	return report.Result{Actions: []report.Action{{Verb: verb, Refs: []report.Ref{{Type: "bead", ID: beadID}}}}}
+func failureAction(verb participant.Verb, beadID string) participant.Report {
+	return participant.Report{Actions: []participant.Action{{Verb: verb, Refs: []participant.Ref{{Type: "bead", ID: beadID}}}}}
 }

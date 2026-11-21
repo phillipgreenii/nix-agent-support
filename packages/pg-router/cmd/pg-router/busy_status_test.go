@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -87,7 +87,7 @@ func TestBusy_ReachesScrapeAndStatusFromTheDeclineKindAlone(t *testing.T) {
 	}
 
 	var out, errOut strings.Builder
-	if code := status(&out, &errOut, true, svc.Ref()); code != conformance.ExitOK {
+	if code := status(&out, &errOut, true, svc.Ref()); code != participant.ExitOK {
 		t.Fatalf("status --json exit = %d; stderr=%s", code, errOut.String())
 	}
 	var reply struct {
@@ -113,7 +113,7 @@ func TestBusy_ReachesScrapeAndStatusFromTheDeclineKindAlone(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := status(&out, &errOut, false, svc.Ref()); code != conformance.ExitOK {
+	if code := status(&out, &errOut, false, svc.Ref()); code != participant.ExitOK {
 		t.Fatalf("status exit = %d; stderr=%s", code, errOut.String())
 	}
 	text := out.String()

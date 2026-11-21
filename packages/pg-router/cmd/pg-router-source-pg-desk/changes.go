@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"time"
 
+	apievent "github.com/phillipgreenii/pg-router/api/event"
+
 	"github.com/spf13/cobra"
 )
 
@@ -49,7 +51,7 @@ type entityGroup struct {
 //
 // It also returns, per item, the lowest record sequence of its entity in the
 // poll (the input of the deferred-ack token rule).
-func itemsWithLowest(env envelope) ([]rawItem, []int64, error) {
+func itemsWithLowest(env envelope) ([]apievent.Item, []int64, error) {
 	degraded := make([]string, 0, len(env.Sources))
 	for _, s := range env.Sources {
 		if s.Status != statusOK {
@@ -90,12 +92,12 @@ func itemsWithLowest(env envelope) ([]rawItem, []int64, error) {
 			g.typ, g.title, g.version, g.origin = r.Type, r.Title, version, r.Origin
 		}
 	}
-	items := make([]rawItem, 0, len(order))
+	items := make([]apievent.Item, 0, len(order))
 	lows := make([]int64, 0, len(order))
 	for _, id := range order {
 		g := groups[id]
 		lows = append(lows, g.minSeq)
-		items = append(items, rawItem{
+		items = append(items, apievent.Item{
 			ID:    g.id + "@" + string(g.seq),
 			Emit:  g.typ + changedSuffix,
 			Type:  g.typ,
@@ -118,7 +120,7 @@ func itemsWithLowest(env envelope) ([]rawItem, []int64, error) {
 // k the token (lowest sequence of item k+1) - 1 and the last item the
 // envelope's cursor.to, so every record at or below a token belongs to an item
 // at or before it. The lane of every item is its entity type.
-func withAck(items []rawItem, lows []int64, to json.Number) ([]rawItem, error) {
+func withAck(items []apievent.Item, lows []int64, to json.Number) ([]apievent.Item, error) {
 	if len(items) == 0 {
 		return items, nil
 	}
@@ -131,14 +133,14 @@ func withAck(items []rawItem, lows []int64, to json.Number) ([]rawItem, error) {
 		idx[i] = i
 	}
 	sort.SliceStable(idx, func(a, b int) bool { return lows[idx[a]] < lows[idx[b]] })
-	out := make([]rawItem, len(items))
+	out := make([]apievent.Item, len(items))
 	for k, i := range idx {
 		tok := last
 		if k+1 < len(idx) {
 			tok = lows[idx[k+1]] - 1
 		}
 		it := items[i]
-		it.Ack = &ackHandle{Lane: it.Type, Token: strconv.FormatInt(tok, 10)}
+		it.Ack = &apievent.Ack{Lane: it.Type, Token: strconv.FormatInt(tok, 10)}
 		out[k] = it
 	}
 	return out, nil

@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -33,7 +33,7 @@ const (
 // against a core that never replies.
 var pollerRPCDeadline = 5 * time.Second
 
-// ErrBusy is Snapshot's typed sentinel for an exit-9 (conformance.ExitBusy)
+// ErrBusy is Snapshot's typed sentinel for an exit-9 (participant.ExitBusy)
 // reply: the core is momentarily saturated, not actually failing. It
 // advances the backoff ladder like any other poll failure, but the CALLER
 // (the Model, Task 4.5) suppresses the poll-error zone for this outcome
@@ -166,7 +166,7 @@ func (p *SocketPoller) Snapshot(ctx context.Context, since uint64) (StatusReply,
 		p.advanceBackoffLocked()
 		return StatusReply{}, fmt.Errorf("tui: poll: %w", err)
 	}
-	if code == conformance.ExitBusy {
+	if code == participant.ExitBusy {
 		p.advanceBackoffLocked()
 		return StatusReply{}, ErrBusy
 	}

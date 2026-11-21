@@ -2,13 +2,14 @@
 // envelope (spec section 9.3), decoded generically with this module's own
 // structs — this is a SEPARATE Go module and never imports
 // packages/pg-desk. Output side: pg-router's per-record command-query
-// source shape (rawItem in packages/pg-router/internal/query/command.go),
-// mirrored from packages/pg-router-source-pg-connector's wire.go.
+// source shape, the published api/event.Item.
 package main
 
 import (
 	"encoding/json"
 	"io"
+
+	apievent "github.com/phillipgreenii/pg-router/api/event"
 )
 
 // envelope is the subset of the change envelope this adapter consumes. The
@@ -43,35 +44,13 @@ type envRecord struct {
 	Origin  string      `json:"origin"`
 }
 
-// rawItem is pg-router's own per-record command-query source shape. Emit
-// names the event type pg-router mints for the item (pg-router types an event
-// from emit, defaulting to the query's first declared emit, never from Type).
-type rawItem struct {
-	ID       string         `json:"id"`
-	Emit     string         `json:"emit,omitempty"`
-	Type     string         `json:"type"`
-	Title    string         `json:"title"`
-	Metadata map[string]any `json:"metadata"`
-	// Ack is the settlement handle, set only under --deferred-ack.
-	Ack *ackHandle `json:"ack,omitempty"`
-	// At and ExpiresAt are UTC RFC 3339 strings (second precision), set only
-	// when --retry-window is greater than zero; omitted otherwise so the
-	// output without the flag is unchanged.
-	At        string `json:"at,omitempty"`
-	ExpiresAt string `json:"expiresAt,omitempty"`
-}
-
 // writeItems encodes items as one JSON array to stdout. items MUST be a
 // non-nil (possibly empty) slice so zero items marshals as [] not null.
-func writeItems(stdout io.Writer, items []rawItem) error {
-	enc := json.NewEncoder(stdout)
-	enc.SetEscapeHTML(false)
-	return enc.Encode(items)
-}
-
-// ackHandle is the opaque lane and token pg-router keeps with an event and
-// hands back to the settle subcommand (both strings).
-type ackHandle struct {
-	Lane  string `json:"lane"`
-	Token string `json:"token"`
+func writeItems(stdout io.Writer, items []apievent.Item) error {
+	b, err := apievent.EncodeItems(items)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(b)
+	return err
 }

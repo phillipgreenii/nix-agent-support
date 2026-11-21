@@ -13,7 +13,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 // runAdapterProcess runs the test binary as the adapter (adapterRunEnv) with
@@ -51,8 +51,8 @@ func TestProcess_validateFlags(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &r); err != nil || code != 0 || len(r.Problems) != 0 {
 		t.Fatalf("with --skip-pool-dirs: exit=%d problems=%q err=%v, want 0 and none", code, r.Problems, err)
 	}
-	if code, _ = runAdapterProcess(t, []string{"validate", "--bogus"}, req); code != conformance.ExitUsage {
-		t.Fatalf("unknown flag: exit = %d, want %d", code, conformance.ExitUsage)
+	if code, _ = runAdapterProcess(t, []string{"validate", "--bogus"}, req); code != participant.ExitUsage {
+		t.Fatalf("unknown flag: exit = %d, want %d", code, participant.ExitUsage)
 	}
 	if !strings.Contains(helpText, "--skip-pool-dirs") || !strings.Contains(usageLine, "validate") {
 		t.Errorf("--help must document validate and --skip-pool-dirs")

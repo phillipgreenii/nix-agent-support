@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -75,7 +76,7 @@ func startedService(t *testing.T) *Service {
 func startedServiceWith(t *testing.T, bindings Bindings, obs IngestObserver) *Service {
 	t.Helper()
 	return &Service{
-		state:    conformance.Started,
+		state:    participant.Started,
 		q:        newQueue(t),
 		bindings: bindings,
 		obs:      obs,
@@ -90,8 +91,8 @@ func TestIngestEvent_AcceptsAndEnqueues(t *testing.T) {
 	svc := startedService(t)
 	reply, code := serveIngest(t, svc, oneEventRequest)
 
-	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want %d; reply=%v", code, conformance.ExitOK, reply)
+	if code != participant.ExitOK {
+		t.Fatalf("exit = %d, want %d; reply=%v", code, participant.ExitOK, reply)
 	}
 	if err := conformance.Check(IngestReplySchema, reply); err != nil {
 		t.Fatalf("reply failed its own schema (INV-INTF-2): %v", err)
@@ -118,7 +119,7 @@ func TestIngestEvent_AcceptsABatch(t *testing.T) {
 		{"id":"e2","type":"t1"},
 		{"id":"e3","type":"t2"}]}`
 	reply, code := serveIngest(t, svc, req)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if reply["accepted"] != float64(3) {
@@ -139,7 +140,7 @@ func TestIngestEvent_RejectsATypeNoConfiguredBindingDeclares(t *testing.T) {
 	svc := startedServiceWith(t, testBindings(), obs)
 	reply, code := serveIngest(t, svc, `{"schemaVersion":"1","id":"trk-1","events":[{"id":"e1","type":"nobody-declares-this"}]}`)
 
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 for a type no configured binding declares (INV-DISP-3); reply=%v", code, reply)
 	}
 	if err := conformance.Check(IngestReplySchema, reply); err != nil {
@@ -185,16 +186,16 @@ func TestIngestEvent_DedupedEventNotifiesObserver(t *testing.T) {
 	svc := startedServiceWith(t, testBindings(), obs)
 
 	reply, code := serveIngest(t, svc, oneEventRequest)
-	if code != conformance.ExitOK {
-		t.Fatalf("first send: exit = %d, want %d; reply=%v", code, conformance.ExitOK, reply)
+	if code != participant.ExitOK {
+		t.Fatalf("first send: exit = %d, want %d; reply=%v", code, participant.ExitOK, reply)
 	}
 	if len(obs.dedupedTypes) != 0 {
 		t.Fatalf("first (fresh) send must NOT notify OnDeduped: %v", obs.dedupedTypes)
 	}
 
 	reply, code = serveIngest(t, svc, oneEventRequest)
-	if code != conformance.ExitOK {
-		t.Fatalf("duplicate send: exit = %d, want %d (a duplicate is accepted, not an error); reply=%v", code, conformance.ExitOK, reply)
+	if code != participant.ExitOK {
+		t.Fatalf("duplicate send: exit = %d, want %d (a duplicate is accepted, not an error); reply=%v", code, participant.ExitOK, reply)
 	}
 	if reply["accepted"] != float64(1) {
 		t.Fatalf("duplicate send: accepted = %v, want 1", reply["accepted"])
@@ -217,7 +218,7 @@ func TestIngestEvent_RejectedListCarriesBothMalformedAndUnknownType(t *testing.T
 		{"id":"evt-def456","type":"review-abandoned"}]}`
 	reply, code := serveIngest(t, svc, req)
 
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1; reply=%v", code, reply)
 	}
 	if err := conformance.Check(IngestReplySchema, reply); err != nil {
@@ -255,7 +256,7 @@ func TestIngestEvent_AcceptsADeclaredTypeNoActiveBindingServes(t *testing.T) {
 	// Declared by the configuration; inactive this run (no listener registered).
 	svc := startedServiceWith(t, NewBindings(inactiveThisRunType), nil)
 	reply, code := serveIngest(t, svc, req)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0 — a declared type merely inactive this run is accepted (INV-DISP-3); reply=%v", code, reply)
 	}
 	if reply["accepted"] != float64(1) {
@@ -280,7 +281,7 @@ func TestIngestEvent_AcceptsADeclaredTypeNoActiveBindingServes(t *testing.T) {
 	// declares the type, so THIS one is rejected and never enqueued.
 	undeclared := startedServiceWith(t, NewBindings(), nil)
 	reply, code = serveIngest(t, undeclared, req)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 once the configuration declares no binding for the type; reply=%v", code, reply)
 	}
 	if len(undeclared.Queue().DepthByType()) != 0 {
@@ -292,11 +293,11 @@ func TestIngestEvent_AcceptsADeclaredTypeNoActiveBindingServes(t *testing.T) {
 // (INV-EVT-3) — a source must never have to track what it already emitted.
 func TestIngestEvent_DuplicateIsAbsorbedNotRejected(t *testing.T) {
 	svc := startedService(t)
-	if _, code := serveIngest(t, svc, oneEventRequest); code != conformance.ExitOK {
+	if _, code := serveIngest(t, svc, oneEventRequest); code != participant.ExitOK {
 		t.Fatalf("first ingest exit = %d, want 0", code)
 	}
 	reply, code := serveIngest(t, svc, oneEventRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("re-ingest exit = %d, want 0 (dedup is not a rejection); reply=%v", code, reply)
 	}
 	if reply["accepted"] != float64(1) {
@@ -328,7 +329,7 @@ func TestIngestEvent_PartialBatchRejectsOnlyTheMalformed(t *testing.T) {
 		{"id":"badExpiry","type":"t","expiresAt":"15m"}]}`
 	reply, code := serveIngest(t, svc, req)
 
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 when anything was rejected", code)
 	}
 	if err := conformance.Check(IngestReplySchema, reply); err != nil {
@@ -365,7 +366,7 @@ func TestIngestEvent_PartialBatchRejectsOnlyTheMalformed(t *testing.T) {
 func TestIngestEvent_RejectsANonObjectEvent(t *testing.T) {
 	svc := startedService(t)
 	reply, code := serveIngest(t, svc, `{"schemaVersion":"1","id":"trk-1","events":["not-an-object"]}`)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	rejected := reply["rejected"].([]any)
@@ -398,7 +399,7 @@ func TestIngestEvent_EnvelopeFaults(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			svc := startedService(t)
 			reply, code := serveIngest(t, svc, tc.req)
-			if code != conformance.ExitError {
+			if code != participant.ExitError {
 				t.Fatalf("exit = %d, want 1", code)
 			}
 			msg, _ := reply["error"].(string)
@@ -454,10 +455,10 @@ func TestIngestEvent_DurableWriteFailureIsClassifiedLogUnwritable(t *testing.T) 
 	if err != nil {
 		t.Fatalf("queue: %v", err)
 	}
-	svc := &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router"}
+	svc := &Service{state: participant.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router"}
 
 	reply, code := serveIngest(t, svc, oneEventRequest)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 when the durable write failed", code)
 	}
 	if err := conformance.Check(IngestReplySchema, reply); err != nil {
@@ -490,9 +491,9 @@ func TestIngestEvent_UnclassifiedEnqueueFailureKeepsEnqueuePrefix(t *testing.T) 
 	if err != nil {
 		t.Fatalf("queue: %v", err)
 	}
-	svc := &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router"}
+	svc := &Service{state: participant.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router"}
 	reply, code := serveIngest(t, svc, oneEventRequest)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	reason := reply["rejected"].([]any)[0].(map[string]any)["reason"].(string)
@@ -517,11 +518,11 @@ func TestIngestEvent_HardLimitRejectsWithLogFullPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("queue: %v", err)
 	}
-	svc := &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router"}
+	svc := &Service{state: participant.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router"}
 
 	mem.SetLogSize(1000)
 	reply, code := serveIngest(t, svc, oneEventRequest)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 (the contract: the prefix, not a distinct code)", code)
 	}
 	if err := conformance.Check(IngestReplySchema, reply); err != nil {
@@ -553,11 +554,11 @@ func TestIngestEvent_HardLimitRejectsWithLogFullPrefix(t *testing.T) {
 	// Room again: accepted; then, back at the limit, the SAME id is a retained
 	// duplicate and is still a success (Deduped writes nothing).
 	mem.SetLogSize(10)
-	if reply, code := serveIngest(t, svc, oneEventRequest); code != conformance.ExitOK || reply["accepted"] != float64(1) {
+	if reply, code := serveIngest(t, svc, oneEventRequest); code != participant.ExitOK || reply["accepted"] != float64(1) {
 		t.Fatalf("with room: code=%d reply=%v, want accepted", code, reply)
 	}
 	mem.SetLogSize(5000)
-	if reply, code := serveIngest(t, svc, oneEventRequest); code != conformance.ExitOK || reply["accepted"] != float64(1) {
+	if reply, code := serveIngest(t, svc, oneEventRequest); code != participant.ExitOK || reply["accepted"] != float64(1) {
 		t.Fatalf("Deduped re-emit at the hard limit: code=%d reply=%v, want accepted (no write needed)", code, reply)
 	}
 }

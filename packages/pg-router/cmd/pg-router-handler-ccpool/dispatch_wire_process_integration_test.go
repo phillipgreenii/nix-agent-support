@@ -13,7 +13,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 // A dispatch outlives the daemon that spawned it across a restart (ADR 0085), so
@@ -92,8 +92,8 @@ func TestBrokenStdoutPipe_dispatchExitsNormally(t *testing.T) {
 	if ws.Signaled() {
 		t.Fatalf("dispatch was killed by %v: a lost reply must not be a signalled death", ws.Signal())
 	}
-	if ws.ExitStatus() != conformance.ExitError {
-		t.Fatalf("exit status = %d, want %d (ExitError for the malformed request)", ws.ExitStatus(), conformance.ExitError)
+	if ws.ExitStatus() != participant.ExitError {
+		t.Fatalf("exit status = %d, want %d (ExitError for the malformed request)", ws.ExitStatus(), participant.ExitError)
 	}
 }
 
@@ -104,18 +104,18 @@ func TestProcess_DispatchAndValidateOverTheRealWire(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
 	name, cfg := dtest.WorkerRole("", "")
 	code, stdout := runAdapterProcess(t, []string{"dispatch"}, dtest.Request(dtest.DefaultEvent, name, cfg), "PATH=/usr/bin")
-	if code != conformance.ExitBusy {
-		t.Fatalf("dispatch: exit = %d, want %d; stdout %s", code, conformance.ExitBusy, stdout)
+	if code != participant.ExitBusy {
+		t.Fatalf("dispatch: exit = %d, want %d; stdout %s", code, participant.ExitBusy, stdout)
 	}
 	if reason := decodeReply(t, stdout)["reason"]; reason != "pool-unreadable" {
 		t.Errorf("dispatch: reason = %v, want pool-unreadable", reason)
 	}
 	code, stdout = runAdapterProcess(t, []string{"validate", "--skip-pool-dirs"}, dtest.Request("", name, cfg))
-	if code != conformance.ExitOK || len(decodeReply(t, stdout)["problems"].([]any)) != 0 {
+	if code != participant.ExitOK || len(decodeReply(t, stdout)["problems"].([]any)) != 0 {
 		t.Errorf("validate: exit = %d stdout %s, want 0 and no problems", code, stdout)
 	}
 	code, stdout = runAdapterProcess(t, []string{"dispatch"}, dtest.Request(dtest.DefaultEvent, "", nil))
-	if code != conformance.ExitUsage {
-		t.Errorf("dispatch without a role: exit = %d stdout %s, want %d", code, stdout, conformance.ExitUsage)
+	if code != participant.ExitUsage {
+		t.Errorf("dispatch without a role: exit = %d stdout %s, want %d", code, stdout, participant.ExitUsage)
 	}
 }

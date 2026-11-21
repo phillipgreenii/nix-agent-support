@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 )
@@ -326,7 +326,7 @@ func TestInterpretReply_Faults(t *testing.T) {
 		// case is the one that has to move whenever the wire code does, and a
 		// literal here would silently start exercising the usage code instead
 		// (ADR 0042's Consequences).
-		{"busy is never a delivery", conformance.ExitBusy, "", "busy"},
+		{"busy is never a delivery", participant.ExitBusy, "", "busy"},
 		{"no reply body", 1, "", "no reply body"},
 		{"protocol error envelope", 1, `{"schemaVersion":"1","error":"not accepting: core is stopping"}`, "not accepting"},
 		{"reply violates the reply schema", 0, `{"schemaVersion":"1","id":"x","accepted":"one","rejected":[]}`, "not a valid cli.ingest-event-reply"},

@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -29,12 +29,12 @@ func serveLifecycle(name string, stdin io.Reader, stdout io.Writer) int {
 	if !ok {
 		return exit
 	}
-	var req wire.LifecycleRequest
+	var req participant.LifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 	wire.WriteReply(stdout, map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
 		"id":            req.ID,
 		"outcome":       "ok",
 	})
-	return conformance.ExitOK
+	return participant.ExitOK
 }

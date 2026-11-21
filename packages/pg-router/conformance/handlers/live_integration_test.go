@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/conformance/golden"
 )
@@ -201,8 +202,8 @@ func liveDispatchNewShape(t *testing.T, req map[string]any) []byte {
 	if err != nil {
 		t.Fatalf("run dispatch: %v", err)
 	}
-	if code != conformance.ExitOK {
-		t.Fatalf("dispatch exit=%d, want %d; reply=%s", code, conformance.ExitOK, reply)
+	if code != participant.ExitOK {
+		t.Fatalf("dispatch exit=%d, want %d; reply=%s", code, participant.ExitOK, reply)
 	}
 	return reply
 }
@@ -263,7 +264,7 @@ func TestLiveDispatch_negative(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run dispatch: %v", err)
 			}
-			if code == conformance.ExitOK {
+			if code == participant.ExitOK {
 				t.Fatalf("dispatch accepted a request that is malformed (%s); reply=%s", tc.name, stdout)
 			}
 			// The diagnostic is the INTF-HANDLER error reply on stdout
@@ -309,8 +310,8 @@ func liveQuery(t *testing.T, cmdName string) {
 	if err != nil {
 		t.Fatalf("run query: %v", err)
 	}
-	if code != conformance.ExitOK {
-		t.Fatalf("query exit=%d, want %d; reply=%s", code, conformance.ExitOK, reply)
+	if code != participant.ExitOK {
+		t.Fatalf("query exit=%d, want %d; reply=%s", code, participant.ExitOK, reply)
 	}
 	var v any
 	if err := json.Unmarshal(reply, &v); err != nil {

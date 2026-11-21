@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-failsig"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 )
 
 // An unclaimed end carries the failure signature of the dying session, and an
@@ -42,7 +42,7 @@ func (c noCapacityCC) Capacity(context.Context) (ccpool.Capacity, error) {
 // unclaimedOutcome is what one unclaimed end left behind.
 type unclaimedOutcome struct {
 	err    error
-	result report.Result
+	result participant.Report
 	bd     *dtest.ScriptBD
 	raw    string // the event log
 }
@@ -237,7 +237,7 @@ func TestUnclaimedEnd_otherSignaturesKeepTwoStrikes(t *testing.T) {
 			if !dtest.HasUpdate(two.bd, "update zr-d --add-label human") {
 				t.Errorf("strike two must add human; updates=%v", two.bd.Updates)
 			}
-			if len(two.result.Actions) != 1 || two.result.Actions[0].Verb != report.Escalated {
+			if len(two.result.Actions) != 1 || two.result.Actions[0].Verb != participant.Escalated {
 				t.Errorf("strike two reports %+v, want Escalated", two.result)
 			}
 		})

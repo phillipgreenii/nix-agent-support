@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 
+	apievent "github.com/phillipgreenii/pg-router/api/event"
+
 	"github.com/spf13/cobra"
 )
 
@@ -59,7 +61,7 @@ func newSweepCmd() *cobra.Command {
 			listArgs = append(listArgs, "--output", "json")
 			out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(), listArgs, env)
 			if errors.Is(err, errBudgetSkipped) {
-				return writeItems(cmd.OutOrStdout(), []rawItem{})
+				return writeItems(cmd.OutOrStdout(), []apievent.Item{})
 			}
 			if err != nil {
 				return err
@@ -83,9 +85,9 @@ func newSweepCmd() *cobra.Command {
 		// equals the id (present_ids carries no title), and metadata is
 		// exactly {"change": "sweep"} — no other keys [design: section
 		// 6.1].
-		items := make([]rawItem, 0, len(ordered))
+		items := make([]apievent.Item, 0, len(ordered))
 		for _, id := range ordered {
-			items = append(items, rawItem{
+			items = append(items, apievent.Item{
 				ID:       id,
 				Type:     entityType,
 				Title:    id,

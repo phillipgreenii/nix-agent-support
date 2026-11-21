@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -48,8 +49,8 @@ func TestServePreShutdown_answersAtOnceWithNoSweepCalls(t *testing.T) {
 			if elapsed := time.Since(start); elapsed > time.Second {
 				t.Errorf("preShutdown took %v, want well under 1s", elapsed)
 			}
-			if code != conformance.ExitOK {
-				t.Fatalf("exit = %d, want %d", code, conformance.ExitOK)
+			if code != participant.ExitOK {
+				t.Fatalf("exit = %d, want %d", code, participant.ExitOK)
 			}
 			reply := decodeReply(t, stdout.String())
 			if reply["id"] != "d-1" || reply["outcome"] != "ok" {
@@ -69,8 +70,8 @@ func TestServePreShutdown_answersAtOnceWithNoSweepCalls(t *testing.T) {
 func TestServePreShutdown_rejectsMalformedRequest(t *testing.T) {
 	var stdout bytes.Buffer
 	code := servePreShutdown(strings.NewReader(`{"schemaVersion":"1","role":{"name":"worker"}}`), &stdout) // missing id
-	if code != conformance.ExitError || !strings.Contains(stdout.String(), "error") {
-		t.Fatalf("exit = %d, out = %q; want exit %d with an error reply", code, stdout.String(), conformance.ExitError)
+	if code != participant.ExitError || !strings.Contains(stdout.String(), "error") {
+		t.Fatalf("exit = %d, out = %q; want exit %d with an error reply", code, stdout.String(), participant.ExitError)
 	}
 }
 
@@ -83,8 +84,8 @@ func TestServePreShutdown_requestWithoutRoleIsUsageError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var stdout bytes.Buffer
 			code := servePreShutdown(strings.NewReader(body), &stdout)
-			if code != conformance.ExitUsage || !strings.Contains(stdout.String(), "error") {
-				t.Fatalf("exit = %d, out = %q; want exit %d with an error reply", code, stdout.String(), conformance.ExitUsage)
+			if code != participant.ExitUsage || !strings.Contains(stdout.String(), "error") {
+				t.Fatalf("exit = %d, out = %q; want exit %d with an error reply", code, stdout.String(), participant.ExitUsage)
 			}
 		})
 	}

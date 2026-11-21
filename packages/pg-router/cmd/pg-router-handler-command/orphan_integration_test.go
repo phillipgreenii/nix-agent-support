@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
@@ -76,7 +76,7 @@ func TestOrphanedPayloadHoldsTheEventLock(t *testing.T) {
 		return exit, out.String()
 	}
 	exit, reply := redeliver()
-	if exit != conformance.ExitBusy {
+	if exit != participant.ExitBusy {
 		t.Fatalf("redelivery with an orphan alive: exit %d, reply %s; want busy", exit, reply)
 	}
 	if l, err := sessionlock.TryLock(lockDir, "unrelated"); err != nil {
@@ -95,7 +95,7 @@ func TestOrphanedPayloadHoldsTheEventLock(t *testing.T) {
 		quick := request(t, eventWith(map[string]any{"id": "b1"}), "cmdrole", cmdConfig("/bin/sh", "-c", "exit 0"), true)
 		var out bytes.Buffer
 		exit := serveDispatch(context.Background(), strings.NewReader(quick), &out, "", lockedDeps(lockDir))
-		if exit == conformance.ExitOK {
+		if exit == participant.ExitOK {
 			return
 		}
 		if time.Now().After(deadline) {

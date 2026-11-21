@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/x/gitclient"
 )
 
@@ -168,7 +168,7 @@ func TestRun_nudge_notLiveSession_takesPostReadyPath(t *testing.T) {
 			if len(cc.Sent) != 0 {
 				t.Fatalf("a not-live session must not be sent to; Sent=%v", cc.Sent)
 			}
-			if v := verbOf(res); v != report.Unclaimed {
+			if v := verbOf(res); v != participant.Unclaimed {
 				t.Errorf("verb = %q, want Unclaimed", v)
 			}
 			if !dtest.HasUpdate(bd, "update zr-w --status=open --assignee=") {

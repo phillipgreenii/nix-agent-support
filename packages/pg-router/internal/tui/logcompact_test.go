@@ -10,7 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 )
 
@@ -276,7 +276,7 @@ func TestSocketPoller_CompactLog(t *testing.T) {
 	var gotDry []bool
 	startFakeCore(t, socketPath, func(subcommand string, payload json.RawMessage) ([]byte, int) {
 		if subcommand != core.SubcommandLogCompact {
-			return []byte(`{"schemaVersion":"1","error":"unexpected subcommand"}`), conformance.ExitError
+			return []byte(`{"schemaVersion":"1","error":"unexpected subcommand"}`), participant.ExitError
 		}
 		var req struct {
 			DryRun bool `json:"dryRun"`
@@ -284,9 +284,9 @@ func TestSocketPoller_CompactLog(t *testing.T) {
 		_ = json.Unmarshal(payload, &req)
 		gotDry = append(gotDry, req.DryRun)
 		if req.DryRun {
-			return []byte(`{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":900,"bytesAfter":100,"recordsBefore":30,"recordsAfter":3,"eventsKept":1,"eventsDropped":9,"levelsKept":1}`), conformance.ExitOK
+			return []byte(`{"schemaVersion":"1","dryRun":true,"compacted":false,"noProgress":false,"via":"daemon","bytesBefore":900,"bytesAfter":100,"recordsBefore":30,"recordsAfter":3,"eventsKept":1,"eventsDropped":9,"levelsKept":1}`), participant.ExitOK
 		}
-		return []byte(`{"schemaVersion":"1","dryRun":false,"compacted":true,"noProgress":false,"via":"daemon","bytesBefore":900,"bytesAfter":100,"recordsBefore":30,"recordsAfter":3,"eventsKept":1,"eventsDropped":9,"levelsKept":1,"durationMs":4}`), conformance.ExitOK
+		return []byte(`{"schemaVersion":"1","dryRun":false,"compacted":true,"noProgress":false,"via":"daemon","bytesBefore":900,"bytesAfter":100,"recordsBefore":30,"recordsAfter":3,"eventsKept":1,"eventsDropped":9,"levelsKept":1,"durationMs":4}`), participant.ExitOK
 	})
 	writeDiscoveryRecord(t, logDir, socketPath, "tok")
 	p := NewSocketPoller(logDir, core.Ref{})

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
 	"github.com/phillipgreenii/pg-router/internal/handlers/query"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
 
@@ -157,7 +157,7 @@ func TestCommandDispatch_SuccessStderrNotLogged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exit 0 must succeed, got %v", err)
 	}
-	if fmt.Sprintf("%+v", res) != fmt.Sprintf("%+v", report.Result{}) {
+	if fmt.Sprintf("%+v", res) != fmt.Sprintf("%+v", participant.Report{}) {
 		t.Fatalf("success must return an empty Result, got %+v", res)
 	}
 }
@@ -207,13 +207,13 @@ func TestCommandDispatch_ReportsActionsFromStdoutLastLine(t *testing.T) {
 	cases := []struct {
 		name string
 		out  string
-		want []report.Action
+		want []participant.Action
 	}{
 		{
 			"verb and refs", "plan text\n{\"actions\":[{\"verb\":\"review-pr\",\"refs\":[{\"type\":\"bead\",\"id\":\"w1\"}]},{\"verb\":\"resolve-conflict\"}]}\n",
-			[]report.Action{{Verb: "review-pr", Refs: []report.Ref{{Type: "bead", ID: "w1"}}}, {Verb: "resolve-conflict"}},
+			[]participant.Action{{Verb: "review-pr", Refs: []participant.Ref{{Type: "bead", ID: "w1"}}}, {Verb: "resolve-conflict"}},
 		},
-		{"no trailing newline", "{\"actions\":[{\"verb\":\"review-pr\"}]}", []report.Action{{Verb: "review-pr"}}},
+		{"no trailing newline", "{\"actions\":[{\"verb\":\"review-pr\"}]}", []participant.Action{{Verb: "review-pr"}}},
 		{"plain output is no actions", "refresh: no change\nplan: nothing\n", nil},
 		{"empty stdout", "", nil},
 		{"json that is not an actions object", "{\"other\":1}\n", nil},

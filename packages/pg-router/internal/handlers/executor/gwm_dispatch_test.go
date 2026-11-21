@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/handlers/gwm"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/cmdruntest"
@@ -252,7 +252,7 @@ func TestRefusalMapping(t *testing.T) {
 			if tc.not != nil && errors.Is(err, tc.not) {
 				t.Errorf("err = %v must not match %v", err, tc.not)
 			}
-			if tc.unclaims != (len(res.Actions) == 1 && res.Actions[0].Verb == report.Unclaimed) {
+			if tc.unclaims != (len(res.Actions) == 1 && res.Actions[0].Verb == participant.Unclaimed) {
 				t.Errorf("unclaim result = %v, want unclaim=%v", res, tc.unclaims)
 			}
 			ev := h.events(t)

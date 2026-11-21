@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/emit"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -50,16 +50,16 @@ func runPushInject(args []string) int {
 		return exitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "push-inject:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	switch {
 	case fs.NArg() == 0:
 		fmt.Fprintln(os.Stderr, "push-inject: missing event JSON (usage: push-inject [--json] [--socket <path>] [--token <tok>] <json>)")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	case fs.NArg() > 1:
 		fmt.Fprintln(os.Stderr, "push-inject: unexpected argument:", fs.Arg(1))
 		fmt.Fprintln(os.Stderr, "push-inject takes ONE event JSON argument; quote it so the shell keeps it as one word")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 
 	sock, tok := injectedRef(*socket, *token)

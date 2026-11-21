@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/api/status"
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -85,17 +85,17 @@ func (s *Service) noLevels(stdout io.Writer, verb string) bool {
 func (s *Service) handleLevelIngest(stdin io.Reader, stdout io.Writer) int {
 	const verb = SubcommandLevelIngest
 	if s.noLevels(stdout, verb) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		writeBody(stdout, errorReply(verb+": read request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	outcome, reason, aerr := s.levels.IngestJSON(data)
 	if aerr != nil {
 		writeBody(stdout, errorReply(verb+": level accepted but the durable append failed: "+aerr.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	reply := map[string]any{"schemaVersion": schemas.SchemaVersion, "outcome": string(outcome)}
 	if outcome == LevelRejected {
@@ -141,11 +141,11 @@ func LevelEntries(p *LevelProjection) []status.Level {
 func (s *Service) handleLevelList(stdin io.Reader, stdout io.Writer) int {
 	const verb = SubcommandLevelList
 	if s.noLevels(stdout, verb) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req struct{}
 	if !decodeVerb(stdin, stdout, verb, LevelListRequestSchema, &req) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	return writeJSONReply(stdout, verb, map[string]any{"schemaVersion": schemas.SchemaVersion, "levels": LevelEntries(s.levels)})
 }
@@ -153,7 +153,7 @@ func (s *Service) handleLevelList(stdin io.Reader, stdout io.Writer) int {
 func (s *Service) handleLevelSet(stdin io.Reader, stdout io.Writer) int {
 	const verb = SubcommandLevelSet
 	if s.noLevels(stdout, verb) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req struct {
 		Resource     string `json:"resource"`
@@ -163,28 +163,28 @@ func (s *Service) handleLevelSet(stdin io.Reader, stdout io.Writer) int {
 		UntilCleared bool   `json:"until_cleared"`
 	}
 	if !decodeVerb(stdin, stdout, verb, LevelSetRequestSchema, &req) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if (req.ForS == nil) == !req.UntilCleared {
 		writeBody(stdout, errorReply(verb+": exactly one of for_s and until_cleared is required"))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if err := s.levels.ValidateLevel(req.Resource, req.Level); err != nil {
 		writeBody(stdout, errorReply(verb+": "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var expires time.Time
 	if req.ForS != nil {
 		d := time.Duration(*req.ForS) * time.Second
 		if d > MaxOverride {
 			writeBody(stdout, errorReply(verb+": override capped at 24h; use --until-cleared"))
-			return conformance.ExitError
+			return participant.ExitError
 		}
 		expires = s.levels.cfg.Now().Add(d)
 	}
 	if err := s.levels.SetOverride(req.Resource, req.Level, req.Owner, expires); err != nil {
 		writeBody(stdout, errorReply(verb+": "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	reply := map[string]any{"schemaVersion": schemas.SchemaVersion, "resource": req.Resource, "level": req.Level, "until_cleared": req.UntilCleared}
 	if !req.UntilCleared {
@@ -196,31 +196,31 @@ func (s *Service) handleLevelSet(stdin io.Reader, stdout io.Writer) int {
 func (s *Service) handleLevelClear(stdin io.Reader, stdout io.Writer) int {
 	const verb = SubcommandLevelClear
 	if s.noLevels(stdout, verb) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req struct {
 		Resource string `json:"resource"`
 		All      bool   `json:"all"`
 	}
 	if !decodeVerb(stdin, stdout, verb, LevelClearRequestSchema, &req) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if (req.Resource == "") == !req.All {
 		writeBody(stdout, errorReply(verb+": exactly one of resource and all is required"))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	targets := s.levels.OverrideResources()
 	if !req.All {
 		if _, ok := s.levels.cfg.Registry[req.Resource]; !ok {
 			writeBody(stdout, errorReply(verb+": unknown resource "+req.Resource))
-			return conformance.ExitError
+			return participant.ExitError
 		}
 		targets = []string{req.Resource}
 	}
 	cleared, err := s.levels.ClearOverrides(targets)
 	if err != nil {
 		writeBody(stdout, errorReply(verb+": "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if cleared == nil {
 		cleared = []string{}
@@ -232,13 +232,13 @@ func (s *Service) handleLevelRefresh(ctx context.Context, stdin io.Reader, stdou
 	const verb = SubcommandLevelRefresh
 	if s.levelRefresher == nil {
 		writeBody(stdout, errorReply(verb+": level refresh is not available on this core"))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req struct {
 		Resources []string `json:"resources"`
 	}
 	if !decodeVerb(stdin, stdout, verb, LevelRefreshRequestSchema, &req) {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	results := s.levelRefresher.RefreshLevels(ctx, req.Resources)
 	rows := make([]map[string]any, 0, len(results))

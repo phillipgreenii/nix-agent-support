@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 // fakeCore listens on a unix socket in a short path (macOS limits socket paths
@@ -52,7 +52,7 @@ func TestRunRegister_relaysTheCoresReplyAndExitCode(t *testing.T) {
 	out := captureStdout(t, func() {
 		code = run([]string{"register", "--socket", sock, "--token", "tok", "--id", "ccpool-1", "--self", "degraded"})
 	})
-	if code != conformance.ExitOK || out != `{"registered":true}` {
+	if code != participant.ExitOK || out != `{"registered":true}` {
 		t.Fatalf("exit = %d, stdout = %q", code, out)
 	}
 	req := <-seen
@@ -66,19 +66,19 @@ func TestRunRegister_relaysTheCoresReplyAndExitCode(t *testing.T) {
 }
 
 func TestRunRegister_usageAndNoCoreErrors(t *testing.T) {
-	if got := run([]string{"register"}); got != conformance.ExitUsage {
-		t.Errorf("register without --id: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run([]string{"register"}); got != participant.ExitUsage {
+		t.Errorf("register without --id: exit %d, want %d", got, participant.ExitUsage)
 	}
-	if got := run([]string{"register", "--id", "x", "stray"}); got != conformance.ExitUsage {
-		t.Errorf("register with an argument: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run([]string{"register", "--id", "x", "stray"}); got != participant.ExitUsage {
+		t.Errorf("register with an argument: exit %d, want %d", got, participant.ExitUsage)
 	}
-	if got := run([]string{"register", "--bogus"}); got != conformance.ExitUsage {
-		t.Errorf("register with an unknown flag: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run([]string{"register", "--bogus"}); got != participant.ExitUsage {
+		t.Errorf("register with an unknown flag: exit %d, want %d", got, participant.ExitUsage)
 	}
 	t.Setenv("PG_ROUTER_SOCKET", "")
 	t.Setenv("PG_ROUTER_TOKEN", "")
-	if got := run([]string{"register", "--id", "x"}); got != conformance.ExitError {
-		t.Errorf("register with no core socket: exit %d, want %d", got, conformance.ExitError)
+	if got := run([]string{"register", "--id", "x"}); got != participant.ExitError {
+		t.Errorf("register with no core socket: exit %d, want %d", got, participant.ExitError)
 	}
 }
 
@@ -92,7 +92,7 @@ func TestRunSelfStatus_relaysStdinToTheCore(t *testing.T) {
 	out := captureStdout(t, func() {
 		code = run([]string{"self-status", "--socket", sock, "--token", "tok"})
 	})
-	if code != conformance.ExitOK || out != `{"ok":true}` {
+	if code != participant.ExitOK || out != `{"ok":true}` {
 		t.Fatalf("exit = %d, stdout = %q", code, out)
 	}
 	req := <-seen
@@ -103,13 +103,13 @@ func TestRunSelfStatus_relaysStdinToTheCore(t *testing.T) {
 }
 
 func TestRunSelfStatus_usageAndNoCoreErrors(t *testing.T) {
-	if got := run([]string{"self-status", "stray"}); got != conformance.ExitUsage {
-		t.Errorf("self-status with an argument: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run([]string{"self-status", "stray"}); got != participant.ExitUsage {
+		t.Errorf("self-status with an argument: exit %d, want %d", got, participant.ExitUsage)
 	}
 	t.Setenv("PG_ROUTER_SOCKET", "")
 	t.Setenv("PG_ROUTER_TOKEN", "")
-	if got := run([]string{"self-status"}); got != conformance.ExitError {
-		t.Errorf("self-status with no core socket: exit %d, want %d", got, conformance.ExitError)
+	if got := run([]string{"self-status"}); got != participant.ExitError {
+		t.Errorf("self-status with no core socket: exit %d, want %d", got, participant.ExitError)
 	}
 	if !strings.Contains(helpText, "register") || !strings.Contains(helpText, "self-status") {
 		t.Errorf("help must list register and self-status")

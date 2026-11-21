@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
@@ -176,21 +176,21 @@ func (w wiring) runOriginTo(args []string, stdout, stderr io.Writer) int {
 	// flag stops at the first non-flag, so the verb comes first: origin <verb> [flags] [key].
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "origin: a verb is required (status|ignore|unignore)")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	verb, rest := args[0], args[1:]
 	if verb == "-h" || verb == "--help" || verb == "help" {
 		fmt.Fprint(stdout, originHelp)
-		return conformance.ExitOK
+		return participant.ExitOK
 	}
 	if err := fs.Parse(rest); err != nil {
 		fmt.Fprintln(stderr, "origin:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	cfg, err := rolefile.LoadConfig(*cfgPath)
 	if err != nil {
 		fmt.Fprintln(stderr, "origin:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	p := originprobe.New(cfg.OriginProbe)
 
@@ -198,26 +198,26 @@ func (w wiring) runOriginTo(args []string, stdout, stderr io.Writer) int {
 	case "status":
 		if fs.NArg() > 0 {
 			fmt.Fprintln(stderr, "origin status: unexpected argument:", fs.Arg(0))
-			return conformance.ExitUsage
+			return participant.ExitUsage
 		}
 		if err := p.WriteStatus(stdout); err != nil {
 			fmt.Fprintln(stderr, "origin status:", err)
-			return conformance.ExitError
+			return participant.ExitError
 		}
 		if err := writeGuardStatus(stdout, cfg, w.newGuardCheck(cfg), roleFiles); err != nil {
 			fmt.Fprintln(stderr, "origin status:", err)
-			return conformance.ExitError
+			return participant.ExitError
 		}
-		return conformance.ExitOK
+		return participant.ExitOK
 	case "ignore", "unignore":
 		if fs.NArg() != 1 {
 			fmt.Fprintf(stderr, "origin %s: exactly one <key> is required\n", verb)
-			return conformance.ExitUsage
+			return participant.ExitUsage
 		}
 		key := fs.Arg(0)
 		if !watched(p, key) {
 			fmt.Fprintf(stderr, "origin %s: %q is not a watched origin (see: origin status)\n", verb, key)
-			return conformance.ExitUsage
+			return participant.ExitUsage
 		}
 		if verb == "ignore" {
 			err = p.Ignore(key)
@@ -226,13 +226,13 @@ func (w wiring) runOriginTo(args []string, stdout, stderr io.Writer) int {
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "origin %s: %v\n", verb, err)
-			return conformance.ExitError
+			return participant.ExitError
 		}
 		fmt.Fprintf(stdout, "%s: %s\n", verb, key)
-		return conformance.ExitOK
+		return participant.ExitOK
 	default:
 		fmt.Fprintf(stderr, "origin: unknown verb %q (want status|ignore|unignore)\n", verb)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 }
 

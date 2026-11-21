@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 // Kind is the interface a registered participant speaks (interfaces.md's five
@@ -75,7 +75,7 @@ func ParseKind(s string) (Kind, error) {
 type Registration struct {
 	ID    string
 	Kind  Kind
-	State conformance.Lifecycle
+	State participant.Lifecycle
 	Self  SelfStatus
 	// UnavailableReason says why Self is SelfUnavailable when core itself marked
 	// the participant so (SetUnavailable: a failed startup validate, docket
@@ -156,7 +156,7 @@ func (r *Registry) Register(id string, kind Kind, callback string, selfStatusCal
 	reg := &Registration{
 		ID:                 id,
 		Kind:               kind,
-		State:              conformance.Starting,
+		State:              participant.Starting,
 		Self:               SelfHealthy,
 		Callback:           callback,
 		SelfStatusCallback: selfStatusCallback,
@@ -201,7 +201,7 @@ func (r *Registry) Deregister(id string) bool {
 
 // SetLifecycle records a participant's lifecycle transition (the signals
 // interfaces.md's state diagram declares).
-func (r *Registry) SetLifecycle(id string, state conformance.Lifecycle) error {
+func (r *Registry) SetLifecycle(id string, state participant.Lifecycle) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	reg, ok := r.byID[id]
@@ -310,5 +310,5 @@ func (r *Registry) Len() int {
 // quality, not a refusal of work.
 func (r *Registry) Available(id string) bool {
 	reg, ok := r.Get(id)
-	return ok && reg.State == conformance.Started && reg.Self != SelfUnavailable
+	return ok && reg.State == participant.Started && reg.Self != SelfUnavailable
 }

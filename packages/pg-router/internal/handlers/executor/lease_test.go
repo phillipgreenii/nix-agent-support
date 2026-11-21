@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/budget"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/sessionlock"
 	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
 	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
@@ -323,7 +323,7 @@ func TestAbsorb_usesLaunchedAtAsWatchdogStart(t *testing.T) {
 			if stopped != tc.wantStop {
 				t.Errorf("budget hard stop = %v, want %v (err=%v)", stopped, tc.wantStop, err)
 			}
-			if tc.wantStop && verbOf(res) != report.Unclaimed {
+			if tc.wantStop && verbOf(res) != participant.Unclaimed {
 				t.Errorf("hard stop must report Unclaimed, got %q", verbOf(res))
 			}
 		})
@@ -343,7 +343,7 @@ func timeBudgetDispatch(cfg config.Config) DispatchContext {
 // with a LockDir so the lease handshake takes the real flock. beforeWait runs at
 // the wait's first bead read: the SECOND read, since the absorb decision reads
 // the bead first.
-func absorbTurn(t *testing.T, lockDir string, cc *dtest.FakeCC, beforeWait func()) (report.Result, error) {
+func absorbTurn(t *testing.T, lockDir string, cc *dtest.FakeCC, beforeWait func()) (participant.Report, error) {
 	t.Helper()
 	cfg := leaseCfg()
 	clk := &dtest.ManualClock{T: time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)}

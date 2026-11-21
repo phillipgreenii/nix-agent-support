@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	apistatus "github.com/phillipgreenii/pg-router/api/status"
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -64,11 +64,11 @@ func runDoctor(args []string) int {
 		return exitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "doctor:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "doctor: unexpected argument:", fs.Arg(0))
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if *clauses {
 		return runDoctorClauses(os.Stdout)

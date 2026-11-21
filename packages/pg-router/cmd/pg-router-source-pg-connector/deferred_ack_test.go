@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	apievent "github.com/phillipgreenii/pg-router/api/event"
 )
 
 // ownedBody is a changes answer of one backend that owns its changes: rows
@@ -117,7 +119,7 @@ func TestChangesDeferredAck_NonEmptyPollDoesNotAcknowledge(t *testing.T) {
 	}
 }
 
-func deferredIDs(t *testing.T, body string, skew int) []rawItem {
+func deferredIDs(t *testing.T, body string, skew int) []apievent.Item {
 	t.Helper()
 	pinEmitTime(t)
 	emitSkew = 0

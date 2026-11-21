@@ -22,7 +22,7 @@ import (
 )
 
 // coreStateStarted is the wire value of StatusReply.Core.State
-// (conformance.Started.String(), internal/core/core.go's composeStatusReply)
+// (participant.Started.String(), internal/core/core.go's composeStatusReply)
 // that keeps the TUI on screenMain. Any other value -- draining, stopping,
 // crashing, ... -- means the core is not fully serving, and the TUI shows
 // screenQuiescing instead: a normal lifecycle phase (INV-LIFE-2), never a

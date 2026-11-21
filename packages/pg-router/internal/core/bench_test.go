@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 )
@@ -28,7 +28,7 @@ func BenchmarkServeStatus(b *testing.B) {
 		b.Fatalf("eventqueue.New: %v", err)
 	}
 	svc := &Service{
-		state:        conformance.Started,
+		state:        participant.Started,
 		q:            q,
 		bindings:     testBindings(),
 		reg:          NewRegistry(nil),
@@ -59,7 +59,7 @@ func BenchmarkServeStatus_DefaultWindow(b *testing.B) {
 		b.Fatalf("eventqueue.New: %v", err)
 	}
 	svc := &Service{
-		state:        conformance.Started,
+		state:        participant.Started,
 		q:            q,
 		bindings:     testBindings(),
 		reg:          NewRegistry(nil),

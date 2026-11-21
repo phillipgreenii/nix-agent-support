@@ -35,7 +35,7 @@ type roleObject struct {
 }
 
 // errNoRole is returned for a request without a usable role object; the
-// callers map it to conformance.ExitUsage.
+// callers map it to participant.ExitUsage.
 var errNoRole = errors.New("request has no usable role object: want {\"role\": {\"name\": \"<role>\", \"config\": {...}}}")
 
 // parseRole extracts the role object from a request body. A missing config

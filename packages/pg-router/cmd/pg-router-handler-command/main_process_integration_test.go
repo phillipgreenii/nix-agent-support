@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 // adapter starts the test binary as the adapter with a request on stdin.
@@ -39,10 +39,10 @@ func TestProcess_DispatchAndValidateOverTheRealWire(t *testing.T) {
 		req       string
 		wantExit  int
 	}{
-		{"dispatch ok", "dispatch", request(t, ev, "r", cmdConfig("/bin/sh", "-c", ":"), true), conformance.ExitOK},
-		{"dispatch busy", "dispatch", request(t, ev, "r", cmdConfig("/bin/sh", "-c", "exit 9"), true), conformance.ExitBusy},
-		{"validate", "validate", request(t, nil, "r", cmdConfig("/bin/sh", "-c", ":"), true), conformance.ExitOK},
-		{"postStartup", "postStartup", request(t, nil, "r", nil, true), conformance.ExitOK},
+		{"dispatch ok", "dispatch", request(t, ev, "r", cmdConfig("/bin/sh", "-c", ":"), true), participant.ExitOK},
+		{"dispatch busy", "dispatch", request(t, ev, "r", cmdConfig("/bin/sh", "-c", "exit 9"), true), participant.ExitBusy},
+		{"validate", "validate", request(t, nil, "r", cmdConfig("/bin/sh", "-c", ":"), true), participant.ExitOK},
+		{"postStartup", "postStartup", request(t, nil, "r", nil, true), participant.ExitOK},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -87,8 +87,8 @@ func TestProcess_TermKillsThePayloadGroup(t *testing.T) {
 	defer cancel()
 	select {
 	case err := <-waited:
-		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != conformance.ExitError {
-			t.Fatalf("adapter ended with %v, want exit %d; stdout %s", err, conformance.ExitError, out)
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != participant.ExitError {
+			t.Fatalf("adapter ended with %v, want exit %d; stdout %s", err, participant.ExitError, out)
 		}
 	case <-ctx.Done():
 		t.Fatal("the adapter did not exit after TERM")

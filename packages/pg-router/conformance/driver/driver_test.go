@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/conformance/golden"
 )
@@ -178,7 +179,7 @@ func TestRun_ContextCanceled(t *testing.T) {
 	}
 }
 
-// fakeParticipant is a minimal conformance.Participant double used only to
+// fakeParticipant is a minimal participant.Participant double used only to
 // prove Run's invoking checks actually call through a live Target and
 // validate the reply that comes back — this task does not wire a real
 // core.Service (out of scope; Task 3.13 Files/Contract), just the driver
@@ -221,7 +222,7 @@ func validQueryReply(t *testing.T) []byte {
 }
 
 func TestRun_InvokingMonRead_Pass(t *testing.T) {
-	target := Target{MonRead: fakeParticipant{reply: validMonReadReply(t), code: conformance.ExitOK}}
+	target := Target{MonRead: fakeParticipant{reply: validMonReadReply(t), code: participant.ExitOK}}
 	r := findResult(t, Run(context.Background(), target), "invoking/mon.read")
 	if r.Skipped || r.Err != nil {
 		t.Fatalf("invoking/mon.read = %+v, want a clean pass", r)
@@ -229,7 +230,7 @@ func TestRun_InvokingMonRead_Pass(t *testing.T) {
 }
 
 func TestRun_InvokingMonRead_BadExitCode(t *testing.T) {
-	target := Target{MonRead: fakeParticipant{reply: validMonReadReply(t), code: conformance.ExitError}}
+	target := Target{MonRead: fakeParticipant{reply: validMonReadReply(t), code: participant.ExitError}}
 	r := findResult(t, Run(context.Background(), target), "invoking/mon.read")
 	if r.Err == nil {
 		t.Fatal("expected invoking/mon.read to fail on a non-OK exit code")
@@ -237,7 +238,7 @@ func TestRun_InvokingMonRead_BadExitCode(t *testing.T) {
 }
 
 func TestRun_InvokingMonRead_MalformedReply(t *testing.T) {
-	target := Target{MonRead: fakeParticipant{reply: []byte("{ not json"), code: conformance.ExitOK}}
+	target := Target{MonRead: fakeParticipant{reply: []byte("{ not json"), code: participant.ExitOK}}
 	r := findResult(t, Run(context.Background(), target), "invoking/mon.read")
 	if r.Err == nil {
 		t.Fatal("expected invoking/mon.read to fail on a malformed reply")
@@ -245,7 +246,7 @@ func TestRun_InvokingMonRead_MalformedReply(t *testing.T) {
 }
 
 func TestRun_InvokingMonRead_SchemaViolation(t *testing.T) {
-	target := Target{MonRead: fakeParticipant{reply: []byte(`{"schemaVersion":"1","id":"m-1"}`), code: conformance.ExitOK}}
+	target := Target{MonRead: fakeParticipant{reply: []byte(`{"schemaVersion":"1","id":"m-1"}`), code: participant.ExitOK}}
 	r := findResult(t, Run(context.Background(), target), "invoking/mon.read")
 	if r.Err == nil {
 		t.Fatal("expected invoking/mon.read to fail a reply missing required values")
@@ -253,7 +254,7 @@ func TestRun_InvokingMonRead_SchemaViolation(t *testing.T) {
 }
 
 func TestRun_InvokingQuery_Pass(t *testing.T) {
-	target := Target{Query: fakeParticipant{reply: validQueryReply(t), code: conformance.ExitOK}}
+	target := Target{Query: fakeParticipant{reply: validQueryReply(t), code: participant.ExitOK}}
 	r := findResult(t, Run(context.Background(), target), "invoking/query")
 	if r.Skipped || r.Err != nil {
 		t.Fatalf("invoking/query = %+v, want a clean pass", r)
@@ -261,7 +262,7 @@ func TestRun_InvokingQuery_Pass(t *testing.T) {
 }
 
 func TestRun_InvokingQuery_BadExitCode(t *testing.T) {
-	target := Target{Query: fakeParticipant{reply: validQueryReply(t), code: conformance.ExitError}}
+	target := Target{Query: fakeParticipant{reply: validQueryReply(t), code: participant.ExitError}}
 	r := findResult(t, Run(context.Background(), target), "invoking/query")
 	if r.Err == nil {
 		t.Fatal("expected invoking/query to fail on a non-OK exit code")
@@ -269,7 +270,7 @@ func TestRun_InvokingQuery_BadExitCode(t *testing.T) {
 }
 
 func TestRun_InvokingQuery_MalformedReply(t *testing.T) {
-	target := Target{Query: fakeParticipant{reply: []byte("{ not json"), code: conformance.ExitOK}}
+	target := Target{Query: fakeParticipant{reply: []byte("{ not json"), code: participant.ExitOK}}
 	r := findResult(t, Run(context.Background(), target), "invoking/query")
 	if r.Err == nil {
 		t.Fatal("expected invoking/query to fail on a malformed reply")
@@ -277,7 +278,7 @@ func TestRun_InvokingQuery_MalformedReply(t *testing.T) {
 }
 
 func TestRun_InvokingQuery_SchemaViolation(t *testing.T) {
-	target := Target{Query: fakeParticipant{reply: []byte(`{"schemaVersion":"1","id":"q-1"}`), code: conformance.ExitOK}}
+	target := Target{Query: fakeParticipant{reply: []byte(`{"schemaVersion":"1","id":"q-1"}`), code: participant.ExitOK}}
 	r := findResult(t, Run(context.Background(), target), "invoking/query")
 	if r.Err == nil {
 		t.Fatal("expected invoking/query to fail a reply naming neither branch")
@@ -296,7 +297,7 @@ type fakeCommandParticipant struct {
 func (f fakeCommandParticipant) Run(ctx context.Context) (int, error) { return f.code, f.err }
 
 func TestRun_InvokingCommand_Pass(t *testing.T) {
-	target := Target{Command: fakeCommandParticipant{code: conformance.ExitOK}}
+	target := Target{Command: fakeCommandParticipant{code: participant.ExitOK}}
 	r := findResult(t, Run(context.Background(), target), "invoking/command")
 	if r.Skipped || r.Err != nil || r.Busy {
 		t.Fatalf("invoking/command = %+v, want a clean pass", r)
@@ -304,7 +305,7 @@ func TestRun_InvokingCommand_Pass(t *testing.T) {
 }
 
 func TestRun_InvokingCommand_Busy(t *testing.T) {
-	target := Target{Command: fakeCommandParticipant{code: conformance.ExitBusy}}
+	target := Target{Command: fakeCommandParticipant{code: participant.ExitBusy}}
 	r := findResult(t, Run(context.Background(), target), "invoking/command")
 	if r.Err != nil || r.Skipped || !r.Busy {
 		t.Fatalf("invoking/command = %+v, want Busy=true, no error, not skipped", r)
@@ -314,7 +315,7 @@ func TestRun_InvokingCommand_Busy(t *testing.T) {
 func TestRun_InvokingCommand_PlainFailure(t *testing.T) {
 	// A plain non-zero exit outside the reserved/collision set (0, 2, 3, 9) —
 	// e.g. exit 1, ExitError — is a genuine conformance failure.
-	target := Target{Command: fakeCommandParticipant{code: conformance.ExitError}}
+	target := Target{Command: fakeCommandParticipant{code: participant.ExitError}}
 	r := findResult(t, Run(context.Background(), target), "invoking/command")
 	if r.Err == nil || r.Busy {
 		t.Fatalf("invoking/command = %+v, want a plain Err, Busy=false", r)
@@ -325,7 +326,7 @@ func TestRun_InvokingCommand_ExitThreeIsNoLongerCoreReserved(t *testing.T) {
 	// Exit 3 is the shared Unavailable code (ADR 0127), no longer a core-reserved
 	// pre-flight signal: it is an ordinary nonzero exit, a plain failure that is
 	// not described as reserved.
-	target := Target{Command: fakeCommandParticipant{code: conformance.ExitUnavailable}}
+	target := Target{Command: fakeCommandParticipant{code: participant.ExitUnavailable}}
 	r := findResult(t, Run(context.Background(), target), "invoking/command")
 	if r.Err == nil || r.Busy {
 		t.Fatalf("invoking/command = %+v, want a plain Err, Busy=false", r)
@@ -336,10 +337,10 @@ func TestRun_InvokingCommand_ExitThreeIsNoLongerCoreReserved(t *testing.T) {
 }
 
 func TestRun_InvokingCommand_UsageViolation(t *testing.T) {
-	// Exit 2 (conformance.ExitUsage) is flagged here too, but for the
+	// Exit 2 (participant.ExitUsage) is flagged here too, but for the
 	// project-specific pg-connector-collision reason (Task pg2-2j5ac.23.3
 	// Binding decisions #1) — not a blanket DEC-WIRE-1 prohibition.
-	target := Target{Command: fakeCommandParticipant{code: conformance.ExitUsage}}
+	target := Target{Command: fakeCommandParticipant{code: participant.ExitUsage}}
 	r := findResult(t, Run(context.Background(), target), "invoking/command")
 	if r.Err == nil {
 		t.Fatal("expected invoking/command to flag exit 2 (usage) as a violation")
@@ -353,7 +354,7 @@ func TestRun_InvokingCommand_SkippedWhenNil(t *testing.T) {
 	}
 }
 
-// fakeStoreParticipant is a minimal in-memory conformance.Participant double
+// fakeStoreParticipant is a minimal in-memory participant.Participant double
 // exercising get/put/delete (Task 6.7's SubcommandGet/Put/Delete) the same
 // way internal/core.Service's real handleGet/handlePut/handleDelete do,
 // without pulling in internal/core — this driver package deliberately stays
@@ -395,7 +396,7 @@ type fakeStoreParticipant struct {
 func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req struct {
 		ID    string `json:"id"`
@@ -404,7 +405,7 @@ func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout 
 		Value string `json:"value"`
 	}
 	if err := json.Unmarshal(data, &req); err != nil {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if f.data == nil {
 		f.data = map[string]string{}
@@ -418,16 +419,16 @@ func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout 
 	if failing {
 		switch f.failMode {
 		case "exit":
-			return conformance.ExitError
+			return participant.ExitError
 		case "badjson":
 			_, _ = stdout.Write([]byte("{ not json"))
-			return conformance.ExitOK
+			return participant.ExitOK
 		case "schema":
 			// A wrong-typed `ok` violates store.reply.schema.json
 			// (properties.ok: {"type":"boolean"}).
 			b, _ := json.Marshal(map[string]any{"schemaVersion": "1", "id": req.ID, "ok": "yes"})
 			_, _ = stdout.Write(b)
-			return conformance.ExitOK
+			return participant.ExitOK
 		}
 	}
 
@@ -461,14 +462,14 @@ func (f *fakeStoreParticipant) Serve(subcommand string, stdin io.Reader, stdout 
 		delete(f.data, req.Key)
 		reply["ok"] = !failing || f.failMode != "notok"
 	default:
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	b, err := json.Marshal(reply)
 	if err != nil {
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	_, _ = stdout.Write(b)
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // findResult locates the one result named name, failing the test outright if

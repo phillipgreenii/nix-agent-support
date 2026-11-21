@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	apievent "github.com/phillipgreenii/pg-router/api/event"
+)
 
 func TestList_NoFilters_PrintsEveryEntity(t *testing.T) {
 	withFactory(t, "list_full_ok")
@@ -104,7 +108,7 @@ func TestList_BackendNotRegistered_ErrorsRatherThanNoOp(t *testing.T) {
 }
 
 // listItemIDs returns the ids of items in order.
-func listItemIDs(items []rawItem) []string {
+func listItemIDs(items []apievent.Item) []string {
 	ids := make([]string, 0, len(items))
 	for _, it := range items {
 		ids = append(ids, it.ID)

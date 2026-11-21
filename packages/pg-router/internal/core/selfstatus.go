@@ -5,7 +5,7 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -61,11 +61,11 @@ func (s *Service) handleSelfStatus(stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		writeBody(stdout, errorReply("self-status: read request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if err := conformance.CheckBytes(SelfStatusRequestSchema, data); err != nil {
+	if err := schemas.CheckBytes(SelfStatusRequestSchema, data); err != nil {
 		writeBody(stdout, errorReply("self-status: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req selfStatusRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -73,18 +73,18 @@ func (s *Service) handleSelfStatus(stdin io.Reader, stdout io.Writer) int {
 		// decodes as a well-typed object with these fields. Kept for the same
 		// report-don't-guess discipline the rest of this package follows.
 		writeBody(stdout, errorReply("self-status: malformed request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if err := s.reg.SetSelfStatus(req.ParticipantID, SelfStatus(req.Self)); err != nil {
 		slog.Warn("core: self-status push rejected", "trackingId", req.ID, "participantId", req.ParticipantID, "err", err)
 		writeBody(stdout, errorReply("self-status: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	body, err := json.Marshal(selfStatusReply{SchemaVersion: schemas.SchemaVersion, ID: req.ID, Accepted: true})
 	if err != nil { // unreachable: the reply holds only strings and a bool
 		writeBody(stdout, errorReply("self-status: marshal reply: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	writeBody(stdout, body)
-	return conformance.ExitOK
+	return participant.ExitOK
 }

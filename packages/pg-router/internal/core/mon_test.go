@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/metrics"
 )
@@ -19,7 +20,7 @@ import (
 func startedServiceWithMonitoring(t *testing.T, metricsReader MetricsReader, monitorSubsets MonitorSubsetResolver) *Service {
 	t.Helper()
 	return &Service{
-		state:          conformance.Started,
+		state:          participant.Started,
 		q:              newQueue(t),
 		bindings:       testBindings(),
 		reg:            NewRegistry(nil),
@@ -80,8 +81,8 @@ func TestServeMonRead(t *testing.T) {
 	request := `{"schemaVersion":"1","id":"m-1","metrics":["` +
 		metrics.MetricUnconsumedExpired + `","` + metrics.MetricQueueDepth + `"]}`
 	reply, code := serveMonRead(t, svc, request)
-	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want %d; reply=%v", code, conformance.ExitOK, reply)
+	if code != participant.ExitOK {
+		t.Fatalf("exit = %d, want %d; reply=%v", code, participant.ExitOK, reply)
 	}
 	if err := conformance.Check(MonReadReplySchema, reply); err != nil {
 		t.Fatalf("reply failed its own schema (INV-INTF-2): %v", err)
@@ -114,8 +115,8 @@ func TestServeMonRead(t *testing.T) {
 func TestServeMonRead_UnregisteredIDRejected(t *testing.T) {
 	svc := startedServiceWithMonitoring(t, nil, nil)
 	_, code := serveMonRead(t, svc, `{"schemaVersion":"1","id":"never-registered","metrics":[]}`)
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d for an id with no registration", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d for an id with no registration", code, participant.ExitError)
 	}
 }
 
@@ -127,8 +128,8 @@ func TestServeMonRead_WrongKindRejected(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	_, code := serveMonRead(t, svc, `{"schemaVersion":"1","id":"src-1","metrics":[]}`)
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d for a non-monitor registration", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d for a non-monitor registration", code, participant.ExitError)
 	}
 }
 
@@ -141,8 +142,8 @@ func TestServeMonRead_NilMetricsReaderIsEmptyNotError(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	reply, code := serveMonRead(t, svc, `{"schemaVersion":"1","id":"m-2","metrics":["`+metrics.MetricQueueDepth+`"]}`)
-	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want %d; reply=%v", code, conformance.ExitOK, reply)
+	if code != participant.ExitOK {
+		t.Fatalf("exit = %d, want %d; reply=%v", code, participant.ExitOK, reply)
 	}
 	values, ok := reply["values"].([]any)
 	if !ok || len(values) != 0 {

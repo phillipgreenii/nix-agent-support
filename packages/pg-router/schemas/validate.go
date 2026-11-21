@@ -23,6 +23,7 @@
 package schemas
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"regexp"
@@ -326,4 +327,57 @@ const LevelAnswerSchema = "source.level-answer"
 // validation path.
 func ValidateLevelAnswer(data []byte) error {
 	return ValidateBytes(LevelAnswerSchema, data)
+}
+
+// Check validates a decoded JSON message against its named schema AND the
+// cross-field rules a structural schema cannot express (a store.request carries
+// a value if and only if its op is put). It is the single entry point the core,
+// the adapters and a downstream implementer's conformance run all call.
+func Check(messageType string, value any) error {
+	if err := Validate(messageType, value); err != nil {
+		return err
+	}
+	if rule := crossFieldRules[messageType]; rule != nil {
+		return rule(value)
+	}
+	return nil
+}
+
+// CheckBytes decodes raw JSON then runs Check, covering the malformed and
+// non-object path too.
+func CheckBytes(messageType string, data []byte) error {
+	if err := ValidateBytes(messageType, data); err != nil {
+		return err
+	}
+	if rule := crossFieldRules[messageType]; rule != nil {
+		var v any
+		if err := json.Unmarshal(data, &v); err != nil {
+			return err
+		}
+		return rule(v)
+	}
+	return nil
+}
+
+// crossFieldRules holds the per-message rules the JSON Schema subset cannot
+// state (conditional presence, dependent fields).
+var crossFieldRules = map[string]func(any) error{
+	"store.request": storeRequestRule,
+}
+
+// storeRequestRule enforces "value required IFF op==put".
+func storeRequestRule(v any) error {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%w: store.request is not an object", ErrValidation)
+	}
+	op, _ := obj["op"].(string)
+	_, hasValue := obj["value"]
+	if op == "put" && !hasValue {
+		return fmt.Errorf("%w: op=put requires a value", ErrValidation)
+	}
+	if op != "put" && hasValue {
+		return fmt.Errorf("%w: value present but op=%q (value is only for put)", ErrValidation, op)
+	}
+	return nil
 }

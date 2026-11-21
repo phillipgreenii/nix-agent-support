@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	apievent "github.com/phillipgreenii/pg-router/api/event"
+
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/item"
 	"github.com/phillipgreenii/pg-router/procenv"
@@ -193,31 +195,6 @@ func (q CommandQuery) BackingCommand() string {
 	return q.Argv[0]
 }
 
-// rawItem is the per-record shape a command source's stdout decodes into.
-// type keeps its pre-existing meaning (item classification, carried through to
-// item.Item.Type) untouched. at/expiresAt are OPTIONAL RFC3339 timestamp
-// strings, camelCase to match the event wire's own at/expiresAt (Task 1.4);
-// when present they are carried onto the produced event's Attributes (the
-// general "extra, type-specific fields" seam event.Event already declares),
-// and discover.ToQueueEvent copies them onto eventqueue.Event's At /
-// ExpiresAt (INV-EVT-1, DEC-RETRY-2). emit is an
-// OPTIONAL event-type selector: when present it MUST be one of the query's
-// declared Emits() (multi-emit); absent, the record falls back to
-// firstEmit(q) — today's behavior, unchanged.
-type rawItem struct {
-	ID        string         `json:"id"`
-	Type      string         `json:"type"`
-	Title     string         `json:"title"`
-	Metadata  map[string]any `json:"metadata"`
-	At        string         `json:"at,omitempty"`
-	ExpiresAt string         `json:"expiresAt,omitempty"`
-	Emit      string         `json:"emit,omitempty"`
-	// Ack is the optional acknowledgement handle: an object with exactly two
-	// non-empty string fields, lane and token. Decoded loosely so a malformed
-	// one only means the event carries no handle, never a parse failure.
-	Ack any `json:"ack,omitempty"`
-}
-
 // ackFromAny reads an ack handle from a decoded JSON value, nil unless it is an
 // object whose lane and token are both non-empty strings.
 func ackFromAny(v any) *event.Ack {
@@ -231,6 +208,15 @@ func ackFromAny(v any) *event.Ack {
 		return nil
 	}
 	return &event.Ack{Lane: lane, Token: token}
+}
+
+// ackFromHandle converts a source record's acknowledgement handle into the
+// queue event's own, nil when the record carries none.
+func ackFromHandle(a *apievent.Ack) *event.Ack {
+	if !a.Valid() {
+		return nil
+	}
+	return &event.Ack{Lane: a.Lane, Token: a.Token}
 }
 
 func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
@@ -248,7 +234,7 @@ func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("command query %v: %w", q.Argv, err)
 	}
-	var raws []rawItem
+	var raws []apievent.Item
 	switch q.Format {
 	case FormatJSON:
 		if len(bytes.TrimSpace(out)) == 0 {
@@ -265,7 +251,7 @@ func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
 			if len(line) == 0 {
 				continue
 			}
-			var r rawItem
+			var r apievent.Item
 			if err := json.Unmarshal(line, &r); err != nil {
 				return nil, fmt.Errorf("command query: parse jsonl line: %w", err)
 			}
@@ -291,7 +277,7 @@ func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
 			emitType = r.Emit
 		}
 		evt := event.NewItemEvent(emitType, "", item.Item{ID: r.ID, Type: r.Type, Title: r.Title, Metadata: r.Metadata})
-		evt.Ack = ackFromAny(r.Ack)
+		evt.Ack = ackFromHandle(r.Ack)
 		if r.At != "" || r.ExpiresAt != "" {
 			attrs := make(map[string]any, 2)
 			if r.At != "" {

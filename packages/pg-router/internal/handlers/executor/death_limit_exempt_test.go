@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
 
@@ -32,7 +32,7 @@ const (
 
 type deathOutcome struct {
 	err    error
-	result report.Result
+	result participant.Report
 	bd     *dtest.ScriptBD
 	raw    string // the event log
 }
@@ -113,7 +113,7 @@ func TestDeathOnLimit_triagerIsNotParkedHuman(t *testing.T) {
 				t.Errorf("a limit death must not leave a park note; comments=%v", out.bd.Comments)
 			}
 			for _, a := range out.result.Actions {
-				if a.Verb == report.Escalated {
+				if a.Verb == participant.Escalated {
 					t.Errorf("a limit death must not report an escalation; actions=%v", verbsOf(out.result))
 				}
 			}
@@ -152,7 +152,7 @@ func TestDeathOnOtherCause_triagerIsStillParkedHuman(t *testing.T) {
 				t.Errorf("the park note must be written; comments=%v", out.bd.Comments)
 			}
 			got := verbsOf(out.result)
-			if len(got) != 2 || got[0] != report.Escalated || got[1] != report.Unclaimed {
+			if len(got) != 2 || got[0] != participant.Escalated || got[1] != participant.Unclaimed {
 				t.Errorf("result actions = %v, want [escalated unclaimed]", got)
 			}
 		})

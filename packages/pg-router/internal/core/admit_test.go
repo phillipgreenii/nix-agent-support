@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/levels"
@@ -110,11 +111,11 @@ func TestRegister_RejectsTheRemovedNonBlockingGatesField(t *testing.T) {
 	svc := startedServiceForStatus(t, nil)
 	_, code := serveVerb(t, svc, SubcommandRegister,
 		`{"schemaVersion":"1","id":"x","kind":"handler","nonBlockingGates":["LOW_DISK_USAGE"]}`)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want a schema rejection", code)
 	}
 	reply, code := serveVerb(t, svc, SubcommandRegister, `{"schemaVersion":"1","id":"y","kind":"handler"}`)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("a plain register exit = %d reply=%v", code, reply)
 	}
 }
@@ -124,7 +125,7 @@ func TestRemovedGateAndPauseVerbsAreUnknown(t *testing.T) {
 	svc := startedServiceForStatus(t, nil)
 	for _, sub := range []string{"gate-set", "gate-clear", "pause", "resume"} {
 		reply, code := serveVerb(t, svc, sub, `{"schemaVersion":"1"}`)
-		if code != conformance.ExitError || reply["error"] == nil {
+		if code != participant.ExitError || reply["error"] == nil {
 			t.Errorf("%s: exit=%d reply=%v, want the protocol error envelope", sub, code, reply)
 		}
 	}
@@ -158,7 +159,7 @@ func TestAdmitPull_ConcurrentLevelChurn(t *testing.T) {
 	}()
 	wg.Wait()
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("final status exit = %d", code)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {

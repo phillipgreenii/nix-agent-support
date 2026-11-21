@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
@@ -62,30 +62,30 @@ func (w wiring) runQuery(args []string) int {
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
-		return conformance.ExitOK
+		return participant.ExitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "query:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "query: unexpected argument:", fs.Arg(0))
 		fmt.Fprintln(os.Stderr, "query takes its request as JSON on stdin, never as arguments")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 
 	raw, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "query: read request from stdin:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
 		wire.WriteErrorReply(os.Stdout, "malformed JSON: "+err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if err := conformance.Check("source.query", v); err != nil {
+	if err := schemas.Check("source.query", v); err != nil {
 		wire.WriteErrorReply(os.Stdout, err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req queryRequest
 	_ = json.Unmarshal(raw, &req) // Check above already proved this decodes.
@@ -93,7 +93,7 @@ func (w wiring) runQuery(args []string) int {
 	qf, configured, err := loadQueryConfig(*queryConfigPath)
 	if err != nil {
 		wire.WriteErrorReply(os.Stdout, err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if !configured {
 		wire.WriteReply(os.Stdout, map[string]any{
@@ -101,19 +101,19 @@ func (w wiring) runQuery(args []string) int {
 			"id":            req.ID,
 			"events":        []any{},
 		})
-		return conformance.ExitOK
+		return participant.ExitOK
 	}
 
 	cfg, err := rolefile.LoadConfig(*cfgPath)
 	if err != nil {
 		wire.WriteErrorReply(os.Stdout, err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	ctx := context.Background()
 	br := beads.NewCLIRunnerForRepo(cfg.RepoRoot, "")
 	if err := precheck(ctx, cfg.RepoRoot, cfg.BeadsPrefix, br); err != nil {
 		wire.WriteErrorReply(os.Stdout, err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	// Opportunistic reconciliation (pg2-hrppg): DEFENSE IN DEPTH, not the
 	// primary hook -- dispatch.go's runDispatch is the call site actually
@@ -133,14 +133,14 @@ func (w wiring) runQuery(args []string) int {
 	events, err := queryBeadsReady(ctx, br, qf)
 	if err != nil {
 		wire.WriteErrorReply(os.Stdout, err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	wire.WriteReply(os.Stdout, map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
 		"id":            req.ID,
 		"events":        events,
 	})
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // queryBeadsReady runs `bd ready` with qf's label filters, applies its

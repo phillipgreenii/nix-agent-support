@@ -13,7 +13,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
@@ -127,7 +127,7 @@ func (e *admissionEnv) showsOf(bead string) int {
 func TestAdmission_fullPoolWithClosedBeadSessionFreesASlotAndLaunches(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("a", "zr-x"), pressureRow("b", "zr-y"))
 	code, reply := e.dispatch(t, dtest.DefaultEvent)
-	if code != conformance.ExitBusy || reply["reason"] != "launch-failed" {
+	if code != participant.ExitBusy || reply["reason"] != "launch-failed" {
 		t.Fatalf("exit=%d reply=%v, want the dispatch to pass the gate and reach the (failing) launch", code, reply)
 	}
 	// The first close is the closed-bead session; the second is the purge of the
@@ -143,7 +143,7 @@ func TestAdmission_fullPoolWithClosedBeadSessionFreesASlotAndLaunches(t *testing
 func TestAdmission_fullPoolNothingReclaimableDeclinesOnceAndStampsTheNegativeCache(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("b", "zr-y"), pressureRow("c", "zr-y"))
 	code, reply := e.dispatch(t, dtest.DefaultEvent)
-	if code != conformance.ExitBusy || reply["reason"] != "at-capacity" {
+	if code != participant.ExitBusy || reply["reason"] != "at-capacity" {
 		t.Fatalf("exit=%d reply=%v, want the at-capacity decline", code, reply)
 	}
 	// The wire carries no detail for an at-capacity decline (only launch-failed
@@ -172,7 +172,7 @@ func TestAdmission_secondDeclineInsideTheIntervalDoesNotReconcile(t *testing.T) 
 	}
 	e.now = e.now.Add(10 * time.Second) // inside the 30 s default
 	code, reply := e.dispatch(t, dtest.DefaultEvent)
-	if code != conformance.ExitBusy || reply["reason"] != "at-capacity" {
+	if code != participant.ExitBusy || reply["reason"] != "at-capacity" {
 		t.Fatalf("exit=%d reply=%v", code, reply)
 	}
 	if n := e.showsOf("zr-y"); n != 1 {
@@ -198,7 +198,7 @@ func TestAdmission_usageLimitSkipsTheReconcile(t *testing.T) {
 	e := newAdmissionEnv(t, "", pressureRow("a", "zr-x"))
 	e.cc.usageHit = true
 	code, reply := e.dispatch(t, dtest.DefaultEvent)
-	if code != conformance.ExitBusy || reply["reason"] != "at-capacity" {
+	if code != participant.ExitBusy || reply["reason"] != "at-capacity" {
 		t.Fatalf("exit=%d reply=%v", code, reply)
 	}
 	if len(e.cc.Closed()) != 0 || e.showsOf("zr-x") != 0 {
@@ -249,7 +249,7 @@ func TestAdmission_orphansOfOtherBeadsAreHandledBeforeTheCapacityCheck(t *testin
 	if !orphanMarked(e.cc, "pg-router-worker-o1") {
 		t.Fatalf("the orphan of another bead was not reclaimed; closed=%v", e.cc.Closed())
 	}
-	if code != conformance.ExitBusy || reply["reason"] != "launch-failed" {
+	if code != participant.ExitBusy || reply["reason"] != "launch-failed" {
 		t.Fatalf("exit=%d reply=%v, want the reclaimed orphan's slot to let the dispatch reach the launch", code, reply)
 	}
 	if lists, _ := e.cc.counts(); lists < 2 {

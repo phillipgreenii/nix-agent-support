@@ -11,7 +11,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -26,8 +26,8 @@ type validateReplyBody struct {
 func validateWith(t *testing.T, name string, cfg map[string]any, skipPoolDirs bool) validateReplyBody {
 	t.Helper()
 	var out bytes.Buffer
-	if code := serveValidate(strings.NewReader(dtest.Request("", name, cfg)), &out, skipPoolDirs); code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want %d; stdout %s", code, conformance.ExitOK, out.String())
+	if code := serveValidate(strings.NewReader(dtest.Request("", name, cfg)), &out, skipPoolDirs); code != participant.ExitOK {
+		t.Fatalf("exit = %d, want %d; stdout %s", code, participant.ExitOK, out.String())
 	}
 	if err := schemas.ValidateBytes("handler.validate-reply", out.Bytes()); err != nil {
 		t.Fatalf("reply %s does not match handler.validate-reply: %v", out.String(), err)
@@ -255,8 +255,8 @@ func TestValidate_requestWithoutUsableRoleIsUsage(t *testing.T) {
 		"empty name": `{"schemaVersion":"1","id":"v-1","role":{"name":"","config":{}}}`,
 	} {
 		var out bytes.Buffer
-		if code := serveValidate(strings.NewReader(body), &out, false); code != conformance.ExitUsage {
-			t.Errorf("%s: exit = %d, want %d", name, code, conformance.ExitUsage)
+		if code := serveValidate(strings.NewReader(body), &out, false); code != participant.ExitUsage {
+			t.Errorf("%s: exit = %d, want %d", name, code, participant.ExitUsage)
 		}
 		if _, ok := decodeReply(t, out.String())["error"]; !ok {
 			t.Errorf("%s: reply %s has no error", name, out.String())
@@ -269,8 +269,8 @@ func TestValidate_requestWithoutUsableRoleIsUsage(t *testing.T) {
 		"role a string": `{"schemaVersion":"1","id":"v-1","role":"x"}`,
 	} {
 		var out bytes.Buffer
-		if code := serveValidate(strings.NewReader(body), &out, false); code != conformance.ExitError {
-			t.Errorf("%s: exit = %d, want %d", name, code, conformance.ExitError)
+		if code := serveValidate(strings.NewReader(body), &out, false); code != participant.ExitError {
+			t.Errorf("%s: exit = %d, want %d", name, code, participant.ExitError)
 		}
 	}
 }
@@ -278,8 +278,8 @@ func TestValidate_requestWithoutUsableRoleIsUsage(t *testing.T) {
 func TestValidate_malformedStdinRequestIsAnErrorReply(t *testing.T) {
 	for _, in := range []string{`{not json`, `{"schemaVersion":"1"}`} { // malformed JSON; schema-invalid (no id)
 		var out bytes.Buffer
-		if code := serveValidate(strings.NewReader(in), &out, false); code != conformance.ExitError {
-			t.Fatalf("%q: exit = %d, want %d", in, code, conformance.ExitError)
+		if code := serveValidate(strings.NewReader(in), &out, false); code != participant.ExitError {
+			t.Fatalf("%q: exit = %d, want %d", in, code, participant.ExitError)
 		}
 		if _, ok := decodeReply(t, out.String())["error"]; !ok {
 			t.Errorf("%q: reply %s has no error", in, out.String())
@@ -297,8 +297,8 @@ func TestValidateAndDispatchShareOneDecoder(t *testing.T) {
 		if r := validateWith(t, "r", cfg, true); len(r.Problems) != 1 {
 			t.Fatalf("validate problems = %q, want one", r.Problems)
 		}
-		if code, _ := dispatchWith(t, "r", cfg, "", dtest.DefaultEvent); code != conformance.ExitError {
-			t.Errorf("dispatch of a config validate rejects: exit = %d, want %d", code, conformance.ExitError)
+		if code, _ := dispatchWith(t, "r", cfg, "", dtest.DefaultEvent); code != participant.ExitError {
+			t.Errorf("dispatch of a config validate rejects: exit = %d, want %d", code, participant.ExitError)
 		}
 	}
 }

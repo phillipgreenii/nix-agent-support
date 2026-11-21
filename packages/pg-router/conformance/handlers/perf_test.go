@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 // This file carries docket pg2-oju6w's Task 5.11 Step 3 perf-baseline
@@ -79,7 +79,7 @@ func measureDispatchRoundTrip(t *testing.T, bin string, args []string, reqBytes 
 	// One untimed warm-up round: excludes the binary's first-exec page-cache
 	// cost from the measured samples, matching this module's own
 	// buildBinary/runBinary helpers' steady-state assumption.
-	if _, code, err := runBinary(t, bin, args, reqBytes); err != nil || code != conformance.ExitOK {
+	if _, code, err := runBinary(t, bin, args, reqBytes); err != nil || code != participant.ExitOK {
 		t.Fatalf("warm-up dispatch: err=%v code=%d", err, code)
 	}
 
@@ -91,8 +91,8 @@ func measureDispatchRoundTrip(t *testing.T, bin string, args []string, reqBytes 
 		if err != nil {
 			t.Fatalf("round %d: run dispatch: %v", i, err)
 		}
-		if code != conformance.ExitOK {
-			t.Fatalf("round %d: dispatch exit=%d, want %d; reply=%s", i, code, conformance.ExitOK, reply)
+		if code != participant.ExitOK {
+			t.Fatalf("round %d: dispatch exit=%d, want %d; reply=%s", i, code, participant.ExitOK, reply)
 		}
 	}
 

@@ -1,7 +1,6 @@
 // wire.go: this adapter's own output-side wire shape — pg-router's
-// rawItem, confirmed by reading
-// packages/pg-router/internal/query/command.go's rawItem struct during
-// this packet's own curation pass [design: section 6.1]. This adapter
+// published per-record command-query source shape, api/event.Item
+// [design: section 6.1]. This adapter
 // emits id/type/title/metadata always. at/expiresAt (bead pg2-1ldvy) are
 // emitted ONLY by "changes --retry-window <d>" with d > 0 and are omitted
 // (omitempty) otherwise, so every other output stays byte-identical to what
@@ -10,39 +9,21 @@
 package main
 
 import (
-	"encoding/json"
 	"io"
+
+	apievent "github.com/phillipgreenii/pg-router/api/event"
 )
-
-// rawItem is pg-router's own per-record command-query source shape.
-type rawItem struct {
-	ID       string         `json:"id"`
-	Type     string         `json:"type"`
-	Title    string         `json:"title"`
-	Metadata map[string]any `json:"metadata"`
-	// At and ExpiresAt are RFC3339 strings; set only by changes with a
-	// positive --retry-window (changes.go).
-	At        string `json:"at,omitempty"`
-	ExpiresAt string `json:"expiresAt,omitempty"`
-	// Ack is the settlement position of the item; set only by changes
-	// --deferred-ack.
-	Ack *ackRef `json:"ack,omitempty"`
-}
-
-// ackRef is an item's lane (the backend name) and token (a decimal
-// position the settle subcommand acknowledges through).
-type ackRef struct {
-	Lane  string `json:"lane"`
-	Token string `json:"token"`
-}
 
 // writeItems encodes items as one JSON array to stdout — every
 // subcommand's own success path writes exactly one such array, never
 // pg-connector's own wire envelope passed through unmodified [design:
 // section 6.1]. items MUST be a non-nil (possibly empty) slice so a
 // zero-match result still marshals as [] rather than null.
-func writeItems(stdout io.Writer, items []rawItem) error {
-	enc := json.NewEncoder(stdout)
-	enc.SetEscapeHTML(false)
-	return enc.Encode(items)
+func writeItems(stdout io.Writer, items []apievent.Item) error {
+	b, err := apievent.EncodeItems(items)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(b)
+	return err
 }

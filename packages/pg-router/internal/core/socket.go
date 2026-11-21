@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -182,7 +181,7 @@ func probe(ctx context.Context, socket string, timeout time.Duration) error {
 // explicitly allows a participant to "speak a gRPC or in-code transport contract
 // over the socket and still conform, so long as it carries the same message
 // schema". The payload is passed through byte-for-byte to the SAME
-// conformance.Participant boundary the stdin/stdout transport uses, so the schema
+// participant.Participant boundary the stdin/stdout transport uses, so the schema
 // is validated in exactly one place.
 type wireRequest struct {
 	Token      string          `json:"token"`
@@ -353,7 +352,7 @@ func DiscriminateReply(reply []byte, replySchema string, out any) error {
 	if len(reply) == 0 {
 		return nil
 	}
-	if conformance.CheckBytes(ErrorReplySchema, reply) == nil {
+	if schemas.CheckBytes(ErrorReplySchema, reply) == nil {
 		var errBody struct {
 			Error string `json:"error"`
 		}
@@ -364,7 +363,7 @@ func DiscriminateReply(reply []byte, replySchema string, out any) error {
 	if replySchema == "" {
 		return nil
 	}
-	if err := conformance.CheckBytes(replySchema, reply); err != nil {
+	if err := schemas.CheckBytes(replySchema, reply); err != nil {
 		return fmt.Errorf("core reply is not a valid %s: %w", replySchema, err)
 	}
 	if out != nil {

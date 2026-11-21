@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -51,33 +51,33 @@ func (s *Service) handleRegister(stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		writeBody(stdout, errorReply("register: read request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if err := conformance.CheckBytes(RegisterRequestSchema, data); err != nil {
+	if err := schemas.CheckBytes(RegisterRequestSchema, data); err != nil {
 		writeBody(stdout, errorReply("register: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req registerRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		// Unreachable once CheckBytes has passed — kept for the same
 		// report-don't-guess discipline the rest of this package follows.
 		writeBody(stdout, errorReply("register: malformed request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	kind, err := ParseKind(req.Kind)
 	if err != nil {
 		writeBody(stdout, errorReply("register: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	reg, err := s.Register(req.ID, kind)
 	if err != nil {
 		writeBody(stdout, errorReply("register: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if req.Self != "" {
 		if err := s.reg.SetSelfStatus(req.ID, SelfStatus(req.Self)); err != nil {
 			writeBody(stdout, errorReply("register: "+err.Error()))
-			return conformance.ExitError
+			return participant.ExitError
 		}
 	}
 	body, err := json.Marshal(registerReply{
@@ -88,8 +88,8 @@ func (s *Service) handleRegister(stdin io.Reader, stdout io.Writer) int {
 	})
 	if err != nil { // unreachable: the reply holds only strings and a bool
 		writeBody(stdout, errorReply("register: marshal reply: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	writeBody(stdout, body)
-	return conformance.ExitOK
+	return participant.ExitOK
 }

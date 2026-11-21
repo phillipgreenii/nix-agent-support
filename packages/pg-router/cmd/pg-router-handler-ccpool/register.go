@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
-	"github.com/phillipgreenii/pg-router/internal/handlers/corecall"
+	"github.com/phillipgreenii/pg-router/api/participant"
+	"github.com/phillipgreenii/pg-router/api/participant/coreclient"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -21,30 +21,30 @@ import (
 func runRegister(args []string) int {
 	fs := flag.NewFlagSet("register", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	socket := fs.String("socket", "", "path to pg-router's core socket (or "+corecall.EnvSocket+")")
-	token := fs.String("token", "", "auth token for pg-router's core (or "+corecall.EnvToken+")")
+	socket := fs.String("socket", "", "path to pg-router's core socket (or "+coreclient.EnvSocket+")")
+	token := fs.String("token", "", "auth token for pg-router's core (or "+coreclient.EnvToken+")")
 	id := fs.String("id", "", "this participant's own chosen registration id (required)")
 	self := fs.String("self", "healthy", "this participant's own health: healthy|degraded|unavailable")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
-		return conformance.ExitOK
+		return participant.ExitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "register:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "register: unexpected argument:", fs.Arg(0))
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if *id == "" {
 		fmt.Fprintln(os.Stderr, "register: --id is required")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
-	ref, err := corecall.ResolveRef(*socket, *token)
+	ref, err := coreclient.ResolveRef(*socket, *token)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "register:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	payload, err := json.Marshal(map[string]any{
 		"schemaVersion": schemas.SchemaVersion,
@@ -54,9 +54,9 @@ func runRegister(args []string) int {
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "register: build request:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	return corecall.Relay(os.Stdout, os.Stderr, ref, "register", payload)
+	return coreclient.Relay(os.Stdout, os.Stderr, ref, "register", payload)
 }
 
 // runSelfStatus implements the `self-status` INTF-CLI callback subcommand,
@@ -68,30 +68,30 @@ func runRegister(args []string) int {
 func runSelfStatus(args []string) int {
 	fs := flag.NewFlagSet("self-status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	socket := fs.String("socket", "", "path to pg-router's core socket (or "+corecall.EnvSocket+")")
-	token := fs.String("token", "", "auth token for pg-router's core (or "+corecall.EnvToken+")")
+	socket := fs.String("socket", "", "path to pg-router's core socket (or "+coreclient.EnvSocket+")")
+	token := fs.String("token", "", "auth token for pg-router's core (or "+coreclient.EnvToken+")")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
-		return conformance.ExitOK
+		return participant.ExitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "self-status:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "self-status: unexpected argument:", fs.Arg(0))
 		fmt.Fprintln(os.Stderr, "self-status takes its request as JSON on stdin, never as arguments")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
-	ref, err := corecall.ResolveRef(*socket, *token)
+	ref, err := coreclient.ResolveRef(*socket, *token)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "self-status:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	request, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "self-status: read request from stdin:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	return corecall.Relay(os.Stdout, os.Stderr, ref, "self-status", request)
+	return coreclient.Relay(os.Stdout, os.Stderr, ref, "self-status", request)
 }

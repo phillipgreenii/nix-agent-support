@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 var explainNow = time.Date(2026, 11, 11, 23, 0, 0, 0, time.UTC)
@@ -73,7 +73,7 @@ func TestExplainRole_NotPausedDisabledExcludedAndUnknown(t *testing.T) {
 		}
 	}
 	var out, errb strings.Builder
-	if code := explainRole(&out, &errb, "nope", st, explainNow); code != conformance.ExitError || errb.String() != "unknown role nope\n" || out.Len() != 0 {
+	if code := explainRole(&out, &errb, "nope", st, explainNow); code != participant.ExitError || errb.String() != "unknown role nope\n" || out.Len() != 0 {
 		t.Errorf("unknown role: code=%d out=%q err=%q, want exit 1 and 'unknown role nope'", code, out.String(), errb.String())
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -30,7 +30,7 @@ func runExplain(args []string) int {
 	}
 	if len(pos) != 1 {
 		fmt.Fprintln(os.Stderr, "explain: want exactly one <role>")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	ref, err := locateCore(*socket, *token)
 	if err != nil {
@@ -51,16 +51,16 @@ func explain(stdout, stderr io.Writer, role string, ref core.Ref, now time.Time)
 	reply, code, err := client.Call(context.Background(), core.SubcommandStatus, []byte(`{"schemaVersion":"`+schemas.SchemaVersion+`"}`), core.CallOptions{})
 	if err != nil {
 		fmt.Fprintf(stderr, "explain: %v\n", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if code == conformance.ExitBusy {
+	if code == participant.ExitBusy {
 		fmt.Fprintf(stderr, "explain: %s\n", busyRefusalMessage(reply))
 		return code
 	}
 	var st statusReply
 	if diag := core.DiscriminateReply(reply, core.StatusReplySchema, &st); diag != nil {
 		fmt.Fprintf(stderr, "explain: %v\n", diag)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	return explainRole(stdout, stderr, role, st, now)
 }
@@ -90,7 +90,7 @@ func explainRole(stdout, stderr io.Writer, role string, st statusReply, now time
 		return exitOK
 	}
 	fmt.Fprintf(stderr, "unknown role %s\n", textsafe.Sanitize(role))
-	return conformance.ExitError
+	return participant.ExitError
 }
 
 // writeRequires lists every requires clause of role with its current verdict,

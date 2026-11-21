@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 )
 
 // External close (ccpool closed the session: idle_ttl, cap_eviction, operator)
@@ -51,7 +51,7 @@ func TestWaitDone_externalCloseReleaseIsGuardedByTheObservedHolder(t *testing.T)
 			if !dtest.HasUpdate(script, "update zr-w --status=open --assignee= --if-assignee review-zr-w --if-status in_progress") {
 				t.Errorf("the release must be guarded by the observed holder; updates=%v", script.Updates)
 			}
-			if v := verbsOf(e.waitFailureResult(workerRole(fastCfg()).CCPool, "zr-w", err)); len(v) != 1 || v[0] != report.Unclaimed {
+			if v := verbsOf(e.waitFailureResult(workerRole(fastCfg()).CCPool, "zr-w", err)); len(v) != 1 || v[0] != participant.Unclaimed {
 				t.Errorf("a landed release is reported as the unclaim verb; got %v", v)
 			}
 		})

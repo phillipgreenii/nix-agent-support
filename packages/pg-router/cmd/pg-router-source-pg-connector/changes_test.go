@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	apievent "github.com/phillipgreenii/pg-router/api/event"
+
 	"github.com/phillipgreenii/x/exitcode"
 
 	"github.com/phillipgreenii/x/cmdrun"
@@ -33,7 +35,7 @@ var suffixedID = regexp.MustCompile(`^(.+)@([0-9a-f]{12})$`)
 
 // onePRItems runs changes --retry-window against the changes_pr_one double with
 // the given entity-field environment and returns the single emitted item.
-func onePRItems(t *testing.T, window string, env ...string) rawItem {
+func onePRItems(t *testing.T, window string, env ...string) apievent.Item {
 	t.Helper()
 	withFactory(t, "changes_pr_one", env...)
 	args := []string{"changes", "pr", "q", "--consumer", "c1"}
@@ -53,7 +55,7 @@ func onePRItems(t *testing.T, window string, env ...string) rawItem {
 
 // metadataStrings reads a []any-typed JSON array field back out of a
 // decoded rawItem's Metadata map as []string, for assertions.
-func metadataStrings(t *testing.T, item rawItem, key string) []string {
+func metadataStrings(t *testing.T, item apievent.Item, key string) []string {
 	t.Helper()
 	raw, ok := item.Metadata[key]
 	if !ok {
@@ -503,7 +505,7 @@ func TestChanges_RetryWindow_SuffixesIDAndStampsAtAndExpiresAt(t *testing.T) {
 // an identical row gets the same id on a repeat invocation.
 func TestChanges_RetryWindow_DistinctRowsDistinctIDsIdenticalRowSameID(t *testing.T) {
 	pinEmitTime(t)
-	run := func() []rawItem {
+	run := func() []apievent.Item {
 		withFactory(t, "changes_pr_rows")
 		stdout, stderr, code := runCLI(t, "changes", "pr", "q", "--consumer", "c1", "--retry-window", "1h")
 		if code != 0 {
@@ -602,7 +604,7 @@ func pollBody(rows ...string) string {
 }
 
 // poll runs one changes invocation against the given canned answer.
-func poll(t *testing.T, window, body string) (stdout string, items []rawItem) {
+func poll(t *testing.T, window, body string) (stdout string, items []apievent.Item) {
 	t.Helper()
 	pinEmitTime(t)
 	withFactory(t, "changes_body_env", "GO_HELPER_BODY="+body)

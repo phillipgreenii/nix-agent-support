@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/handlers/handlerstate"
 )
@@ -46,8 +47,8 @@ func TestServePostStartup_doesNotSweep(t *testing.T) {
 	name, cfg := dtest.WorkerRole("", "")
 	k := &kickRecorder{}
 	code, out := postStartupWith(t, dtest.Request("", name, cfg), cfgPath, k.kick)
-	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d, want %d; reply %s", code, conformance.ExitOK, out)
+	if code != participant.ExitOK {
+		t.Fatalf("exit = %d, want %d; reply %s", code, participant.ExitOK, out)
 	}
 	reply := decodeReply(t, out)
 	if reply["id"] != "d-1" || reply["outcome"] != "ok" {
@@ -85,7 +86,7 @@ func TestServePostStartup_kickFailureIsNotAFailure(t *testing.T) {
 	var code int
 	var out string
 	msgs := dtest.CaptureSlog(t, func() { code, out = postStartupWith(t, dtest.Request("", name, cfg), cfgPath, k.kick) })
-	if code != conformance.ExitOK || decodeReply(t, out)["outcome"] != "ok" {
+	if code != participant.ExitOK || decodeReply(t, out)["outcome"] != "ok" {
 		t.Fatalf("exit = %d, reply = %s; want ok", code, out)
 	}
 	if !containsSubstring(msgs, "postStartup: janitor kick failed; the scheduled janitor still runs") {
@@ -101,7 +102,7 @@ func TestServePostStartup_repeatedCallsAreSafe(t *testing.T) {
 	name, cfg := dtest.WorkerRole("", "")
 	k := &kickRecorder{}
 	for i := 0; i < 3; i++ {
-		if code, out := postStartupWith(t, dtest.Request("", name, cfg), cfgPath, k.kick); code != conformance.ExitOK {
+		if code, out := postStartupWith(t, dtest.Request("", name, cfg), cfgPath, k.kick); code != participant.ExitOK {
 			t.Fatalf("call %d: exit = %d, reply %s", i, code, out)
 		}
 	}
@@ -122,7 +123,7 @@ func TestKickJanitor_startsADetachedRealJanitor(t *testing.T) {
 	name, cfg := dtest.WorkerRole("", "")
 	var out bytes.Buffer
 	k := func(c, r string) error { return kickJanitor(c, r) }
-	if code := servePostStartup(strings.NewReader(dtest.Request("", name, cfg)), &out, cfgPath, k); code != conformance.ExitOK {
+	if code := servePostStartup(strings.NewReader(dtest.Request("", name, cfg)), &out, cfgPath, k); code != participant.ExitOK {
 		t.Fatalf("exit = %d, reply %s", code, out.String())
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -148,7 +149,7 @@ func TestFirstDispatchAfterSimulatedBootLaunchesWithAFullPoolOfClosedBeadSession
 	e := newAdmissionEnv(t, "", pressureRow("a", "zr-x"), pressureRow("b", "zr-x"))
 	name, cfg := dtest.WorkerRole("", "")
 	k := &kickRecorder{}
-	if code, out := postStartupWith(t, dtest.Request("", name, cfg), e.cfgPath, k.kick); code != conformance.ExitOK {
+	if code, out := postStartupWith(t, dtest.Request("", name, cfg), e.cfgPath, k.kick); code != participant.ExitOK {
 		t.Fatalf("postStartup exit = %d, reply %s", code, out)
 	}
 	if got := e.cc.Closed(); len(got) != 0 {
@@ -158,7 +159,7 @@ func TestFirstDispatchAfterSimulatedBootLaunchesWithAFullPoolOfClosedBeadSession
 		t.Fatalf("postStartup touched ccpool capacity (%d calls)", caps)
 	}
 	code, reply := e.dispatch(t, dtest.DefaultEvent)
-	if code != conformance.ExitBusy || reply["reason"] != "launch-failed" {
+	if code != participant.ExitBusy || reply["reason"] != "launch-failed" {
 		t.Fatalf("exit=%d reply=%v, want the first dispatch to pass the capacity gate and reach the (failing) launch", code, reply)
 	}
 	got := e.cc.Closed()
@@ -178,8 +179,8 @@ func noKick(t *testing.T) janitorKick {
 // before anything else.
 func TestServePostStartup_rejectsMalformedRequest(t *testing.T) {
 	code, out := postStartupWith(t, `{"schemaVersion":"1","role":{"name":"worker"}}`, "", noKick(t)) // missing id
-	if code != conformance.ExitError || !strings.Contains(out, "error") {
-		t.Fatalf("exit = %d, out = %q; want exit %d and an error reply", code, out, conformance.ExitError)
+	if code != participant.ExitError || !strings.Contains(out, "error") {
+		t.Fatalf("exit = %d, out = %q; want exit %d and an error reply", code, out, participant.ExitError)
 	}
 }
 
@@ -191,8 +192,8 @@ func TestServePostStartup_requestWithoutRoleIsUsageError(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, out := postStartupWith(t, body, "", noKick(t))
-			if code != conformance.ExitUsage || !strings.Contains(out, "error") {
-				t.Fatalf("exit = %d, out = %q; want exit %d and an error reply", code, out, conformance.ExitUsage)
+			if code != participant.ExitUsage || !strings.Contains(out, "error") {
+				t.Fatalf("exit = %d, out = %q; want exit %d and an error reply", code, out, participant.ExitUsage)
 			}
 		})
 	}
@@ -216,8 +217,8 @@ func TestServePostStartup_invalidRoleOrLaunchConfigIsAnError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			code, out := postStartupWith(t, dtest.Request("", "worker", tc.cfg), tc.cfgPath, noKick(t))
 			msg, _ := decodeReply(t, out)["error"].(string)
-			if code != conformance.ExitError || !strings.Contains(msg, tc.want) {
-				t.Fatalf("exit = %d, out = %q; want exit %d and %q in the error reply", code, out, conformance.ExitError, tc.want)
+			if code != participant.ExitError || !strings.Contains(msg, tc.want) {
+				t.Fatalf("exit = %d, out = %q; want exit %d and %q in the error reply", code, out, participant.ExitError, tc.want)
 			}
 		})
 	}
@@ -226,10 +227,10 @@ func TestServePostStartup_invalidRoleOrLaunchConfigIsAnError(t *testing.T) {
 // The CLI entry point reads --config and the request from stdin; a flag that
 // would name a role file is not accepted (the role comes from stdin).
 func TestRunPostStartup_flags(t *testing.T) {
-	if got := runPostStartup([]string{"--role-file", "/x"}); got != conformance.ExitUsage {
-		t.Errorf("--role-file: exit %d, want %d", got, conformance.ExitUsage)
+	if got := runPostStartup([]string{"--role-file", "/x"}); got != participant.ExitUsage {
+		t.Errorf("--role-file: exit %d, want %d", got, participant.ExitUsage)
 	}
-	if got := runPostStartup([]string{"stray"}); got != conformance.ExitUsage {
-		t.Errorf("a positional argument: exit %d, want %d", got, conformance.ExitUsage)
+	if got := runPostStartup([]string{"stray"}); got != participant.ExitUsage {
+		t.Errorf("a positional argument: exit %d, want %d", got, participant.ExitUsage)
 	}
 }

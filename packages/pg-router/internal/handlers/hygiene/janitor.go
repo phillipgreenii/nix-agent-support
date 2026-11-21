@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dispatchlib"
@@ -181,16 +181,16 @@ func (s Sweeper) RunJanitor(args []string) int {
 	if opts.listDiagUntil != "" {
 		if _, err := time.Parse(time.RFC3339, opts.listDiagUntil); err != nil {
 			fmt.Fprintln(os.Stderr, "janitor: --list-diag-until must be an RFC 3339 time:", err)
-			return conformance.ExitUsage
+			return participant.ExitUsage
 		}
 	}
 	if opts.cfgPath == "" {
 		fmt.Fprintln(os.Stderr, "janitor: --config (or "+rolefile.EnvConfig+") is required")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if opts.deadline <= 0 {
 		fmt.Fprintln(os.Stderr, "janitor: --deadline must be positive")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	return serveJanitor(context.Background(), os.Stdout, opts, dispatchlib.BuildDeps, s.prodJanitorPasses())
 }
@@ -201,16 +201,16 @@ func (s Sweeper) parseFlagsNoStdin(name string, fs *flag.FlagSet, args []string)
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(s.Help)
-		return conformance.ExitOK, true
+		return participant.ExitOK, true
 	case err != nil:
 		fmt.Fprintln(os.Stderr, name+":", err)
-		return conformance.ExitUsage, true
+		return participant.ExitUsage, true
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, name+": unexpected argument:", fs.Arg(0))
-		return conformance.ExitUsage, true
+		return participant.ExitUsage, true
 	}
-	return conformance.ExitOK, false
+	return participant.ExitOK, false
 }
 
 // janitorRole is one ccpool role loaded from a role file.
@@ -384,12 +384,12 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 	cfg, err := rolefile.LoadConfig(opts.cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "janitor:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	jroles, err := loadJanitorRoles(opts, mkDeps)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "janitor:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if opts.dryRun {
 		return janitorDryRun(ctx, stdout, jroles, cfg)
@@ -409,10 +409,10 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 				"outcome":     janitorSkipped,
 				"deadline_ms": opts.deadline.Milliseconds(),
 			})
-			return conformance.ExitOK
+			return participant.ExitOK
 		}
 		fmt.Fprintln(os.Stderr, "janitor: cannot take the single-flight lock:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	defer lock.Unlock()
 
@@ -512,7 +512,7 @@ func serveJanitor(ctx context.Context, stdout io.Writer, opts janitorOptions, mk
 		emitCensus(ctx, passes, jroles, passes.clock().Sub(clockStart))
 	}
 	flushGauges(ctx, passes.flush)
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // deadlineOf returns ctx's deadline (a janitor run context always has one).

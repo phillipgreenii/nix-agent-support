@@ -48,6 +48,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/conformance/golden"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
@@ -532,7 +533,7 @@ func runAdoption(t *testing.T, starter, adopter handlerShape) {
 	case <-time.After(adoptWait):
 		t.Fatalf("the adopting dispatch did not finish after the bead closed; sessions: %+v", sb.beadSessions())
 	}
-	if code := p2.cmd.ProcessState.ExitCode(); code != conformance.ExitOK {
+	if code := p2.cmd.ProcessState.ExitCode(); code != participant.ExitOK {
 		t.Fatalf("the adopting dispatch must succeed: %s", p2.report())
 	}
 	var reply any

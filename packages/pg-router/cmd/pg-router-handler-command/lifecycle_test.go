@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -15,7 +16,7 @@ func TestLifecycle_AreNoOpOkReplies(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
 			req := request(t, nil, "cmdrole", cmdConfig("/bin/sh", "-c", ":"), true)
-			if exit := serveLifecycle(name, strings.NewReader(req), &out); exit != conformance.ExitOK {
+			if exit := serveLifecycle(name, strings.NewReader(req), &out); exit != participant.ExitOK {
 				t.Fatalf("exit = %d; %s", exit, out.String())
 			}
 			m := decodeReply(t, out.String())
@@ -34,12 +35,12 @@ func TestLifecycle_AreNoOpOkReplies(t *testing.T) {
 func TestLifecycle_RequestWithoutRoleIsUsageError(t *testing.T) {
 	for _, name := range []string{"postStartup", "preShutdown"} {
 		var out bytes.Buffer
-		if exit := serveLifecycle(name, strings.NewReader(request(t, nil, "", nil, false)), &out); exit != conformance.ExitUsage {
-			t.Fatalf("%s: exit = %d, want %d", name, exit, conformance.ExitUsage)
+		if exit := serveLifecycle(name, strings.NewReader(request(t, nil, "", nil, false)), &out); exit != participant.ExitUsage {
+			t.Fatalf("%s: exit = %d, want %d", name, exit, participant.ExitUsage)
 		}
 	}
 	var out bytes.Buffer
-	if exit := serveLifecycle("postStartup", strings.NewReader(`{"schemaVersion":"2"}`), &out); exit != conformance.ExitError {
-		t.Fatalf("schema violation: exit = %d, want %d", exit, conformance.ExitError)
+	if exit := serveLifecycle("postStartup", strings.NewReader(`{"schemaVersion":"2"}`), &out); exit != participant.ExitError {
+		t.Fatalf("schema violation: exit = %d, want %d", exit, participant.ExitError)
 	}
 }

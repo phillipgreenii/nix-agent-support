@@ -14,7 +14,7 @@ import (
 
 	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
@@ -223,10 +223,10 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 			// A MOOT outcome (closed, de-escalated) is completed as skipped (exit 0,
 			// bead pg2-6t91v7); every other precheck outcome is still a busy decline.
 			if moot := tc.wantReason == "skipped-bead-closed" || tc.wantReason == "skipped-bead-not-escalated" || tc.wantReason == "skipped-bead-human-escalated" || tc.wantReason == "skipped-bead-blocked-triage" || tc.wantReason == "skipped-bead-deferred-triage"; moot {
-				if code != conformance.ExitOK || reply.Skipped != tc.wantReason || reply.Reason != "" {
+				if code != participant.ExitOK || reply.Skipped != tc.wantReason || reply.Reason != "" {
 					t.Fatalf("got exit %d skipped %q reason %q, want ExitOK completed as skipped %q", code, reply.Skipped, reply.Reason, tc.wantReason)
 				}
-			} else if code != conformance.ExitBusy || reply.Reason != tc.wantReason {
+			} else if code != participant.ExitBusy || reply.Reason != tc.wantReason {
 				t.Fatalf("got exit %d reason %q, want ExitBusy with %q", code, reply.Reason, tc.wantReason)
 			}
 			// The bead read must really have happened (or really failed): a launch
@@ -252,7 +252,7 @@ func TestTriage_RealBD_Dispatch(t *testing.T) {
 					t.Fatalf("human+escalated bead after the precheck, want escalated stripped, human kept and a comment:\n%s", after)
 				}
 				code, got := dispatchWith(t, triager.name, triager.cfg, "", `{"id":"e-2","type":"dispatch","payload":{"id":"`+tc.id+`","type":"task"}}`)
-				if code != conformance.ExitOK || !strings.Contains(got, "skipped-bead-not-escalated") {
+				if code != participant.ExitOK || !strings.Contains(got, "skipped-bead-not-escalated") {
 					t.Fatalf("repeat: exit %d %s, want moot skipped-bead-not-escalated", code, got)
 				}
 				if again := f.show(t, tc.id); again != after {
@@ -401,7 +401,7 @@ func TestTriage_RealBD_ReviewClosedBeadRedeliverySkipped(t *testing.T) {
 	// reaches the launch path, which declines pool-unreadable because the ccpool
 	// stub cannot list.
 	code, got := dispatchWith(t, review.name, review.cfg, "", event(open))
-	if reply := decodeReply(t, got); code != conformance.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
+	if reply := decodeReply(t, got); code != participant.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
 		t.Fatalf("positive control: an open review bead must reach the launch path: exit %d reply %v", code, reply)
 	}
 	if len(calls("pg-connector")) == 0 {

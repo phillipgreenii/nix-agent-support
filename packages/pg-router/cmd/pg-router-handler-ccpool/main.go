@@ -38,7 +38,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/cliutil"
 	"github.com/phillipgreenii/x/jsonllogger"
 )
@@ -58,15 +58,15 @@ func run(args []string) int { return newWiring().run(args) }
 func (w wiring) run(args []string) int {
 	if len(args) == 0 {
 		cliutil.PrintUsageErr("pg-router-handler-ccpool: a subcommand is required", usageLine)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	switch args[0] {
 	case "-h", "--help", "help":
 		fmt.Print(helpText)
-		return conformance.ExitOK
+		return participant.ExitOK
 	case "-v", "--version", "version":
 		fmt.Println(version)
-		return conformance.ExitOK
+		return participant.ExitOK
 	case "register":
 		return runRegister(args[1:])
 	case "self-status":
@@ -91,6 +91,6 @@ func (w wiring) run(args []string) int {
 		return w.sweeper.RunJanitor(args[1:])
 	default:
 		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-ccpool: unknown subcommand %q", args[0]), usageLine)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 }

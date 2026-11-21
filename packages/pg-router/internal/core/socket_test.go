@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 )
 
@@ -76,7 +76,7 @@ func waitStarted(t *testing.T, svc *Service) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if svc.State() == conformance.Started {
+		if svc.State() == participant.Started {
 			return
 		}
 		time.Sleep(time.Millisecond)
@@ -94,7 +94,7 @@ func TestListen_PublishesDiscoverableCore(t *testing.T) {
 	}
 	defer func() { _ = svc.Close() }()
 
-	if svc.State() != conformance.Starting {
+	if svc.State() != participant.Starting {
 		t.Fatalf("state after Listen = %s, want starting (messages cross only in started)", svc.State())
 	}
 	if _, err := os.Stat(SocketPath(dir)); err != nil {
@@ -278,8 +278,8 @@ func TestServe_RejectsABadToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d for an unauthorized request", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d for an unauthorized request", code, participant.ExitError)
 	}
 	if !strings.Contains(string(reply), "unauthorized") {
 		t.Fatalf("reply = %s, want an unauthorized error envelope", reply)
@@ -318,8 +318,8 @@ func TestServe_MalformedTransportFrame(t *testing.T) {
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.ExitCode != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d", resp.ExitCode, conformance.ExitError)
+	if resp.ExitCode != participant.ExitError {
+		t.Fatalf("exit = %d, want %d", resp.ExitCode, participant.ExitError)
 	}
 	if !strings.Contains(string(resp.Reply), "malformed transport frame") {
 		t.Fatalf("reply = %s, want a malformed-frame error", resp.Reply)
@@ -341,8 +341,8 @@ func TestServe_UnknownSubcommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d for a dropped/unknown subcommand", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d for a dropped/unknown subcommand", code, participant.ExitError)
 	}
 	if !strings.Contains(string(reply), "unknown subcommand") {
 		t.Fatalf("reply = %s, want an unknown-subcommand error", reply)
@@ -358,8 +358,8 @@ func TestServe_RefusesOutsideStarted(t *testing.T) {
 		t.Fatalf("Listen: %v", err)
 	}
 	var out strings.Builder
-	if code := svc.Serve(SubcommandIngestEvent, strings.NewReader(oneEventRequest), &out); code != conformance.ExitError {
-		t.Fatalf("exit = %d while starting, want %d", code, conformance.ExitError)
+	if code := svc.Serve(SubcommandIngestEvent, strings.NewReader(oneEventRequest), &out); code != participant.ExitError {
+		t.Fatalf("exit = %d while starting, want %d", code, participant.ExitError)
 	}
 	if !strings.Contains(out.String(), "core is starting") {
 		t.Fatalf("reply = %s, want it to name the lifecycle state", out.String())
@@ -369,8 +369,8 @@ func TestServe_RefusesOutsideStarted(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	out.Reset()
-	if code := svc.Serve(SubcommandIngestEvent, strings.NewReader(oneEventRequest), &out); code != conformance.ExitError {
-		t.Fatalf("exit = %d while stopping, want %d", code, conformance.ExitError)
+	if code := svc.Serve(SubcommandIngestEvent, strings.NewReader(oneEventRequest), &out); code != participant.ExitError {
+		t.Fatalf("exit = %d while stopping, want %d", code, participant.ExitError)
 	}
 	if !strings.Contains(out.String(), "core is stopping") {
 		t.Fatalf("reply = %s, want it to name the lifecycle state", out.String())
@@ -398,12 +398,12 @@ func TestAcceptAndClose_OrderlyShutdown(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Accept = %v, want nil after Close", err)
 	}
-	if svc.State() != conformance.Stopped {
+	if svc.State() != participant.Stopped {
 		t.Fatalf("state = %s, want stopped after a drained shutdown", svc.State())
 	}
 	// A late Accept must not resurrect a closed core.
-	svc.setState(conformance.Started)
-	if svc.State() != conformance.Stopped {
+	svc.setState(participant.Started)
+	if svc.State() != participant.Stopped {
 		t.Fatalf("state = %s, want the shutdown to be one-way", svc.State())
 	}
 }
@@ -542,7 +542,7 @@ func TestCall_NullReplyIsNoBody(t *testing.T) {
 		defer func() { _ = conn.Close() }()
 		var req wireRequest
 		_ = json.NewDecoder(conn).Decode(&req)
-		_ = json.NewEncoder(conn).Encode(wireResponse{ExitCode: conformance.ExitBusy, Reply: jsonNull})
+		_ = json.NewEncoder(conn).Encode(wireResponse{ExitCode: participant.ExitBusy, Reply: jsonNull})
 	}()
 
 	client, err := Dial(t.Context(), Ref{Socket: sock, Token: "t"}, DefaultProbeTimeout)
@@ -554,8 +554,8 @@ func TestCall_NullReplyIsNoBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitBusy {
-		t.Fatalf("exit = %d, want %d", code, conformance.ExitBusy)
+	if code != participant.ExitBusy {
+		t.Fatalf("exit = %d, want %d", code, participant.ExitBusy)
 	}
 	if reply != nil {
 		t.Fatalf("reply = %q, want nil for a body-less busy reply", reply)
@@ -625,8 +625,8 @@ func TestSaturatedReadSemaphoreAllowsIngest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitOK {
-		t.Fatalf("ingest-event with the read semaphore fully saturated: exit = %d, want %d", code, conformance.ExitOK)
+	if code != participant.ExitOK {
+		t.Fatalf("ingest-event with the read semaphore fully saturated: exit = %d, want %d", code, participant.ExitOK)
 	}
 	if !strings.Contains(string(reply), `"accepted"`) {
 		t.Fatalf("reply = %s, want an accepted ingest-event-reply", reply)
@@ -657,8 +657,8 @@ func TestSaturatedReadRefusesPromptly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitBusy {
-		t.Fatalf("exit = %d, want %d (busy) for a saturated read call", code, conformance.ExitBusy)
+	if code != participant.ExitBusy {
+		t.Fatalf("exit = %d, want %d (busy) for a saturated read call", code, participant.ExitBusy)
 	}
 	if elapsed > 500*time.Millisecond {
 		t.Fatalf("refusal took %s, want an IMMEDIATE decline (no slot was ever released during this call)", elapsed)
@@ -689,8 +689,8 @@ func TestSaturatedReadSemaphoreRefusesMonRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitBusy {
-		t.Fatalf("exit = %d, want %d (busy) for a saturated mon.read call", code, conformance.ExitBusy)
+	if code != participant.ExitBusy {
+		t.Fatalf("exit = %d, want %d (busy) for a saturated mon.read call", code, participant.ExitBusy)
 	}
 	if !strings.Contains(string(reply), "too many concurrent") {
 		t.Fatalf("reply = %s, want the human-readable refusal message", reply)
@@ -716,8 +716,8 @@ func TestSaturatedReadSemaphoreRefusesGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitBusy {
-		t.Fatalf("exit = %d, want %d (busy) for a saturated get call", code, conformance.ExitBusy)
+	if code != participant.ExitBusy {
+		t.Fatalf("exit = %d, want %d (busy) for a saturated get call", code, participant.ExitBusy)
 	}
 	if !strings.Contains(string(reply), "too many concurrent") {
 		t.Fatalf("reply = %s, want the human-readable refusal message", reply)
@@ -746,8 +746,8 @@ func TestSaturatedReadSemaphoreAllowsPutDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call put: %v", err)
 	}
-	if code != conformance.ExitOK {
-		t.Fatalf("put with the read semaphore fully saturated: exit = %d, want %d; reply=%s", code, conformance.ExitOK, putReply)
+	if code != participant.ExitOK {
+		t.Fatalf("put with the read semaphore fully saturated: exit = %d, want %d; reply=%s", code, participant.ExitOK, putReply)
 	}
 
 	delClient, err := Dial(t.Context(), ref, DefaultProbeTimeout)
@@ -760,8 +760,8 @@ func TestSaturatedReadSemaphoreAllowsPutDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call delete: %v", err)
 	}
-	if code != conformance.ExitOK {
-		t.Fatalf("delete with the read semaphore fully saturated: exit = %d, want %d; reply=%s", code, conformance.ExitOK, delReply)
+	if code != participant.ExitOK {
+		t.Fatalf("delete with the read semaphore fully saturated: exit = %d, want %d; reply=%s", code, participant.ExitOK, delReply)
 	}
 }
 
@@ -790,8 +790,8 @@ func TestExitBusy_IsThePollerBackoffSignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
-	if code != conformance.ExitBusy {
-		t.Fatalf("exit = %d, want %d -- this IS the signal a poller backs off on", code, conformance.ExitBusy)
+	if code != participant.ExitBusy {
+		t.Fatalf("exit = %d, want %d -- this IS the signal a poller backs off on", code, participant.ExitBusy)
 	}
 	var errBody struct {
 		Error string `json:"error"`

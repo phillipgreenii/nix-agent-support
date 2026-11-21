@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -117,7 +117,7 @@ func ingestEnvelope(evt eventqueue.Event) ([]byte, error) {
 	// Validate the envelope we are about to send against its own schema (INV-INTF-2).
 	// The core validates it too, but failing here names the fault as OURS instead of
 	// coming back as an opaque remote rejection.
-	if err := conformance.CheckBytes(core.IngestRequestSchema, data); err != nil {
+	if err := schemas.CheckBytes(core.IngestRequestSchema, data); err != nil {
 		return nil, fmt.Errorf("emit: built an invalid %s request: %w", core.IngestRequestSchema, err)
 	}
 	return data, nil
@@ -153,7 +153,7 @@ type ingestReplyBody struct {
 // Task 3.8, the ONE client that discriminated the envelope at all, and
 // push-inject is the front door that reuses it (Task 3.8 Files).
 func interpretIngestReply(eventID string, reply []byte, code int) (eventqueue.EnqueueResult, error) {
-	if code == conformance.ExitBusy {
+	if code == participant.ExitBusy {
 		// The core's ingest-event never declines: the durable queue does not turn
 		// events away, so the common contract's pre-accept busy code should never
 		// come back from it. If one ever arrives, it is NOT a delivery — say so
@@ -163,13 +163,13 @@ func interpretIngestReply(eventID string, reply []byte, code int) (eventqueue.En
 	if len(reply) == 0 {
 		return eventqueue.Enqueued, fmt.Errorf("emit: core returned exit %d with no reply body", code)
 	}
-	if conformance.CheckBytes(core.ErrorReplySchema, reply) == nil {
+	if schemas.CheckBytes(core.ErrorReplySchema, reply) == nil {
 		var perr protocolError
 		if err := json.Unmarshal(reply, &perr); err == nil {
 			return eventqueue.Enqueued, fmt.Errorf("emit: core refused the injection: %s", perr.Error)
 		}
 	}
-	if err := conformance.CheckBytes(core.IngestReplySchema, reply); err != nil {
+	if err := schemas.CheckBytes(core.IngestReplySchema, reply); err != nil {
 		return eventqueue.Enqueued, fmt.Errorf("emit: core reply is not a valid %s: %w", core.IngestReplySchema, err)
 	}
 	var body ingestReplyBody
@@ -183,7 +183,7 @@ func interpretIngestReply(eventID string, reply []byte, code int) (eventqueue.En
 	if body.Accepted != 1 {
 		return eventqueue.Enqueued, fmt.Errorf("emit: core accepted %d of 1 event and rejected none, so event %q is unaccounted for", body.Accepted, eventID)
 	}
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		// Accepted with a non-zero code contradicts the callback contract. Refuse to
 		// paper over it: the operator would otherwise be told "injected" by a core
 		// that signalled a failure.

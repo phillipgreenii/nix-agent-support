@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/backoff"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -200,7 +200,7 @@ func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
 	if _, err := reg.RegisterInProcess(role.Name, core.KindHandler); err != nil {
 		t.Fatalf("RegisterInProcess: %v", err)
 	}
-	if err := reg.SetLifecycle(role.Name, conformance.Started); err != nil {
+	if err := reg.SetLifecycle(role.Name, participant.Started); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
 	if err := reg.SetSelfStatus(role.Name, core.SelfUnavailable); err != nil {
@@ -231,7 +231,7 @@ func unavailableRegistry(t *testing.T, role string) *core.Registry {
 	if _, err := reg.RegisterInProcess(role, core.KindHandler); err != nil {
 		t.Fatalf("RegisterInProcess: %v", err)
 	}
-	if err := reg.SetLifecycle(role, conformance.Started); err != nil {
+	if err := reg.SetLifecycle(role, participant.Started); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
 	if err := reg.SetSelfStatus(role, core.SelfUnavailable); err != nil {

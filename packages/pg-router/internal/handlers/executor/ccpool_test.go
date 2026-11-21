@@ -19,6 +19,7 @@ import (
 
 	"github.com/phillipgreenii/x/jsonllogger/jsonlloggertest"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/budget"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
@@ -27,7 +28,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
 	"github.com/phillipgreenii/pg-router/internal/handlers/parknote"
 	"github.com/phillipgreenii/pg-router/internal/handlers/prompt"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/sessionlock"
 	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
@@ -1351,7 +1351,7 @@ func TestWaitFailureResult_externallyClosedMapsToUnclaimed(t *testing.T) {
 	cc := workerRole(fastCfg()).CCPool // OnFailure: AddHuman
 	err := fmt.Errorf("zr-w: %w", ErrExternallyClosed)
 	got := e.waitFailureResult(cc, "zr-w", err)
-	if got.Actions[0].Verb != report.Unclaimed {
+	if got.Actions[0].Verb != participant.Unclaimed {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -1661,13 +1661,13 @@ func TestWaitDone_noNeedsInput_noAlert(t *testing.T) {
 
 // --- pg2-kj7j: Dispatch reports the failure verb actually taken ---
 
-func dispatchWorker(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, ext string) (report.Result, error) {
+func dispatchWorker(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, ext string) (participant.Report, error) {
 	t.Helper()
 	return dispatchWorkerRole(t, cc, bd, cfg, workerRole(cfg), ext)
 }
 
 // dispatchWorkerRole is dispatchWorker for a caller-supplied worker role.
-func dispatchWorkerRole(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, role roles.Role, ext string) (report.Result, error) {
+func dispatchWorkerRole(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, role roles.Role, ext string) (participant.Report, error) {
 	t.Helper()
 	cfg.WorktreeDir = t.TempDir() // isolate the per-bead worktree to a throwaway dir
 	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-w"}}
@@ -1678,7 +1678,7 @@ func dispatchWorkerRole(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg 
 	return ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
 }
 
-func verbOf(res report.Result) report.Verb {
+func verbOf(res participant.Report) participant.Verb {
 	if len(res.Actions) == 0 {
 		return ""
 	}
@@ -1867,7 +1867,7 @@ func TestDispatch_sendFailFeedbackUnclaim_unclaimed(t *testing.T) {
 	deps.Git = &dtest.NoopGit{}
 	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 	res, _ := ccpoolExecutor{}.Dispatch(context.Background(), d, deps)
-	if v := verbOf(res); v != report.Unclaimed {
+	if v := verbOf(res); v != participant.Unclaimed {
 		t.Errorf("feedback send-fail (unclaim) must report Unclaimed, got %q", v)
 	}
 }
@@ -1885,7 +1885,7 @@ func TestDispatch_droppedNudge_handsBackNoOtherBeadTouched(t *testing.T) {
 	if err == nil {
 		t.Fatal("dropped nudge must return an error")
 	}
-	if v := verbOf(res); v != report.Unclaimed {
+	if v := verbOf(res); v != participant.Unclaimed {
 		t.Errorf("dropped nudge must hand the bead back unclaimed; verb=%q res=%+v", v, res)
 	}
 	if !dtest.HasUpdate(bd, "update zr-w --status=open --assignee=") {
@@ -1926,7 +1926,7 @@ func TestRegression_droppedNudge_noWriteToOtherBead_pg2yukh(t *testing.T) {
 	if err == nil {
 		t.Fatal("dropped nudge must fail the dispatch")
 	}
-	if v := verbOf(res); v != report.Unclaimed {
+	if v := verbOf(res); v != participant.Unclaimed {
 		t.Errorf("bead must be handed back unclaimed; verb=%q res=%+v", v, res)
 	}
 	if !dtest.HasUpdate(bd, "update zr-6bq.3 --status=open --assignee=") {
@@ -2157,7 +2157,7 @@ func TestDispatch_waitFailWorkerTimeout_escalated(t *testing.T) {
 	// noBudget: with the default time budget the watchdog's hard stop (25m)
 	// fires before the derived wait (35m, INV-CCH-27) and reports Unclaimed.
 	res, _ := dispatchWorkerRole(t, cc, bd, cfg, noBudget(workerRole(cfg)), "pg-router-worker-zr-w")
-	if v := verbOf(res); v != report.Escalated {
+	if v := verbOf(res); v != participant.Escalated {
 		t.Errorf("worker timeout must report Escalated, got %q", v)
 	}
 }
@@ -2245,7 +2245,7 @@ func TestDispatch_redeliveryAfterSettle_launchesFreshSession(t *testing.T) {
 		{settled, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}},
 	}}
 	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-1"}
-	dispatch := func(externalID string) (report.Result, error) {
+	dispatch := func(externalID string) (participant.Report, error) {
 		deps := newExec(cc, bd, cfg).deps
 		deps.ExternalID = externalID
 		deps.Git = &dtest.NoopGit{}
@@ -2305,7 +2305,7 @@ func TestDispatch_watchdogHardStop_unclaimed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a budget error")
 	}
-	if v := verbOf(res); v != report.Unclaimed {
+	if v := verbOf(res); v != participant.Unclaimed {
 		t.Errorf("budget hard-stop unclaims => must report Unclaimed (NOT Escalated), got %q", v)
 	}
 }

@@ -9,7 +9,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/originguard"
 	"github.com/phillipgreenii/pg-router/internal/handlers/originprobe"
@@ -90,7 +90,7 @@ func TestDispatch_guardUnavailableDeclinesWithoutBeadsCalls(t *testing.T) {
 	}
 	r := workerWithIsolation(t, `{}`)
 	code, out := dispatchCtxWith(w, context.Background(), t, r.name, r.cfg, cfgPath, dtest.DefaultEvent)
-	if code != conformance.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
+	if code != participant.ExitBusy || decodeReply(t, out)["reason"] != "origin-unavailable" {
 		t.Fatalf("exit=%d out=%q, want a busy origin-unavailable decline", code, out)
 	}
 	if got := calls.Calls(); len(got) != 0 {

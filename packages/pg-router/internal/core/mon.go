@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
 
@@ -76,11 +76,11 @@ func (s *Service) handleMonRead(ctx context.Context, stdin io.Reader, stdout io.
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		writeBody(stdout, errorReply("mon.read: read request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	if err := conformance.CheckBytes(MonReadRequestSchema, data); err != nil {
+	if err := schemas.CheckBytes(MonReadRequestSchema, data); err != nil {
 		writeBody(stdout, errorReply("mon.read: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	var req monReadRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -88,14 +88,14 @@ func (s *Service) handleMonRead(ctx context.Context, stdin io.Reader, stdout io.
 		// decodes as a well-typed object with these fields — see selfstatus.go's
 		// identical note.
 		writeBody(stdout, errorReply("mon.read: malformed request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 
 	reg, ok := s.reg.Get(req.ID)
 	if !ok || reg.Kind != KindMonitor {
 		slog.Warn("core: mon.read rejected for an id with no kind=monitor registration", "id", req.ID)
 		writeBody(stdout, errorReply("mon.read: no kind=monitor registration for id "+req.ID))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 
 	values := []monReadValue{}
@@ -103,7 +103,7 @@ func (s *Service) handleMonRead(ctx context.Context, stdin io.Reader, stdout io.
 		rm, err := s.metricsReader.Snapshot(ctx)
 		if err != nil {
 			writeBody(stdout, errorReply("mon.read: snapshot: "+err.Error()))
-			return conformance.ExitError
+			return participant.ExitError
 		}
 		values = composeMonReadValues(rm, req.Metrics, reg.Subset)
 	}
@@ -117,10 +117,10 @@ func (s *Service) handleMonRead(ctx context.Context, stdin io.Reader, stdout io.
 	body, err := json.Marshal(monReadReply{SchemaVersion: schemas.SchemaVersion, ID: req.ID, Values: values})
 	if err != nil { // unreachable: monReadReply holds only strings, float64s and string-keyed maps of JSON-safe scalars
 		writeBody(stdout, errorReply("mon.read: marshal reply: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	writeBody(stdout, body)
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // composeMonReadValues renders rm's current data points down to the

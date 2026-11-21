@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/core"
 )
@@ -27,7 +28,7 @@ func TestCallCore_SelfStatus_RelaysReplyAndUpdatesRegistry(t *testing.T) {
 	var stdout, stderr strings.Builder
 	req := `{"schemaVersion":"1","id":"trk-1","participantId":"h1","self":"degraded"}`
 	code := callCore(&stdout, &stderr, svc.Ref(), core.SubcommandSelfStatus, []byte(req))
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
 	var reply map[string]any
@@ -59,7 +60,7 @@ func TestCallCore_SelfStatus_RelaysUnknownParticipant(t *testing.T) {
 	var stdout, stderr strings.Builder
 	code := callCore(&stdout, &stderr, svc.Ref(), core.SubcommandSelfStatus,
 		[]byte(`{"schemaVersion":"1","id":"trk-1","participantId":"nope","self":"healthy"}`))
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 for an unknown participant", code)
 	}
 	if !strings.Contains(stdout.String(), "unknown participant") {
@@ -80,8 +81,8 @@ func TestCallCore_SelfStatus_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := callCore(&stdout, &stderr, badRef, core.SubcommandSelfStatus, []byte(testSelfStatusRequest))
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d", code, participant.ExitError)
 	}
 	if !strings.Contains(stdout.String(), `"error"`) {
 		t.Fatalf("stdout = %q, want the relayed error envelope (the wire contract is unchanged)", stdout.String())
@@ -94,11 +95,11 @@ func TestCallCore_SelfStatus_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
 // A usage error on the callback subcommand exits 2, never BUSY (ADR 0042's
 // Decision) — the same guarantee ingest-event carries.
 func TestRunSelfStatus_UsageErrorExitsUsageNotBusy(t *testing.T) {
-	if code := runSelfStatus([]string{"--nope"}); code != conformance.ExitUsage {
-		t.Fatalf("unknown flag exit = %d, want %d/usage (never %d/busy)", code, conformance.ExitUsage, conformance.ExitBusy)
+	if code := runSelfStatus([]string{"--nope"}); code != participant.ExitUsage {
+		t.Fatalf("unknown flag exit = %d, want %d/usage (never %d/busy)", code, participant.ExitUsage, participant.ExitBusy)
 	}
-	if code := runSelfStatus([]string{"extra-positional"}); code != conformance.ExitUsage {
-		t.Fatalf("positional exit = %d, want %d/usage", code, conformance.ExitUsage)
+	if code := runSelfStatus([]string{"extra-positional"}); code != participant.ExitUsage {
+		t.Fatalf("positional exit = %d, want %d/usage", code, participant.ExitUsage)
 	}
 }
 
@@ -108,7 +109,7 @@ func TestCallCore_SelfStatus_NoRunningCoreIsAnError(t *testing.T) {
 	var stdout, stderr strings.Builder
 	ref := core.Ref{Socket: filepath.Join(shortDir(t), "gone.sock")}
 	code := callCore(&stdout, &stderr, ref, core.SubcommandSelfStatus, []byte(testSelfStatusRequest))
-	if code != conformance.ExitUnavailable {
+	if code != participant.ExitUnavailable {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {
@@ -145,8 +146,8 @@ func TestRunSelfStatusIO_EmptyStdinIsUsageErrorNotNullToCore(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := runSelfStatusIO([]string{"--socket", ref.Socket, "--token", ref.Token}, strings.NewReader(""), &stdout, &stderr)
-	if code != conformance.ExitUsage {
-		t.Fatalf("exit = %d, want %d/usage; stderr=%s", code, conformance.ExitUsage, stderr.String())
+	if code != participant.ExitUsage {
+		t.Fatalf("exit = %d, want %d/usage; stderr=%s", code, participant.ExitUsage, stderr.String())
 	}
 	if strings.Contains(stderr.String(), "got null") {
 		t.Fatalf("empty stdin reached the core as null: %q", stderr.String())
@@ -167,7 +168,7 @@ func TestRunSelfStatusIO_RequestOnStdinReachesCore(t *testing.T) {
 	ref := svc.Ref()
 	var stdout, stderr strings.Builder
 	code := runSelfStatusIO([]string{"--socket", ref.Socket, "--token", ref.Token}, strings.NewReader(testSelfStatusRequest), &stdout, &stderr)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), `"accepted":true`) {

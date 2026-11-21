@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
@@ -70,7 +71,7 @@ func TestCallCore_RelaysReplyAndExitCode(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := callCore(&stdout, &stderr, ref, core.SubcommandIngestEvent, []byte(testIngestRequest))
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
 	var reply map[string]any
@@ -99,7 +100,7 @@ func TestCallCore_RelaysRejection(t *testing.T) {
 		// An unparseable `expiresAt`: schema-valid (it is just a string there) but not
 		// convertible, so the core rejects the event rather than the envelope.
 		[]byte(`{"schemaVersion":"1","id":"trk-1","events":[{"id":"bad","type":"t","expiresAt":"soon"}]}`))
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 for a rejected event", code)
 	}
 	if !strings.Contains(stdout.String(), `"rejected"`) {
@@ -121,8 +122,8 @@ func TestCallCore_IngestEvent_DiscriminatesErrorBeforeReplySchema(t *testing.T) 
 
 	var stdout, stderr strings.Builder
 	code := callCore(&stdout, &stderr, badRef, core.SubcommandIngestEvent, []byte(testIngestRequest))
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d", code, participant.ExitError)
 	}
 	if !strings.Contains(stdout.String(), `"error"`) {
 		t.Fatalf("stdout = %q, want the relayed error envelope (the wire contract is unchanged)", stdout.String())
@@ -138,7 +139,7 @@ func TestCallCore_NoRunningCoreIsAnError(t *testing.T) {
 	var stdout, stderr strings.Builder
 	ref := core.Ref{Socket: filepath.Join(shortDir(t), "gone.sock")}
 	code := callCore(&stdout, &stderr, ref, core.SubcommandIngestEvent, []byte(testIngestRequest))
-	if code != conformance.ExitUnavailable {
+	if code != participant.ExitUnavailable {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {
@@ -206,11 +207,11 @@ func TestLocateCore(t *testing.T) {
 // Decision). The collision this replaces is the hazard: a source that read a bad
 // flag as "busy, re-offer later" would silently drop events.
 func TestRunIngestEvent_UsageErrorExitsUsageNotBusy(t *testing.T) {
-	if code := runIngestEvent([]string{"--nope"}); code != conformance.ExitUsage {
-		t.Fatalf("unknown flag exit = %d, want %d/usage (never %d/busy)", code, conformance.ExitUsage, conformance.ExitBusy)
+	if code := runIngestEvent([]string{"--nope"}); code != participant.ExitUsage {
+		t.Fatalf("unknown flag exit = %d, want %d/usage (never %d/busy)", code, participant.ExitUsage, participant.ExitBusy)
 	}
-	if code := runIngestEvent([]string{"extra-positional"}); code != conformance.ExitUsage {
-		t.Fatalf("positional exit = %d, want %d/usage", code, conformance.ExitUsage)
+	if code := runIngestEvent([]string{"extra-positional"}); code != participant.ExitUsage {
+		t.Fatalf("positional exit = %d, want %d/usage", code, participant.ExitUsage)
 	}
 }
 
@@ -240,8 +241,8 @@ func TestRunIngestEventIO_EmptyStdinIsUsageErrorNotForwardedToCore(t *testing.T)
 	for _, in := range []string{"", " \n\t"} {
 		var stdout, stderr strings.Builder
 		code := runIngestEventIO([]string{"--socket", ref.Socket, "--token", ref.Token}, strings.NewReader(in), &stdout, &stderr)
-		if code != conformance.ExitUsage {
-			t.Fatalf("stdin %q: exit = %d, want %d/usage; stderr=%s", in, code, conformance.ExitUsage, stderr.String())
+		if code != participant.ExitUsage {
+			t.Fatalf("stdin %q: exit = %d, want %d/usage; stderr=%s", in, code, participant.ExitUsage, stderr.String())
 		}
 		if strings.Contains(stderr.String(), "core refused") || stdout.Len() != 0 {
 			t.Fatalf("stdin %q reached the core: stdout=%q stderr=%q", in, stdout.String(), stderr.String())
@@ -260,7 +261,7 @@ func TestRunIngestEventIO_RequestOnStdinReachesCore(t *testing.T) {
 	ref := svc.Ref()
 	var stdout, stderr strings.Builder
 	code := runIngestEventIO([]string{"--socket", ref.Socket, "--token", ref.Token}, strings.NewReader(testIngestRequest), &stdout, &stderr)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; stderr=%s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), `"accepted"`) {

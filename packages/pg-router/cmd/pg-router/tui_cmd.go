@@ -17,7 +17,7 @@ import (
 	_ "github.com/charmbracelet/colorprofile"
 	_ "github.com/charmbracelet/lipgloss"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/tui"
 )
@@ -72,17 +72,17 @@ func runTUI(args []string) int {
 		return exitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "tui:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "tui: unexpected argument:", fs.Arg(0))
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 
 	interval, err := resolveTUIInterval(os.Getenv(envTUIInterval))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tui:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 
 	// locateCore resolves the same injected/discovered ref every other
@@ -94,7 +94,7 @@ func runTUI(args []string) int {
 	poller := tui.NewSocketPoller(config.LogDir(), ref)
 	if err := tuiRun(tui.Options{Poller: poller, PollInterval: interval}); err != nil {
 		fmt.Fprintln(os.Stderr, "tui:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	return exitOK
 }

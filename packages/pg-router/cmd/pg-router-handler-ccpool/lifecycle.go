@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/handlerstate"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
@@ -21,11 +21,11 @@ import (
 )
 
 // failLifecycle writes msg to stderr and as an error reply, and returns
-// conformance.ExitError.
+// participant.ExitError.
 func failLifecycle(name string, stdout io.Writer, msg string) int {
 	fmt.Fprintln(os.Stderr, name+":", msg)
 	wire.WriteErrorReply(stdout, msg)
-	return conformance.ExitError
+	return participant.ExitError
 }
 
 // runPostStartup implements the `postStartup` INTF-HANDLER subcommand (pg2-oju6w.15):
@@ -67,7 +67,7 @@ func servePostStartup(stdin io.Reader, stdout io.Writer, cfgPath string, kick ja
 	if !ok {
 		return exit
 	}
-	var req wire.LifecycleRequest
+	var req participant.LifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 
 	_, cfg, err := rolefile.LoadRoleAndConfig(ro, cfgPath)
@@ -83,7 +83,7 @@ func servePostStartup(stdin io.Reader, stdout io.Writer, cfgPath string, kick ja
 		"id":            req.ID,
 		"outcome":       "ok",
 	})
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // kickJanitorFor writes the role as a role file under the handler state

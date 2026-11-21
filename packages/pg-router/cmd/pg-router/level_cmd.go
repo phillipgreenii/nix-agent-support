@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/textsafe"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -131,7 +131,7 @@ func runLevel(args []string) int { return runLevelIO(args, os.Stdout, os.Stderr)
 func runLevelIO(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "level: a verb is required: list, set, clear or refresh")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	switch args[0] {
 	case "list":
@@ -147,14 +147,14 @@ func runLevelIO(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 	fmt.Fprintf(stderr, "level: unknown verb %q: want list, set, clear or refresh\n", args[0])
-	return conformance.ExitUsage
+	return participant.ExitUsage
 }
 
 func levelRef(stderr io.Writer, verb, socket, token string) (core.Ref, int) {
 	ref, err := locateCore(socket, token)
 	if err != nil {
 		reportNoCore(stderr, verb, err)
-		return core.Ref{}, conformance.ExitError
+		return core.Ref{}, participant.ExitError
 	}
 	return ref, exitOK
 }
@@ -168,7 +168,7 @@ func runLevelList(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(pos) > 0 {
 		fmt.Fprintln(stderr, "level list: unexpected argument:", pos[0])
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	ref, c := levelRef(stderr, core.SubcommandLevelList, *socket, *token)
 	if c != exitOK {
@@ -215,7 +215,7 @@ func runLevelSet(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(pos) != 2 {
 		fmt.Fprintln(stderr, "level set: want <resource> <LEVEL> (--for <duration> | --until-cleared)")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	req, code := overrideRequest(stderr, "level set", pos[0], pos[1], *owner, *forStr, *untilCleared)
 	if code != exitOK {
@@ -253,7 +253,7 @@ func expiryPhrase(r levelSetReply, now time.Time) string {
 func overrideRequest(stderr io.Writer, name, resource, level, owner, forStr string, untilCleared bool) (map[string]any, int) {
 	if (forStr == "") == !untilCleared {
 		fmt.Fprintln(stderr, name+": exactly one of --for and --until-cleared is required")
-		return nil, conformance.ExitUsage
+		return nil, participant.ExitUsage
 	}
 	req := map[string]any{"schemaVersion": schemas.SchemaVersion, "resource": resource, "level": level, "owner": owner}
 	if untilCleared {
@@ -263,7 +263,7 @@ func overrideRequest(stderr io.Writer, name, resource, level, owner, forStr stri
 	d, err := parseOverrideFor(forStr)
 	if err != nil {
 		fmt.Fprintln(stderr, name+":", err)
-		return nil, conformance.ExitUsage
+		return nil, participant.ExitUsage
 	}
 	req["for_s"] = int64(d / time.Second)
 	return req, exitOK
@@ -283,7 +283,7 @@ func runLevelClear(args []string, stdout, stderr io.Writer) int {
 	}
 	if (len(pos) == 1) == *all || len(pos) > 1 {
 		fmt.Fprintln(stderr, "level clear: want exactly one of <resource> and --all")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	req := map[string]any{"schemaVersion": schemas.SchemaVersion, "by": *by}
 	if *all {
@@ -380,7 +380,7 @@ func runPauseIO(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(pos) > 0 {
 		fmt.Fprintln(stderr, "pause: unexpected argument:", pos[0])
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	req, code := overrideRequest(stderr, "pause", core.RouterResource, core.LevelPaused, *owner, *forStr, *forStr == "")
 	if code != exitOK {
@@ -416,7 +416,7 @@ func runResumeIO(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(pos) > 0 {
 		fmt.Fprintln(stderr, "resume: unexpected argument:", pos[0])
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	req := map[string]any{"schemaVersion": schemas.SchemaVersion, "by": *by}
 	if *all {

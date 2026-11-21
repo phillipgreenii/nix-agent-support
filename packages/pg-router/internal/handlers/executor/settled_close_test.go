@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/budget"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
 	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
@@ -114,7 +114,7 @@ func noBudget(role roles.Role) roles.Role {
 
 // dispatchWith runs a full ccpoolExecutor.Dispatch of role against cc/bd with
 // a manual clock the caller can also read.
-func dispatchWith(t *testing.T, cc ccpool.Runner, bd *dtest.ScriptBD, cfg config.Config, role roles.Role, ext string, clk *dtest.ManualClock) (report.Result, error) {
+func dispatchWith(t *testing.T, cc ccpool.Runner, bd *dtest.ScriptBD, cfg config.Config, role roles.Role, ext string, clk *dtest.ManualClock) (participant.Report, error) {
 	t.Helper()
 	cfg.WorktreeDir = t.TempDir()
 	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-w"}}
@@ -296,10 +296,10 @@ func TestSettledClose_onFailureOutcomes(t *testing.T) {
 	cases := []struct {
 		name string
 		role roles.Role
-		want report.Verb
+		want participant.Verb
 	}{
-		{"add-human", noBudget(workerRole(cfg)), report.Escalated},
-		{"unclaim", noBudget(feedbackRole(cfg)), report.Unclaimed},
+		{"add-human", noBudget(workerRole(cfg)), participant.Escalated},
+		{"unclaim", noBudget(feedbackRole(cfg)), participant.Unclaimed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -379,7 +379,7 @@ func TestSettledClose_budgetStopAddsNoSecondClose(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a budget error")
 	}
-	if v := verbOf(res); v != report.Unclaimed {
+	if v := verbOf(res); v != participant.Unclaimed {
 		t.Errorf("budget stop must still report Unclaimed, got %q", v)
 	}
 	if len(cc.Closed) != 1 || cc.Closed[0] != "sess-1" {
@@ -612,7 +612,7 @@ func TestSettledClose_closeErrorKeepsWerr(t *testing.T) {
 	if !errors.Is(err, want) {
 		t.Errorf("werr must pass through unchanged, got %v", err)
 	}
-	if verbOf(res) != report.Escalated {
+	if verbOf(res) != participant.Escalated {
 		t.Errorf("result must be the add-human verb, got %q", verbOf(res))
 	}
 }

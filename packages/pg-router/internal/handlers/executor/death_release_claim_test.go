@@ -8,16 +8,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
 
 // verbsOf lists every verb of a dispatch result's actions, in order.
-func verbsOf(res report.Result) []report.Verb {
-	var vs []report.Verb
+func verbsOf(res participant.Report) []participant.Verb {
+	var vs []participant.Verb
 	for _, a := range res.Actions {
 		vs = append(vs, a.Verb)
 	}
@@ -36,15 +36,15 @@ func TestDispatch_deathReleasesClaim(t *testing.T) {
 		name      string
 		onFailure roles.FailureAction
 		wantBD    string
-		wantVerbs []report.Verb
+		wantVerbs []participant.Verb
 	}{
 		{
 			"add-human", roles.AddHuman, "update bead-1 --add-label human --remove-label escalated --status=open --assignee=",
-			[]report.Verb{report.Escalated, report.Unclaimed},
+			[]participant.Verb{participant.Escalated, participant.Unclaimed},
 		},
 		{
 			"unclaim", roles.Unclaim, "update bead-1 --status=open --assignee=",
-			[]report.Verb{report.Unclaimed},
+			[]participant.Verb{participant.Unclaimed},
 		},
 	}
 	for _, tc := range cases {

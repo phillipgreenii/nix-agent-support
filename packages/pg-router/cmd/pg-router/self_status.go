@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 )
 
@@ -58,12 +58,12 @@ func runSelfStatusIO(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 		return exitOK
 	case err != nil:
 		fmt.Fprintln(stderr, "self-status:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(stderr, "self-status: unexpected argument:", fs.Arg(0))
 		fmt.Fprintln(stderr, "self-status takes its request as JSON on stdin, never as arguments")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 
 	ref, err := locateCore(*socket, *token)
@@ -74,7 +74,7 @@ func runSelfStatusIO(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 	request, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintln(stderr, "self-status: read request from stdin:", err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	if len(bytes.TrimSpace(request)) == 0 {
 		// An empty stdin is not a request: the core's schema wants an object
@@ -83,7 +83,7 @@ func runSelfStatusIO(args []string, stdin io.Reader, stdout, stderr io.Writer) i
 		// a self-status push is only meaningful for a named participant.
 		fmt.Fprintln(stderr, "self-status: no request on stdin; this is a participant callback and needs a JSON object on stdin,")
 		fmt.Fprintln(stderr, `  e.g. {"schemaVersion":"1","id":"<tracking id>","participantId":"<id>","self":"healthy|degraded|unavailable"}`)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	return callCore(stdout, stderr, ref, core.SubcommandSelfStatus, request)
 }

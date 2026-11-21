@@ -1,4 +1,4 @@
-package corecall
+package coreclient
 
 import (
 	"bytes"

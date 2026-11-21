@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dispatchlib"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
@@ -75,7 +75,7 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 	}
 	// Check already proved raw decodes and matches handler.dispatch's schema, so
 	// this second Unmarshal (into the typed shape) cannot fail.
-	var req wire.DispatchRequest
+	var req participant.DispatchRequest
 	_ = json.Unmarshal(raw, &req)
 
 	role, problems := decodeRole(ro)
@@ -83,13 +83,13 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 		msg := fmt.Sprintf("role %q: invalid config: %s", ro.Name, strings.Join(problems, "; "))
 		fmt.Fprintln(os.Stderr, "dispatch:", msg)
 		wire.WriteErrorReply(stdout, msg)
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	cfg, err := rolefile.LoadConfig(cfgPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "dispatch:", err)
 		wire.WriteErrorReply(stdout, err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 
 	dctx := executor.DispatchContext{Role: role, Item: dispatchlib.ItemFromPayload(req.Event.Payload), EventID: req.Event.ID, DispatchID: req.ID}
@@ -106,19 +106,19 @@ func serveDispatch(ctx context.Context, stdin io.Reader, stdout io.Writer, cfgPa
 		// re-offers the event with backoff. The reason (command-busy) and kind
 		// (busy) are a handler-to-alert contract and stay as they are.
 		wire.DeclineAndReply(stdout, deps.Log, role, dctx.Item.ID, decline, dctx.EventID, dctx.DispatchID)
-		return conformance.ExitBusy
+		return participant.ExitBusy
 	}
 	if err != nil {
 		wire.WriteErrorReply(stdout, err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	// outcome is an opaque STRING on the wire; result.Fields() is the structured
 	// shape the core stores uninterpreted, JSON-encoded into it.
 	outcomeJSON, err := json.Marshal(result.Fields())
 	if err != nil {
 		wire.WriteErrorReply(stdout, "encode outcome: "+err.Error())
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	wire.WriteReply(stdout, wire.OutcomeReply(req.ID, string(outcomeJSON), result.StartedAt))
-	return conformance.ExitOK
+	return participant.ExitOK
 }

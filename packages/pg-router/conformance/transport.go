@@ -3,80 +3,19 @@ package conformance
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/schemas"
-	"github.com/phillipgreenii/x/exitcode"
 )
-
-// Lifecycle is a participant's lifecycle state (interfaces.md). Messages are
-// accepted ONLY in Started — after started, before stopping (INV-INTF-1).
-type Lifecycle int
-
-const (
-	Starting Lifecycle = iota
-	Started
-	Stopping
-	Stopped
-	Crashing
-)
-
-// String returns the lifecycle state's DOC-declared name (interfaces.md
-// "Lifecycle": starting / started / stopping / stopped / crashing), so a
-// diagnostic or a registry view reports the same names the behavior docs use
-// rather than an opaque integer.
-func (l Lifecycle) String() string {
-	switch l {
-	case Starting:
-		return "starting"
-	case Started:
-		return "started"
-	case Stopping:
-		return "stopping"
-	case Stopped:
-		return "stopped"
-	case Crashing:
-		return "crashing"
-	}
-	return fmt.Sprintf("Lifecycle(%d)", int(l))
-}
-
-// Coarse exit codes for the CLI transport (interfaces.md common contract).
-//
-// They are the workspace's shared codes (package exitcode in the x module), so a
-// caller reads the same meaning from pg-router as from every other tool; this is
-// the ONE declaration of them for pg-router, so a second const block stating the
-// same convention in parallel is not allowed to drift from it (ADR 0042's
-// Consequences, ADR 0127's Decision). ExitBusy is a participant's pre-accept
-// capacity decline and the core's own read refusal; ExitUnavailable is a caller
-// that found no running core; ExitConfig is the core's pre-flight config or
-// startup precheck failing before any work begins. A participant is free to emit
-// any of the shared codes: none is reserved to the core.
-const (
-	ExitOK          = exitcode.OK          // ok; rich outcome in the JSON reply
-	ExitError       = exitcode.Error       // unexpected error: NOT a usage error, which is ExitUsage
-	ExitUsage       = exitcode.Usage       // usage error: a bad flag, or a missing/unexpected argument
-	ExitUnavailable = exitcode.Unavailable // no running core, or its socket does not answer
-	ExitConfig      = exitcode.Config      // a config or startup precheck failed before any work
-	ExitBusy        = exitcode.Busy        // at capacity: pre-accept busy decline (no body required)
-)
-
-// Participant speaks the default CLI transport: it reads a JSON request from
-// stdin and writes a JSON reply to stdout, returning a coarse exit code. This
-// is INV-INTF-1's default transport contract; an implementation MAY instead
-// speak gRPC/in-code and still conform so long as the message SCHEMA holds.
-type Participant interface {
-	Serve(subcommand string, stdin io.Reader, stdout io.Writer) (exitCode int)
-}
 
 // RoundTrip runs one request through a Participant over the (in-memory)
 // stdin/stdout transport, returning the reply bytes and exit code — the
 // end-to-end boundary the conformance suite exercises live.
-func RoundTrip(p Participant, subcommand string, request any) (reply []byte, exitCode int, err error) {
+func RoundTrip(p participant.Participant, subcommand string, request any) (reply []byte, exitCode int, err error) {
 	reqBytes, err := json.Marshal(request)
 	if err != nil {
-		return nil, ExitError, err
+		return nil, participant.ExitError, err
 	}
 	var out bytes.Buffer
 	code := p.Serve(subcommand, bytes.NewReader(reqBytes), &out)
@@ -85,12 +24,12 @@ func RoundTrip(p Participant, subcommand string, request any) (reply []byte, exi
 
 // ReferenceHandler is a reference INTF-HANDLER implementation used to prove the
 // transport round-trip end to end. It accepts a dispatch only while Started
-// (lifecycle boundary), declines with ExitBusy when Busy, rejects a
-// malformed/non-conforming dispatch with ExitError, and otherwise replies with
+// (lifecycle boundary), declines with participant.ExitBusy when Busy, rejects a
+// malformed/non-conforming dispatch with participant.ExitError, and otherwise replies with
 // a sync outcome (or a deferred ack when Deferred). It tolerates a duplicate
 // event id (idempotent, INV-EVT-2).
 type ReferenceHandler struct {
-	State    Lifecycle
+	State    participant.Lifecycle
 	Busy     bool
 	Deferred bool
 	seen     map[string]bool
@@ -107,20 +46,20 @@ type ReferenceHandler struct {
 func (h *ReferenceHandler) Serve(subcommand string, stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
-		return ExitError
+		return participant.ExitError
 	}
 	// Lifecycle: messages accepted only when Started (INV-INTF-1).
-	if h.State != Started {
+	if h.State != participant.Started {
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": "not accepting: participant is not started"})
-		return ExitError
+		return participant.ExitError
 	}
 	if h.Busy {
-		return ExitBusy // busy: coarse exit code only, no body (INV-CONC-1)
+		return participant.ExitBusy // busy: coarse exit code only, no body (INV-CONC-1)
 	}
 	var v any
 	if err := json.Unmarshal(data, &v); err != nil {
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": "malformed JSON"})
-		return ExitError
+		return participant.ExitError
 	}
 	switch subcommand {
 	case "postStartup", "preShutdown":
@@ -136,7 +75,7 @@ func (h *ReferenceHandler) Serve(subcommand string, stdin io.Reader, stdout io.W
 func (h *ReferenceHandler) serveDispatch(v any, stdout io.Writer) int {
 	if err := Check("handler.dispatch", v); err != nil {
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": err.Error()})
-		return ExitError
+		return participant.ExitError
 	}
 	obj := v.(map[string]any)
 	id, _ := obj["id"].(string)
@@ -150,14 +89,14 @@ func (h *ReferenceHandler) serveDispatch(v any, stdout io.Writer) int {
 	}
 	if h.Deferred {
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "id": id, "deferred": true})
-		return ExitOK
+		return participant.ExitOK
 	}
 	// outcome is an opaque STRING (docket pg2-oju6w's Task 5.4, ADR 0065's
 	// "Wire contract" section): the schema's own outcome property retypes
 	// object -> string to match wireclient.Reply.Outcome's Go type, since
 	// encoding/json cannot unmarshal an object into a string field.
 	writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "id": id, "outcome": "delivered"})
-	return ExitOK
+	return participant.ExitOK
 }
 
 // serveLifecycleHook is Serve's `postStartup`/`preShutdown` handling
@@ -167,12 +106,12 @@ func (h *ReferenceHandler) serveDispatch(v any, stdout io.Writer) int {
 func (h *ReferenceHandler) serveLifecycleHook(subcommand string, v any, stdout io.Writer) int {
 	if err := Check("handler."+subcommand, v); err != nil {
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": err.Error()})
-		return ExitError
+		return participant.ExitError
 	}
 	obj := v.(map[string]any)
 	id, _ := obj["id"].(string)
 	writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "id": id, "outcome": "ok"})
-	return ExitOK
+	return participant.ExitOK
 }
 
 // serveValidate is Serve's `validate` handling (docket pg2-12gr4.8): the optional
@@ -181,10 +120,10 @@ func (h *ReferenceHandler) serveLifecycleHook(subcommand string, v any, stdout i
 func (h *ReferenceHandler) serveValidate(v any, stdout io.Writer) int {
 	if err := Check("handler.validate", v); err != nil {
 		writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "error": err.Error()})
-		return ExitError
+		return participant.ExitError
 	}
 	writeReply(stdout, map[string]any{"schemaVersion": schemas.SchemaVersion, "problems": []string{}, "warnings": []string{}})
-	return ExitOK
+	return participant.ExitOK
 }
 
 // Seen reports whether the handler has already received the given event id

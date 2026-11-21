@@ -1,5 +1,8 @@
 {
   "shared": [
+    "api/event",
+    "api/participant",
+    "api/participant/coreclient",
     "api/status",
     "conformance",
     "conformance/driver",

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -48,7 +49,7 @@ func TestLevelIngest_outcomesAndReplySchema(t *testing.T) {
 	body := ingestJSON(f, "cpu", "HIGH", "host-sensor", 0)
 	for i, want := range []string{"accepted", "idempotent"} {
 		reply, code := serveVerb(t, svc, SubcommandLevelIngest, body)
-		if code != conformance.ExitOK || reply["outcome"] != want {
+		if code != participant.ExitOK || reply["outcome"] != want {
 			t.Fatalf("call %d: code=%d reply=%v, want %s", i, code, reply, want)
 		}
 		if err := conformance.Check(LevelIngestReplySchema, reply); err != nil {
@@ -74,7 +75,7 @@ func TestLevelSet_overrideWinsThenExpiresToSensor(t *testing.T) {
 	svc, f := levelVerbService(t)
 	serveVerb(t, svc, SubcommandLevelIngest, ingestJSON(f, "cpu", "HIGH", "host-sensor", 0))
 	reply, code := serveVerb(t, svc, SubcommandLevelSet, `{"schemaVersion":"1","resource":"cpu","level":"LOW","for_s":3600}`)
-	if code != conformance.ExitOK || reply["until_cleared"] != false || reply["expires_at"] == nil {
+	if code != participant.ExitOK || reply["until_cleared"] != false || reply["expires_at"] == nil {
 		t.Fatalf("set: code=%d %v", code, reply)
 	}
 	if err := conformance.Check(LevelSetReplySchema, reply); err != nil {
@@ -110,7 +111,7 @@ func TestLevelSet_overrideWinsThenExpiresToSensor(t *testing.T) {
 func TestLevelSet_untilClearedNeverLapsAndClearRemovesIt(t *testing.T) {
 	svc, f := levelVerbService(t)
 	reply, code := serveVerb(t, svc, SubcommandLevelSet, `{"schemaVersion":"1","resource":"cpu","level":"HIGH","owner":"someone","until_cleared":true}`)
-	if code != conformance.ExitOK || reply["until_cleared"] != true || reply["expires_at"] != nil {
+	if code != participant.ExitOK || reply["until_cleared"] != true || reply["expires_at"] != nil {
 		t.Fatalf("set: %d %v", code, reply)
 	}
 	f.clk.advance(30 * 24 * time.Hour)
@@ -120,7 +121,7 @@ func TestLevelSet_untilClearedNeverLapsAndClearRemovesIt(t *testing.T) {
 		t.Fatalf("until-cleared entry: %v", e)
 	}
 	reply, code = serveVerb(t, svc, SubcommandLevelClear, `{"schemaVersion":"1","resource":"cpu"}`)
-	if code != conformance.ExitOK || len(reply["cleared"].([]any)) != 1 {
+	if code != participant.ExitOK || len(reply["cleared"].([]any)) != 1 {
 		t.Fatalf("clear: %d %v", code, reply)
 	}
 	if err := conformance.Check(LevelClearReplySchema, reply); err != nil {
@@ -146,12 +147,12 @@ func TestLevelSet_rejections(t *testing.T) {
 		"level not in scale":              `{"schemaVersion":"1","resource":"cpu","level":"PLENTY","for_s":60}`,
 	} {
 		reply, code := serveVerb(t, svc, SubcommandLevelSet, req)
-		if code != conformance.ExitError || reply["error"] == nil {
+		if code != participant.ExitError || reply["error"] == nil {
 			t.Errorf("%s: code=%d reply=%v, want the error envelope", name, code, reply)
 		}
 	}
 	// exactly 24h is accepted
-	if _, code := serveVerb(t, svc, SubcommandLevelSet, `{"schemaVersion":"1","resource":"cpu","level":"LOW","for_s":86400}`); code != conformance.ExitOK {
+	if _, code := serveVerb(t, svc, SubcommandLevelSet, `{"schemaVersion":"1","resource":"cpu","level":"LOW","for_s":86400}`); code != participant.ExitOK {
 		t.Errorf("24h override rejected")
 	}
 }
@@ -161,13 +162,13 @@ func TestLevelClear_allClearsEveryOverride(t *testing.T) {
 	serveVerb(t, svc, SubcommandLevelSet, `{"schemaVersion":"1","resource":"cpu","level":"LOW","until_cleared":true}`)
 	serveVerb(t, svc, SubcommandLevelSet, `{"schemaVersion":"1","resource":"git_auth","level":"AVAILABLE","for_s":60}`)
 	reply, code := serveVerb(t, svc, SubcommandLevelClear, `{"schemaVersion":"1","all":true}`)
-	if code != conformance.ExitOK || len(reply["cleared"].([]any)) != 2 {
+	if code != participant.ExitOK || len(reply["cleared"].([]any)) != 2 {
 		t.Fatalf("clear all: %d %v", code, reply)
 	}
-	if _, code = serveVerb(t, svc, SubcommandLevelClear, `{"schemaVersion":"1"}`); code != conformance.ExitError {
+	if _, code = serveVerb(t, svc, SubcommandLevelClear, `{"schemaVersion":"1"}`); code != participant.ExitError {
 		t.Fatalf("neither resource nor all must be refused")
 	}
-	if _, code = serveVerb(t, svc, SubcommandLevelClear, `{"schemaVersion":"1","resource":"nope"}`); code != conformance.ExitError {
+	if _, code = serveVerb(t, svc, SubcommandLevelClear, `{"schemaVersion":"1","resource":"nope"}`); code != participant.ExitError {
 		t.Fatalf("unknown resource must be refused")
 	}
 }
@@ -198,7 +199,7 @@ func TestStatusReply_carriesLevelsAndValidates(t *testing.T) {
 	svc, _ := levelVerbService(t)
 	serveVerb(t, svc, SubcommandLevelSet, `{"schemaVersion":"1","resource":"cpu","level":"HIGH","for_s":60}`)
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("status exit %d", code)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -214,7 +215,7 @@ func TestStatusReply_carriesLevelsAndValidates(t *testing.T) {
 
 func TestLevelRefresh_delegatesAndFormats(t *testing.T) {
 	svc, _ := levelVerbService(t)
-	if _, code := serveVerb(t, svc, SubcommandLevelRefresh, `{"schemaVersion":"1","resources":[]}`); code != conformance.ExitError {
+	if _, code := serveVerb(t, svc, SubcommandLevelRefresh, `{"schemaVersion":"1","resources":[]}`); code != participant.ExitError {
 		t.Fatal("no refresher must be an error")
 	}
 	fr := &fakeRefresher{out: []LevelRefreshResult{
@@ -224,7 +225,7 @@ func TestLevelRefresh_delegatesAndFormats(t *testing.T) {
 	}}
 	svc.levelRefresher = fr
 	reply, code := serveVerb(t, svc, SubcommandLevelRefresh, `{"schemaVersion":"1","resources":["cpu","git_auth","x"]}`)
-	if code != conformance.ExitOK || strings.Join(fr.got, ",") != "cpu,git_auth,x" {
+	if code != participant.ExitOK || strings.Join(fr.got, ",") != "cpu,git_auth,x" {
 		t.Fatalf("code=%d got=%v", code, fr.got)
 	}
 	if err := conformance.Check(LevelRefreshReplySchema, reply); err != nil {
@@ -238,7 +239,7 @@ func TestLevelRefresh_delegatesAndFormats(t *testing.T) {
 func TestLevelVerbs_noProjectionIsAnError(t *testing.T) {
 	svc := startedServiceForStatus(t, nil)
 	for _, v := range []string{SubcommandLevelList, SubcommandLevelSet, SubcommandLevelClear, SubcommandLevelIngest} {
-		if _, code := serveVerb(t, svc, v, `{"schemaVersion":"1"}`); code != conformance.ExitError {
+		if _, code := serveVerb(t, svc, v, `{"schemaVersion":"1"}`); code != participant.ExitError {
 			t.Errorf("%s: want an error without a projection", v)
 		}
 	}

@@ -89,10 +89,10 @@ func TestWriteBusyReply_omitsEmptyDetail(t *testing.T) {
 }
 
 func TestOutcomeReply_startedAtOnlyWhenSet(t *testing.T) {
-	if _, has := OutcomeReply("r", "o", time.Time{})["startedAt"]; has {
+	if _, has := wireMap(t, OutcomeReply("r", "o", time.Time{}))["startedAt"]; has {
 		t.Error("zero startedAt must be omitted")
 	}
-	r := OutcomeReply("r", "o", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+	r := wireMap(t, OutcomeReply("r", "o", time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)))
 	if r["id"] != "r" || r["outcome"] != "o" || r["startedAt"] == nil {
 		t.Errorf("reply = %v", r)
 	}
@@ -102,7 +102,7 @@ func TestOutcomeReply_startedAtOnlyWhenSet(t *testing.T) {
 // inline-outcome reply plus the optional skipped reason, valid against the
 // handler.dispatch-reply schema, and carrying none of the decline body's fields.
 func TestSkippedReply_isAnOutcomeReplyWithTheReason(t *testing.T) {
-	reply := SkippedReply("dsp-1", "skipped-bead-closed", "pg2-x")
+	reply := wireMap(t, SkippedReply("dsp-1", "skipped-bead-closed", "pg2-x"))
 	if err := schemas.Validate("handler.dispatch-reply", reply); err != nil {
 		t.Fatalf("the skipped reply does not validate: %v", err)
 	}
@@ -171,18 +171,18 @@ func TestEmitDispatchDecline_carriesEventAndDispatchID(t *testing.T) {
 // optional properties added together; the reply stays schema-valid with or
 // without them, and a half or out-of-range pair adds nothing.
 func TestWithSupervision_addsBothOrNeither(t *testing.T) {
-	r := WithSupervision(OutcomeReply("r", "o", time.Time{}), "sess-1", 2)
+	r := wireMap(t, WithSupervision(OutcomeReply("r", "o", time.Time{}), "sess-1", 2))
 	if err := schemas.Validate("handler.dispatch-reply", r); err != nil {
 		t.Fatalf("reply with supervision does not validate: %v", err)
 	}
-	if r["session"] != "sess-1" || r["supervisors"] != 2 {
+	if r["session"] != "sess-1" || r["supervisors"] != float64(2) {
 		t.Fatalf("reply = %v", r)
 	}
 	for _, c := range []struct {
 		session string
 		n       int
 	}{{"", 2}, {"s", 0}, {"s", -1}, {"", 0}} {
-		got := WithSupervision(OutcomeReply("r", "o", time.Time{}), c.session, c.n)
+		got := wireMap(t, WithSupervision(OutcomeReply("r", "o", time.Time{}), c.session, c.n))
 		if _, has := got["session"]; has {
 			t.Errorf("(%q,%d) must add nothing: %v", c.session, c.n, got)
 		}
@@ -193,9 +193,24 @@ func TestWithSupervision_addsBothOrNeither(t *testing.T) {
 			t.Errorf("plain reply invalid: %v", err)
 		}
 	}
-	bad := OutcomeReply("r", "o", time.Time{})
+	bad := wireMap(t, OutcomeReply("r", "o", time.Time{}))
 	bad["session"], bad["supervisors"] = "s", 0
 	if err := schemas.Validate("handler.dispatch-reply", bad); err == nil {
 		t.Error("supervisors 0 must fail the schema")
 	}
+}
+
+// wireMap renders a typed reply as the generic JSON object that goes on the
+// wire, for the assertions below that read it by property name.
+func wireMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
 }

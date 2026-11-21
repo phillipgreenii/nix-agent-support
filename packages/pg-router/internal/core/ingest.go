@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -107,19 +107,19 @@ func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 	data, err := io.ReadAll(stdin)
 	if err != nil {
 		writeBody(stdout, errorReply("ingest-event: read request: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	req, err := decodeIngest(data)
 	if err != nil {
 		writeBody(stdout, errorReply(err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 
 	reply := ingestReply{SchemaVersion: schemas.SchemaVersion, ID: req.ID, Rejected: []rejection{}}
 	for _, raw := range req.Events {
 		// Schema first (INV-INTF-2): the conformance checker is the declared
 		// contract, so nothing enters the queue that the suite would reject.
-		if err := conformance.CheckBytes(eventSchema, raw); err != nil {
+		if err := schemas.CheckBytes(eventSchema, raw); err != nil {
 			reply.Rejected = append(reply.Rejected, rejection{ID: rawEventID(raw), Reason: "malformed: " + err.Error()})
 			continue
 		}
@@ -183,13 +183,13 @@ func (s *Service) handleIngestEvent(stdin io.Reader, stdout io.Writer) int {
 	body, err := json.Marshal(reply)
 	if err != nil { // unreachable: ingestReply holds only strings, an int and a slice of strings
 		writeBody(stdout, errorReply("ingest-event: marshal reply: "+err.Error()))
-		return conformance.ExitError
+		return participant.ExitError
 	}
 	writeBody(stdout, body)
 	if len(reply.Rejected) > 0 {
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // decodeIngest validates the request ENVELOPE and returns the tracking id with

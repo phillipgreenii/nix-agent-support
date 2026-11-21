@@ -28,15 +28,14 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/api/status"
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/schemas"
 )
 
 // HandlerClient replaces executor.For/Deps (Task 5.4's Interfaces block):
@@ -295,27 +294,6 @@ func (c *Client) runner() Runner {
 	return OSRunner{}
 }
 
-// dispatchRequest / dispatchReply mirror
-// packages/pg-router/schemas/handler.dispatch{,-reply}.schema.json —
-// docs/decisions/wire.md's illustrative shapes, realized here as the
-// concrete Go types this client encodes/decodes.
-type dispatchRequest struct {
-	SchemaVersion string        `json:"schemaVersion"`
-	ID            string        `json:"id"`
-	Event         dispatchEvent `json:"event"`
-	// Role is the role object for the role's own handler (every role sets
-	// handler); omitted only for a role built in code without one.
-	Role *roleObject `json:"role,omitempty"`
-}
-
-// roleObject is the request's role property: {"name": ..., "config": {...}}.
-// config is always present, {} when the role has no [role.config]
-// (schemas/handler.*.schema.json "role").
-type roleObject struct {
-	Name   string         `json:"name"`
-	Config map[string]any `json:"config"`
-}
-
 // SentRole is the role object core puts in every handler request for role, in
 // the JSON shape it is sent in ({"name": ..., "config": {...}}), and false for a
 // role built in code without handler (whose requests carry no role object). `pg-router config
@@ -336,7 +314,7 @@ func SentRole(role roles.Role) (json.RawMessage, bool) {
 
 // roleFor builds the request's role object, nil for a role built in code
 // without handler.
-func roleFor(role roles.Role) *roleObject {
+func roleFor(role roles.Role) *participant.Role {
 	if role.Handler == "" {
 		return nil
 	}
@@ -344,53 +322,7 @@ func roleFor(role roles.Role) *roleObject {
 	if cfg == nil {
 		cfg = map[string]any{}
 	}
-	return &roleObject{Name: role.Name, Config: cfg}
-}
-
-type dispatchEvent struct {
-	ID        string         `json:"id"`
-	Type      string         `json:"type"`
-	ExpiresAt string         `json:"expiresAt,omitempty"`
-	Payload   map[string]any `json:"payload"`
-}
-
-type dispatchReply struct {
-	SchemaVersion string `json:"schemaVersion"`
-	ID            string `json:"id"`
-	Deferred      bool   `json:"deferred,omitempty"`
-	Outcome       string `json:"outcome,omitempty"`
-	Skipped       string `json:"skipped,omitempty"`
-	Error         string `json:"error,omitempty"`
-	// StartedAt is the OPTIONAL adopted dispatch's own start (DEC-EVENT-5), kept
-	// raw so that a value of the wrong JSON type, like one that is not an RFC 3339
-	// instant, can be ignored with a warning (reportedStart) instead of failing
-	// the whole reply decode and with it a dispatch that worked.
-	StartedAt json.RawMessage `json:"startedAt,omitempty"`
-	// Session and Supervisors are the OPTIONAL supervision report, kept raw like
-	// StartedAt so a value of the wrong JSON type is ignored (reportedSupervision)
-	// instead of failing a dispatch that worked.
-	Session     json.RawMessage `json:"session,omitempty"`
-	Supervisors json.RawMessage `json:"supervisors,omitempty"`
-}
-
-// decodeDeclineBody decodes the OPTIONAL exit-9 reply body (bead pg2-j4uwg; see
-// BusyDecline's doc), decoded LENIENTLY: a body that is absent, empty, not JSON
-// or not an object yields the zero value, and each of reason, kind and detail is
-// decoded on its own, so a field of the wrong JSON type is dropped without
-// losing the others. Unknown fields are ignored.
-func decodeDeclineBody(stdout []byte) BusyDecline {
-	var fields map[string]json.RawMessage
-	if len(stdout) == 0 || json.Unmarshal(stdout, &fields) != nil {
-		return BusyDecline{}
-	}
-	str := func(key string) string {
-		var v string
-		if raw, ok := fields[key]; ok && json.Unmarshal(raw, &v) == nil {
-			return v
-		}
-		return ""
-	}
-	return BusyDecline{Reason: str("reason"), Kind: str("kind"), Detail: str("detail")}
+	return &participant.Role{Name: role.Name, Config: cfg}
 }
 
 // SchemaVersion is the wire envelope version this client stamps on every
@@ -420,10 +352,10 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 	if err != nil {
 		return Reply{}, fmt.Errorf("wireclient: mint dispatch id: %w", err)
 	}
-	req := dispatchRequest{
+	req := participant.DispatchRequest{
 		SchemaVersion: SchemaVersion,
 		ID:            id,
-		Event: dispatchEvent{
+		Event: participant.DispatchEvent{
 			ID:      evt.ID,
 			Type:    evt.Type,
 			Payload: evt.Payload,
@@ -444,7 +376,7 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 	}
 	switch code {
 	case 0:
-		var reply dispatchReply
+		var reply participant.DispatchReply
 		if len(stdout) == 0 {
 			return Reply{}, fmt.Errorf("wireclient: role %q: empty reply on exit 0", role.Name)
 		}
@@ -454,8 +386,8 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		if reply.Error != "" {
 			return Reply{}, fmt.Errorf("wireclient: role %q: %s", role.Name, reply.Error)
 		}
-		session, supervisors := reportedSupervision(reply.Session, reply.Supervisors)
-		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome, Skipped: reply.Skipped, StartedAt: reportedStart(role.Name, reply.StartedAt), Session: session, Supervisors: supervisors}, nil
+		session, supervisors := reply.ReportedSupervision()
+		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome, Skipped: reply.Skipped, StartedAt: reportedStart(role.Name, reply), Session: session, Supervisors: supervisors}, nil
 	case 9: // DEC-WIRE-1's "Coarse exit codes": 9 is busy.
 		// The OPTIONAL busy-decline reply body (bead pg2-j4uwg): read
 		// opportunistically, exactly the same "peek at stdout on a non-zero
@@ -463,11 +395,11 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		// Error field. An absent/empty/malformed body still declines with
 		// every field "" — DEC-WIRE-1's "no body required" stays fully legal,
 		// and an unknown or wrong-typed field never fails the decline.
-		bd := decodeDeclineBody(stdout)
-		return Reply{}, &bd
+		d := participant.DecodeDecline(stdout)
+		return Reply{}, &BusyDecline{Reason: d.Reason, Kind: d.Kind, Detail: d.Detail}
 	default:
 		if len(stdout) > 0 {
-			var reply dispatchReply
+			var reply participant.DispatchReply
 			if err := json.Unmarshal(stdout, &reply); err == nil && reply.Error != "" {
 				return Reply{}, &ExitError{Role: role.Name, Code: code, Detail: reply.Error}
 			}
@@ -476,47 +408,17 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 	}
 }
 
-// reportedStart decodes a reply's optional startedAt (DEC-EVENT-5, bead
-// pg2-dm6de). An absent or null field is the zero time, silently: a reply
-// without it is today's reply. A field that is not a JSON string holding an RFC
-// 3339 instant is ignored the same way but with a warning, because it is an
-// advisory field and a handler's slip in it must not fail, and so risk re-running,
-// a dispatch that worked.
-func reportedStart(role string, raw json.RawMessage) time.Time {
-	if len(raw) == 0 || string(raw) == "null" {
-		return time.Time{}
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err != nil {
-		slog.Warn("wireclient: ignoring a startedAt that is not a string in a dispatch reply", "role", role, "startedAt", string(raw))
-		return time.Time{}
-	}
-	t, err := time.Parse(time.RFC3339Nano, s)
+// reportedStart decodes a reply's optional startedAt (DEC-EVENT-5). A field that
+// is not a JSON string holding an RFC 3339 instant is ignored with a warning,
+// because it is an advisory field and a handler's slip in it must not fail, and
+// so risk re-running, a dispatch that worked.
+func reportedStart(role string, reply participant.DispatchReply) time.Time {
+	t, err := reply.ReportedStart()
 	if err != nil {
-		slog.Warn("wireclient: ignoring a startedAt that is not an RFC 3339 instant in a dispatch reply", "role", role, "startedAt", s, "err", err)
+		slog.Warn("wireclient: ignoring a startedAt in a dispatch reply", "role", role, "startedAt", string(reply.StartedAt), "err", err)
 		return time.Time{}
 	}
 	return t
-}
-
-// reportedSupervision vets the reply's optional session and supervisors: both
-// must be present, session a non-empty JSON string and supervisors a JSON
-// integer of at least 1. Anything else (only one present, an empty session, a
-// non-integer or smaller supervisors) yields ("", 0), so the caller leaves the
-// supervisors gauge unset.
-func reportedSupervision(rawSession, rawSupervisors json.RawMessage) (string, int) {
-	if len(rawSession) == 0 || len(rawSupervisors) == 0 {
-		return "", 0
-	}
-	var session string
-	if err := json.Unmarshal(rawSession, &session); err != nil || session == "" {
-		return "", 0
-	}
-	n, err := strconv.ParseInt(strings.TrimSpace(string(rawSupervisors)), 10, 32)
-	if err != nil || n < 1 {
-		return "", 0
-	}
-	return session, int(n)
 }
 
 // ExitError is Dispatch's error for a handler subprocess that exited with a
@@ -538,23 +440,6 @@ func (e *ExitError) Error() string {
 		return fmt.Sprintf("wireclient: role %q exited %d: %s", e.Role, e.Code, e.Detail)
 	}
 	return fmt.Sprintf("wireclient: role %q exited %d", e.Role, e.Code)
-}
-
-// lifecycleRequest / lifecycleReply mirror
-// packages/pg-router/schemas/handler.postStartup{,-reply}.schema.json and
-// .../handler.preShutdown{,-reply}.schema.json — both hooks share one wire
-// shape (no event, no deferred branch), so one pair of types serves both.
-type lifecycleRequest struct {
-	SchemaVersion string      `json:"schemaVersion"`
-	ID            string      `json:"id"`
-	Role          *roleObject `json:"role,omitempty"`
-}
-
-type lifecycleReply struct {
-	SchemaVersion string `json:"schemaVersion"`
-	ID            string `json:"id"`
-	Outcome       string `json:"outcome,omitempty"`
-	Error         string `json:"error,omitempty"`
 }
 
 // PostStartup implements HandlerClient: it sends handler.postStartup to
@@ -597,7 +482,7 @@ func (c *Client) lifecycleCall(ctx context.Context, subcommand string, role role
 	if err != nil {
 		return Reply{}, fmt.Errorf("wireclient: mint %s id: %w", subcommand, err)
 	}
-	body, err := json.Marshal(lifecycleRequest{SchemaVersion: SchemaVersion, ID: id, Role: roleFor(role)})
+	body, err := json.Marshal(participant.LifecycleRequest{SchemaVersion: SchemaVersion, ID: id, Role: roleFor(role)})
 	if err != nil {
 		return Reply{}, fmt.Errorf("wireclient: encode %s request: %w", subcommand, err)
 	}
@@ -608,7 +493,7 @@ func (c *Client) lifecycleCall(ctx context.Context, subcommand string, role role
 	}
 	if code != 0 {
 		if len(stdout) > 0 {
-			var reply lifecycleReply
+			var reply participant.LifecycleReply
 			if err := json.Unmarshal(stdout, &reply); err == nil && reply.Error != "" {
 				return Reply{}, fmt.Errorf("wireclient: role %q %s exited %d: %s", role.Name, subcommand, code, reply.Error)
 			}
@@ -618,7 +503,7 @@ func (c *Client) lifecycleCall(ctx context.Context, subcommand string, role role
 	if len(stdout) == 0 {
 		return Reply{}, fmt.Errorf("wireclient: role %q: empty reply on exit 0", role.Name)
 	}
-	var reply lifecycleReply
+	var reply participant.LifecycleReply
 	if err := json.Unmarshal(stdout, &reply); err != nil {
 		return Reply{}, fmt.Errorf("wireclient: role %q: decode %s reply: %w", role.Name, subcommand, err)
 	}
@@ -676,7 +561,7 @@ func (c *Client) Validate(ctx context.Context, role roles.Role) (ValidateResult,
 	if err != nil {
 		return ValidateResult{}, fmt.Errorf("wireclient: mint validate id: %w", err)
 	}
-	body, err := json.Marshal(lifecycleRequest{SchemaVersion: SchemaVersion, ID: id, Role: roleFor(role)})
+	body, err := json.Marshal(participant.LifecycleRequest{SchemaVersion: SchemaVersion, ID: id, Role: roleFor(role)})
 	if err != nil {
 		return ValidateResult{}, fmt.Errorf("wireclient: encode validate request: %w", err)
 	}
@@ -688,13 +573,13 @@ func (c *Client) Validate(ctx context.Context, role roles.Role) (ValidateResult,
 		return ValidateResult{}, err
 	}
 	switch code {
-	case conformance.ExitUsage:
+	case participant.ExitUsage:
 		return ValidateResult{Supported: false}, nil
-	case conformance.ExitOK:
+	case participant.ExitOK:
 	default:
 		return ValidateResult{}, fmt.Errorf("wireclient: role %q validate exited %d", role.Name, code)
 	}
-	if err := conformance.CheckBytes("handler.validate-reply", stdout); err != nil {
+	if err := schemas.CheckBytes("handler.validate-reply", stdout); err != nil {
 		return ValidateResult{}, fmt.Errorf("wireclient: role %q: validate reply: %w", role.Name, err)
 	}
 	var reply validateReply

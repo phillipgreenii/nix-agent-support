@@ -25,7 +25,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/cliutil"
 	"github.com/phillipgreenii/x/jsonllogger"
 )
@@ -40,15 +40,15 @@ func main() {
 func run(args []string) int {
 	if len(args) == 0 {
 		cliutil.PrintUsageErr("pg-router-handler-command: a subcommand is required", usageLine)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	switch args[0] {
 	case "-h", "--help", "help":
 		fmt.Print(helpText)
-		return conformance.ExitOK
+		return participant.ExitOK
 	case "-v", "--version", "version":
 		fmt.Println(version)
-		return conformance.ExitOK
+		return participant.ExitOK
 	case "dispatch":
 		return runDispatch(args[1:])
 	case "postStartup":
@@ -59,6 +59,6 @@ func run(args []string) int {
 		return runValidate(args[1:])
 	default:
 		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-command: unknown subcommand %q", args[0]), usageLine)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 }

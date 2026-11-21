@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/gwm"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
 
@@ -55,7 +55,7 @@ func (r *ccpoolRun) emitGWM(level, kind, msg string, fields map[string]any) {
 // leaseWorktree leases the dispatch's worktree and maps a refusal to the
 // dispatch's outcome. On error the returned Result is the failure action
 // already applied to the bead (empty for a decline).
-func (r *ccpoolRun) leaseWorktree(ctx context.Context, d DispatchContext, cc *roles.CCPoolConfig) (string, report.Result, error) {
+func (r *ccpoolRun) leaseWorktree(ctx context.Context, d DispatchContext, cc *roles.CCPoolConfig) (string, participant.Report, error) {
 	iso := gwmIsolation{
 		client: r.deps.GWM, git: r.deps.gitRun(), repoRoot: r.deps.Cfg.RepoRoot,
 		ttl: cc.Isolation.LeaseTTL(), readOnly: cc.Isolation.ReadOnly(),
@@ -88,13 +88,13 @@ func (r *ccpoolRun) leaseWorktree(ctx context.Context, d DispatchContext, cc *ro
 			map[string]any{"role": d.Role.Name, "bead": d.Item.ID, "lease": l.LeaseID, "branch": l.Branch, "expected": want})
 		slog.Warn("renewed worktree lease is on an unexpected branch", "bead", d.Item.ID, "branch", l.Branch, "expected", want)
 	}
-	return l.Path, report.Result{}, nil
+	return l.Path, participant.Report{}, nil
 }
 
 // mapGWMRefusal turns a failed pg-gwm lease into the dispatch outcome and
 // writes the events row (pg-gwm counts its own refusals; the handler adds no
 // counter).
-func (r *ccpoolRun) mapGWMRefusal(ctx context.Context, d DispatchContext, cc *roles.CCPoolConfig, err error) (report.Result, error) {
+func (r *ccpoolRun) mapGWMRefusal(ctx context.Context, d DispatchContext, cc *roles.CCPoolConfig, err error) (participant.Report, error) {
 	fields := map[string]any{"role": d.Role.Name, "bead": d.Item.ID, "error": err.Error()}
 	var ge *gwm.Error
 	if errors.As(err, &ge) {
@@ -114,13 +114,13 @@ func (r *ccpoolRun) mapGWMRefusal(ctx context.Context, d DispatchContext, cc *ro
 	}
 	r.emitGWM(level, "gwm_refusal", "pg-gwm refused the worktree lease", fields)
 	if wrapped != nil {
-		return report.Result{}, wrapped
+		return participant.Report{}, wrapped
 	}
 	// ref-unresolvable, broken and anything else: a dispatch failure, with the
 	// role's on_dispatch_fail action.
-	var res report.Result
+	var res participant.Report
 	if cc.OnDispatchFail == roles.DispatchUnclaim && r.releaseAfterFailedSend(ctx, d.Item.ID) {
-		res = failureAction(report.Unclaimed, d.Item.ID)
+		res = failureAction(participant.Unclaimed, d.Item.ID)
 	}
 	return res, fmt.Errorf("isolation %s: %w", d.Item.ID, err)
 }

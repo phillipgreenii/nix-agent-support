@@ -5,12 +5,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 )
 
@@ -45,7 +45,7 @@ func TestDispatch_notIngested_releaseIsGuardedByTheObservedHolder(t *testing.T) 
 	if !dtest.HasUpdate(bd, guardedRelease) {
 		t.Errorf("the release must carry the observed holder's guard; updates=%v", bd.Updates)
 	}
-	if v := verbOf(res); v != report.Unclaimed {
+	if v := verbOf(res); v != participant.Unclaimed {
 		t.Errorf("a landed release is reported as Unclaimed; got %q", v)
 	}
 	// The failure names its cause, and keeps the "prompt not ingested" text the
@@ -92,7 +92,7 @@ func TestDispatch_dispatchUnclaim_releaseIsGuardedAndRefusalLogged(t *testing.T)
 	if !dtest.HasUpdate(bd, guardedRelease) {
 		t.Errorf("the on_dispatch_fail release must carry the holder's guard; updates=%v", bd.Updates)
 	}
-	if v := verbOf(res); v != report.Unclaimed {
+	if v := verbOf(res); v != participant.Unclaimed {
 		t.Errorf("a landed release is reported as Unclaimed; got %q", v)
 	}
 
@@ -110,7 +110,7 @@ func TestDispatch_dispatchUnclaim_releaseIsGuardedAndRefusalLogged(t *testing.T)
 
 // dispatchWorkerWithBD is dispatchWorkerRole with the bd runner the executor
 // sees (run) separate from the ScriptBD that records it (rec).
-func dispatchWorkerWithBD(t *testing.T, cc *dtest.FakeCC, run beads.Runner, rec *dtest.ScriptBD, cfg config.Config, role roles.Role, ext string) (report.Result, error) {
+func dispatchWorkerWithBD(t *testing.T, cc *dtest.FakeCC, run beads.Runner, rec *dtest.ScriptBD, cfg config.Config, role roles.Role, ext string) (participant.Report, error) {
 	t.Helper()
 	cfg.WorktreeDir = t.TempDir()
 	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-w"}}

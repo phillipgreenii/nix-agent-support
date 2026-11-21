@@ -15,7 +15,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/executor"
 	"github.com/phillipgreenii/pg-router/internal/handlers/handlerstate"
@@ -140,11 +140,11 @@ func TestJanitor_flagParsing(t *testing.T) {
 	t.Setenv(rolefile.EnvConfig, "")
 	sw := Sweeper{Help: "usage"}
 	for name, args := range cases {
-		if got := sw.RunJanitor(args); got != conformance.ExitUsage {
-			t.Errorf("%s: exit %d, want %d", name, got, conformance.ExitUsage)
+		if got := sw.RunJanitor(args); got != participant.ExitUsage {
+			t.Errorf("%s: exit %d, want %d", name, got, participant.ExitUsage)
 		}
 	}
-	if got := sw.RunJanitor([]string{"-h"}); got != conformance.ExitOK {
+	if got := sw.RunJanitor([]string{"-h"}); got != participant.ExitOK {
 		t.Errorf("-h: exit %d, want 0", got)
 	}
 }
@@ -152,7 +152,7 @@ func TestJanitor_flagParsing(t *testing.T) {
 func TestJanitor_poolLevelPassesRunOncePerDistinctPool(t *testing.T) {
 	f := newJanitorFixture(t, [2]string{"a", "/pools/one"}, [2]string{"b", "/pools/one"}, [2]string{"c", "/pools/two"}, [2]string{"d", ""}, [2]string{"e", ""})
 	rec := &recorder{}
-	if code, _ := f.run(rec.passes()); code != conformance.ExitOK {
+	if code, _ := f.run(rec.passes()); code != participant.ExitOK {
 		t.Fatalf("exit %d", code)
 	}
 	// pools: one, two, and the unset pool (d and e): 3 closed-bead runs, not 5.
@@ -198,7 +198,7 @@ func TestJanitor_zeroRolesStillCompletes(t *testing.T) {
 	f := newJanitorFixture(t)
 	rec := &recorder{}
 	code, out := f.run(rec.passes())
-	if code != conformance.ExitOK || !strings.Contains(out, "outcome=completed") {
+	if code != participant.ExitOK || !strings.Contains(out, "outcome=completed") {
 		t.Fatalf("exit %d, out %q", code, out)
 	}
 	if rec.lockGC != 1 {
@@ -219,7 +219,7 @@ func TestJanitor_singleFlightSecondRunSkips(t *testing.T) {
 	}
 	rec := &recorder{}
 	code, out := f.run(rec.passes())
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Errorf("a skipped run exits %d, want 0", code)
 	}
 	if !strings.Contains(out, "already running") {
@@ -257,7 +257,7 @@ func TestJanitor_deadlineBoundsASlowRoleAndRecordsIt(t *testing.T) {
 	}
 	start := time.Now()
 	code, out := f.run(p)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit %d", code)
 	}
 	if took := time.Since(start); took > 3*time.Second {
@@ -281,7 +281,7 @@ func TestJanitor_aPassFailingDoesNotStopTheRest(t *testing.T) {
 	p := rec.passes()
 	p.orphan = func(context.Context, roles.Role, config.Config, executor.Deps) int { panic("boom") }
 	code, out := f.run(p)
-	if code != conformance.ExitOK || !strings.Contains(out, "outcome=completed") {
+	if code != participant.ExitOK || !strings.Contains(out, "outcome=completed") {
 		t.Fatalf("exit %d out %q", code, out)
 	}
 	if rec.lockGC != 1 || len(rec.closedBead) != 1 {
@@ -337,7 +337,7 @@ func TestJanitor_dryRunChangesNothing(t *testing.T) {
 	f.opts.dryRun = true
 	rec := &recorder{}
 	code, out := f.run(rec.passes())
-	if code != conformance.ExitOK || !strings.Contains(out, "dry run") {
+	if code != participant.ExitOK || !strings.Contains(out, "dry run") {
 		t.Fatalf("exit %d out %q", code, out)
 	}
 	if rec.lockGC != 0 || len(f.events()) != 0 {
@@ -353,8 +353,8 @@ func TestJanitor_invalidRoleFileIsAUsageError(t *testing.T) {
 	bad := filepath.Join(t.TempDir(), "bad.json")
 	_ = os.WriteFile(bad, []byte(`{"role":{"name":"x","config":{"nope":1}}}`), 0o644)
 	f.opts.roleFiles = []string{bad}
-	if code, _ := f.run((&recorder{}).passes()); code != conformance.ExitUsage {
-		t.Errorf("exit %d, want %d", code, conformance.ExitUsage)
+	if code, _ := f.run((&recorder{}).passes()); code != participant.ExitUsage {
+		t.Errorf("exit %d, want %d", code, participant.ExitUsage)
 	}
 }
 
@@ -375,7 +375,7 @@ func TestJanitor_shareOverrunIsDeadlineAndNamesTheCutRole(t *testing.T) {
 		}
 		return 0
 	}
-	if code, out := f.run(p); code != conformance.ExitOK || !strings.Contains(out, "outcome=deadline") {
+	if code, out := f.run(p); code != participant.ExitOK || !strings.Contains(out, "outcome=deadline") {
 		t.Fatalf("exit %d out %q", code, out)
 	}
 	ev := f.events()
@@ -395,7 +395,7 @@ func TestJanitor_shareOverrunIsDeadlineAndNamesTheCutRole(t *testing.T) {
 func TestJanitor_runInsideEveryShareIsCompletedWithNoCutRole(t *testing.T) {
 	f := newJanitorFixture(t, [2]string{"a", ""}, [2]string{"b", ""})
 	rec := &recorder{}
-	if code, out := f.run(rec.passes()); code != conformance.ExitOK || !strings.Contains(out, "outcome=completed") {
+	if code, out := f.run(rec.passes()); code != participant.ExitOK || !strings.Contains(out, "outcome=completed") {
 		t.Fatalf("exit %d out %q", code, out)
 	}
 	ev := f.events()
@@ -425,7 +425,7 @@ func TestJanitor_cutRoleDoesNotHideTheRolesThatFinished(t *testing.T) {
 		}
 		return 0
 	}
-	if code, out := f.run(p); code != conformance.ExitOK || !strings.Contains(out, "outcome=deadline") {
+	if code, out := f.run(p); code != participant.ExitOK || !strings.Contains(out, "outcome=deadline") {
 		t.Fatalf("exit %d out %q", code, out)
 	}
 	var done []string

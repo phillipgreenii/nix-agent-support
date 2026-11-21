@@ -43,6 +43,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/core"
@@ -50,7 +51,6 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/eventlog"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/query"
-	"github.com/phillipgreenii/pg-router/internal/report"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/settle"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
@@ -428,7 +428,7 @@ func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, evt eventque
 }
 
 // buildResult stores the handler-reported outcome as pg-router's own opaque
-// dispatch record: reply.Outcome, relayed (see report.FromOutcome) with no switch on its value.
+// dispatch record: reply.Outcome, relayed (see participant.FromOutcome) with no switch on its value.
 // Before docket pg2-oju6w's Task 5.5 this method instead re-derived a
 // created/closed/handed-back verdict itself — a created-bead snapshot diff
 // (the retired snapshotIDs/createdByActor pair) plus a post-dispatch
@@ -443,18 +443,18 @@ func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, evt eventque
 // (wireclient.Client.Dispatch's own contract: Reply is the zero value on
 // error), and an accepted-but-outcome-less reply (reply.Outcome == "") has
 // nothing to record either — in both cases this returns an empty
-// report.Result. The dispatch error itself is already surfaced separately,
+// participant.Report. The dispatch error itself is already surfaced separately,
 // by emitResult's own dispatchErr-logging path.
-func (o *Orchestrator) buildResult(d discover.DispatchContext, reply wireclient.Reply, dispatchErr error) report.Result {
+func (o *Orchestrator) buildResult(d discover.DispatchContext, reply wireclient.Reply, dispatchErr error) participant.Report {
 	if dispatchErr != nil || reply.Outcome == "" {
-		return report.Result{}
+		return participant.Report{}
 	}
 	// A handler that returns the structured {"actions":[...]} shape (the
 	// ccpool handler JSON-encodes its Result.Fields() into outcome) has its
 	// verbs and refs relayed; any other string is stored verbatim as one
-	// verb. See report.FromOutcome (bead pg2-tq9q5): wrapping the raw body
+	// verb. See participant.FromOutcome (bead pg2-tq9q5): wrapping the raw body
 	// as the verb logged `{"actions":[]}` for every ccpool dispatch.
-	return report.FromOutcome(reply.Outcome, beadRefs([]string{d.Item.ID}))
+	return participant.FromOutcome(reply.Outcome, beadRefs([]string{d.Item.ID}))
 }
 
 // emitResult writes the dispatch report to the event log (when configured) and the
@@ -478,7 +478,7 @@ func (o *Orchestrator) buildResult(d discover.DispatchContext, reply wireclient.
 // wait-vs-run table can be computed from events.jsonl alone. The fields are
 // ADDITIVE: every key the row already carried is unchanged, so an existing
 // reader (a Loki pipeline, a jq one-liner) is unaffected.
-func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID string, res report.Result, dispatchErr error, meta dispatchMeta) {
+func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID string, res participant.Report, dispatchErr error, meta dispatchMeta) {
 	// A failed attempt that will be re-run (meta.WillRetry) is not a terminal
 	// failure: it logs at INFO, and WARN is kept for failures with no retry
 	// left (bead pg2-974a9m). Metrics are untouched; they are fed elsewhere.
@@ -565,10 +565,10 @@ func (m dispatchMeta) addTo(fields map[string]any) {
 	}
 }
 
-func beadRefs(ids []string) []report.Ref {
-	refs := make([]report.Ref, 0, len(ids))
+func beadRefs(ids []string) []participant.Ref {
+	refs := make([]participant.Ref, 0, len(ids))
 	for _, id := range ids {
-		refs = append(refs, report.Ref{Type: "bead", ID: id})
+		refs = append(refs, participant.Ref{Type: "bead", ID: id})
 	}
 	return refs
 }

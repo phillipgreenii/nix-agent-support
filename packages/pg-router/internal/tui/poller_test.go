@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/core"
 )
 
@@ -148,7 +148,7 @@ func TestSnapshot_MalformedReplyIsPollErrorNotPanic(t *testing.T) {
 	logDir := shortTestDir(t)
 	socketPath := core.SocketPath(logDir)
 	startFakeCore(t, socketPath, func(string, json.RawMessage) ([]byte, int) {
-		return []byte(`{"schemaVersion":"1","bogus":true}`), conformance.ExitOK
+		return []byte(`{"schemaVersion":"1","bogus":true}`), participant.ExitOK
 	})
 	writeDiscoveryRecord(t, logDir, socketPath, "tok")
 
@@ -168,7 +168,7 @@ func TestSnapshot_Exit9AdvancesBackoffSuppressesAsPollError(t *testing.T) {
 	logDir := shortTestDir(t)
 	socketPath := core.SocketPath(logDir)
 	startFakeCore(t, socketPath, func(string, json.RawMessage) ([]byte, int) {
-		return nil, conformance.ExitBusy
+		return nil, participant.ExitBusy
 	})
 	writeDiscoveryRecord(t, logDir, socketPath, "tok")
 
@@ -203,9 +203,9 @@ func TestSnapshot_AuthFailureDoesNotTriggerRediscover(t *testing.T) {
 	authFail.Store(true)
 	startFakeCore(t, socketPath, func(string, json.RawMessage) ([]byte, int) {
 		if authFail.Load() {
-			return []byte(`{"schemaVersion":"1","error":"unauthorized"}`), conformance.ExitError
+			return []byte(`{"schemaVersion":"1","error":"unauthorized"}`), participant.ExitError
 		}
-		return validStatusReplyJSON(), conformance.ExitOK
+		return validStatusReplyJSON(), participant.ExitOK
 	})
 	writeDiscoveryRecord(t, logDir, socketPath, "tok")
 
@@ -229,7 +229,7 @@ func TestSnapshot_DialFailureTriggersRediscoverAtMostOnce(t *testing.T) {
 		logDir := shortTestDir(t)
 		liveSocket := core.SocketPath(logDir)
 		startFakeCore(t, liveSocket, func(string, json.RawMessage) ([]byte, int) {
-			return validStatusReplyJSON(), conformance.ExitOK
+			return validStatusReplyJSON(), participant.ExitOK
 		})
 		writeDiscoveryRecord(t, logDir, liveSocket, "tok")
 
@@ -360,11 +360,11 @@ func TestToggleGate_ReusesClientDialsIfNeeded(t *testing.T) {
 	startFakeCore(t, socketPath, func(subcommand string, _ json.RawMessage) ([]byte, int) {
 		switch subcommand {
 		case wireLevelSet:
-			return []byte(`{"schemaVersion":"1","resource":"router","level":"PAUSED","until_cleared":true}`), conformance.ExitOK
+			return []byte(`{"schemaVersion":"1","resource":"router","level":"PAUSED","until_cleared":true}`), participant.ExitOK
 		case wireLevelClear:
-			return []byte(`{"schemaVersion":"1","cleared":["router"]}`), conformance.ExitOK
+			return []byte(`{"schemaVersion":"1","cleared":["router"]}`), participant.ExitOK
 		default:
-			return []byte(`{"schemaVersion":"1","error":"unexpected subcommand"}`), conformance.ExitError
+			return []byte(`{"schemaVersion":"1","error":"unexpected subcommand"}`), participant.ExitError
 		}
 	})
 	writeDiscoveryRecord(t, logDir, socketPath, "tok")

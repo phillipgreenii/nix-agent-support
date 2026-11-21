@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -30,12 +31,12 @@ func TestSelfStatus_AcceptsAndRecords(t *testing.T) {
 	if _, err := svc.Register("h1", KindHandler); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := svc.Registry().SetLifecycle("h1", conformance.Started); err != nil {
+	if err := svc.Registry().SetLifecycle("h1", participant.Started); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
 
 	reply, code := serveSelfStatus(t, svc, `{"schemaVersion":"1","id":"trk-1","participantId":"h1","self":"degraded"}`)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if err := conformance.Check(SelfStatusReplySchema, reply); err != nil {
@@ -68,7 +69,7 @@ func TestSelfStatus_UnavailableDrivesPreAcceptDecline(t *testing.T) {
 	if _, err := svc.Register("src-1", KindSource); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if err := svc.Registry().SetLifecycle("src-1", conformance.Started); err != nil {
+	if err := svc.Registry().SetLifecycle("src-1", participant.Started); err != nil {
 		t.Fatalf("SetLifecycle: %v", err)
 	}
 	if !svc.Registry().Available("src-1") {
@@ -76,7 +77,7 @@ func TestSelfStatus_UnavailableDrivesPreAcceptDecline(t *testing.T) {
 	}
 
 	reply, code := serveSelfStatus(t, svc, `{"schemaVersion":"1","id":"trk-1","participantId":"src-1","self":"unavailable"}`)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("exit = %d, want 0; reply=%v", code, reply)
 	}
 	if svc.Registry().Available("src-1") {
@@ -90,7 +91,7 @@ func TestSelfStatus_UnavailableDrivesPreAcceptDecline(t *testing.T) {
 func TestSelfStatus_UnknownParticipantIsAnError(t *testing.T) {
 	svc := startedService(t)
 	reply, code := serveSelfStatus(t, svc, `{"schemaVersion":"1","id":"trk-1","participantId":"nope","self":"healthy"}`)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 for an unknown participant id", code)
 	}
 	msg, _ := reply["error"].(string)
@@ -111,7 +112,7 @@ func TestSelfStatus_EveryKindMayPush(t *testing.T) {
 				t.Fatalf("Register: %v", err)
 			}
 			reply, code := serveSelfStatus(t, svc, `{"schemaVersion":"1","id":"trk-1","participantId":"`+id+`","self":"healthy"}`)
-			if code != conformance.ExitOK {
+			if code != participant.ExitOK {
 				t.Fatalf("exit = %d, want 0 for kind %s; reply=%v", code, kind, reply)
 			}
 		})
@@ -139,7 +140,7 @@ func TestSelfStatus_EnvelopeFaults(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			svc := startedService(t)
 			reply, code := serveSelfStatus(t, svc, tc.req)
-			if code != conformance.ExitError {
+			if code != participant.ExitError {
 				t.Fatalf("exit = %d, want 1", code)
 			}
 			if _, has := reply["error"]; !has {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 )
@@ -58,7 +59,7 @@ func fileServiceOver(t *testing.T, path string, opts ...eventqueue.Option) (*Ser
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Service{state: conformance.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router", startedAt: time.Now()}, q
+	return &Service{state: participant.Started, q: q, bindings: testBindings(), reg: NewRegistry(nil), command: "pg-router", startedAt: time.Now()}, q
 }
 
 // A dry run reports exactly what a real run would do and changes nothing; the
@@ -70,7 +71,7 @@ func TestLogCompact_DryRunThenRealThenNoProgress(t *testing.T) {
 	before, _ := os.ReadFile(path)
 
 	dry, code := serveVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1","dryRun":true}`)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("dry run exit = %d; reply=%v", code, dry)
 	}
 	if err := conformance.Check(LogCompactReplySchema, dry); err != nil {
@@ -95,7 +96,7 @@ func TestLogCompact_DryRunThenRealThenNoProgress(t *testing.T) {
 	}
 
 	real, code := serveVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1"}`)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("real run exit = %d; reply=%v", code, real)
 	}
 	if err := conformance.Check(LogCompactReplySchema, real); err != nil {
@@ -116,7 +117,7 @@ func TestLogCompact_DryRunThenRealThenNoProgress(t *testing.T) {
 	}
 
 	again, code := serveVerb(t, svc, SubcommandLogCompact, `{"schemaVersion":"1"}`)
-	if code != conformance.ExitOK || again["compacted"] != false || again["noProgress"] != true {
+	if code != participant.ExitOK || again["compacted"] != false || again["noProgress"] != true {
 		t.Fatalf("second run = %v (exit %d), want a no-progress skip", again, code)
 	}
 	if q.Compactions() != 1 {
@@ -129,7 +130,7 @@ func TestLogCompact_DryRunThenRealThenNoProgress(t *testing.T) {
 func serveStatusQueueLog(t *testing.T, svc *Service) map[string]any {
 	t.Helper()
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("status exit = %d; reply=%v", code, reply)
 	}
 	if err := conformance.Check(StatusReplySchema, reply); err != nil {
@@ -172,8 +173,8 @@ func TestLogCompact_RefusalsUseTheErrorEnvelope(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reply, code := serveVerb(t, svc, SubcommandLogCompact, tc.request)
-			if code != conformance.ExitError {
-				t.Fatalf("exit = %d, want %d; reply=%v", code, conformance.ExitError, reply)
+			if code != participant.ExitError {
+				t.Fatalf("exit = %d, want %d; reply=%v", code, participant.ExitError, reply)
 			}
 			if err := conformance.Check(ErrorReplySchema, reply); err != nil {
 				t.Fatalf("reply is not a cli.error: %v (%v)", err, reply)

@@ -13,10 +13,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/pg-failsig"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
 	"github.com/phillipgreenii/pg-router/internal/handlers/prompt"
 	"github.com/phillipgreenii/pg-router/internal/handlers/query"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/sessionlock"
 	"github.com/phillipgreenii/pg-router/procenv"
@@ -28,7 +28,7 @@ import (
 // Executor.Dispatch, so errors.Is on that error resolves to this sentinel
 // through the existing %w chain — no production interface change.
 // internal/wire's BusyDeclineFor maps it to the
-// wire's pre-accept busy decline (conformance.ExitBusy, reason command-busy,
+// wire's pre-accept busy decline (participant.ExitBusy, reason command-busy,
 // bead pg2-358u3) and the core's roleListener.Offer turns that into
 // eventqueue.DeclineBusy: a graceful "not right now" PRE-ACCEPT decline
 // (INV-CONC-1), never a delivery failure. The returned error carries no
@@ -42,11 +42,11 @@ const busyExitCode = 9
 
 type commandExecutor struct{}
 
-func (commandExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps) (report.Result, error) {
+func (commandExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Deps) (participant.Report, error) {
 	r := &commandRun{deps: deps}
 	out, err := r.run(ctx, d)
 	if err != nil {
-		return report.Result{}, err
+		return participant.Report{}, err
 	}
 	return resultFromStdout(out), nil
 }
@@ -56,16 +56,16 @@ func (commandExecutor) Dispatch(ctx context.Context, d DispatchContext, deps Dep
 // the LAST non-empty line of its stdout one single-line JSON object
 // {"actions":[{"verb":"<verb>","refs":[{"type":"bead","id":"<id>"}]}]}. Those
 // verbs and refs become Result.Actions, which the handler JSON-encodes into the
-// reply outcome the router relays to its log row (report.FromOutcome); an
+// reply outcome the router relays to its log row (participant.FromOutcome); an
 // action with no refs is logged against the dispatched item. Any other stdout
 // (plain text, no trailing JSON, JSON without an "actions" array, an empty
 // verb) reports no actions, exactly as before, so a role that prints nothing
 // special is unchanged. The core never branches on a verb.
-func resultFromStdout(out []byte) report.Result {
+func resultFromStdout(out []byte) participant.Report {
 	lines := strings.Split(strings.TrimRight(string(out), " \t\r\n"), "\n")
 	last := strings.TrimSpace(lines[len(lines)-1])
 	if !strings.HasPrefix(last, "{") {
-		return report.Result{}
+		return participant.Report{}
 	}
 	var wire struct {
 		Actions []struct {
@@ -77,16 +77,16 @@ func resultFromStdout(out []byte) report.Result {
 		} `json:"actions"`
 	}
 	if json.Unmarshal([]byte(last), &wire) != nil {
-		return report.Result{}
+		return participant.Report{}
 	}
-	var res report.Result
+	var res participant.Report
 	for _, a := range wire.Actions {
 		if a.Verb == "" {
 			continue
 		}
-		act := report.Action{Verb: report.Verb(a.Verb)}
+		act := participant.Action{Verb: participant.Verb(a.Verb)}
 		for _, ref := range a.Refs {
-			act.Refs = append(act.Refs, report.Ref{Type: ref.Type, ID: ref.ID})
+			act.Refs = append(act.Refs, participant.Ref{Type: ref.Type, ID: ref.ID})
 		}
 		res.Actions = append(res.Actions, act)
 	}

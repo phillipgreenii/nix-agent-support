@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/config"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/x/gitclient"
@@ -17,12 +17,12 @@ import (
 // package — so this file cannot restate the convention and drift from it again
 // (ADR 0042's Consequences, ADR 0127).
 const (
-	exitOK          = conformance.ExitOK
-	exitGeneric     = conformance.ExitError
-	exitUsage       = conformance.ExitUsage
-	exitPrecheck    = conformance.ExitConfig      // a config or precheck failure, before any work
-	exitUnavailable = conformance.ExitUnavailable // no running core, or its socket does not answer
-	exitBusy        = conformance.ExitBusy        // a refused lock; the core's own refusal is relayed as the wire code
+	exitOK          = participant.ExitOK
+	exitGeneric     = participant.ExitError
+	exitUsage       = participant.ExitUsage
+	exitPrecheck    = participant.ExitConfig      // a config or precheck failure, before any work
+	exitUnavailable = participant.ExitUnavailable // no running core, or its socket does not answer
+	exitBusy        = participant.ExitBusy        // a refused lock; the core's own refusal is relayed as the wire code
 )
 
 // warnDroppedRoleEnv warns if any removed role env var is set, so a stale

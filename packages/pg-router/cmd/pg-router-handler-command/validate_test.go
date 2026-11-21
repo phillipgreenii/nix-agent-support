@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 )
 
@@ -31,7 +32,7 @@ func problemsOf(t *testing.T, m map[string]any) []string {
 
 func TestValidate_ValidConfigHasNoProblems(t *testing.T) {
 	exit, m := validate(t, request(t, nil, "cmdrole", cmdConfig("/usr/bin/true", "{{.BeadID}}"), true))
-	if exit != conformance.ExitOK {
+	if exit != participant.ExitOK {
 		t.Fatalf("exit = %d", exit)
 	}
 	if err := conformance.Check("handler.validate-reply", m); err != nil {
@@ -52,7 +53,7 @@ func TestValidate_ReportsEveryProblemInOneReply(t *testing.T) {
 		"command": map[string]any{"argv": []any{"/usr/bin/true", 7}, "cwd": "/"},
 	}
 	exit, m := validate(t, request(t, nil, "cmdrole", cfg, true))
-	if exit != conformance.ExitOK {
+	if exit != participant.ExitOK {
 		t.Fatalf("a validate that finds problems must still exit 0, got %d", exit)
 	}
 	got := problemsOf(t, m)
@@ -86,7 +87,7 @@ func TestValidate_LoadRulesAreReportedTogether(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			exit, m := validate(t, request(t, nil, "cmdrole", c.cfg, true))
-			if exit != conformance.ExitOK {
+			if exit != participant.ExitOK {
 				t.Fatalf("exit = %d", exit)
 			}
 			got := problemsOf(t, m)
@@ -112,8 +113,8 @@ func TestValidate_MissingConfigIsEmptyConfig(t *testing.T) {
 func TestValidate_RequestWithoutRoleIsUsageError(t *testing.T) {
 	var out bytes.Buffer
 	exit := serveValidate(strings.NewReader(request(t, nil, "", nil, false)), &out)
-	if exit != conformance.ExitUsage {
-		t.Fatalf("exit = %d, want %d; %s", exit, conformance.ExitUsage, out.String())
+	if exit != participant.ExitUsage {
+		t.Fatalf("exit = %d, want %d; %s", exit, participant.ExitUsage, out.String())
 	}
 	if _, ok := decodeReply(t, out.String())["error"].(string); !ok {
 		t.Fatalf("want an error reply, got %s", out.String())

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 	"github.com/phillipgreenii/pg-router/internal/handlers/dtest"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
-	"github.com/phillipgreenii/pg-router/internal/handlers/report"
 	"github.com/phillipgreenii/pg-router/internal/handlers/roles"
 	"github.com/phillipgreenii/pg-router/internal/handlers/usage"
 	"github.com/phillipgreenii/pg-router/internal/handlers/watchdog"
@@ -132,7 +132,7 @@ func TestDispatch_budgetStopAtThresholdOne_escalatesBeforeUnclaim(t *testing.T) 
 			if !errors.Is(err, watchdog.ErrBudgetExceeded) {
 				t.Fatalf("the dispatch must end in the watchdog's budget hard stop, got %v", err)
 			}
-			if v := verbOf(res); v != report.Unclaimed {
+			if v := verbOf(res); v != participant.Unclaimed {
 				t.Errorf("a budget hard stop unclaims its bead, got verb %q", v)
 			}
 			wantCall := "update pg2-x --add-label " + tc.wantLabel

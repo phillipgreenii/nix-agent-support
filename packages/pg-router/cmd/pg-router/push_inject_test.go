@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/emit"
 )
 
@@ -167,7 +167,7 @@ func TestPushInject_NoRunningCoreIsExit3(t *testing.T) {
 	var stdout, stderr strings.Builder
 	loc := injectedLocator(filepath.Join(shortDir(t), "gone.sock"), "tok")
 	code := pushInject(&stdout, &stderr, false, loc, emit.SocketEnqueuer{}, testPushEvent)
-	if code != conformance.ExitUnavailable {
+	if code != participant.ExitUnavailable {
 		t.Fatalf("exit = %d, want 3 (unavailable)", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {
@@ -185,7 +185,7 @@ func TestPushInject_NoRunningCoreIsExit3(t *testing.T) {
 func TestPushInject_NoDiscoverableCoreIsExit3(t *testing.T) {
 	var stdout, stderr strings.Builder
 	loc := emit.Locator{Discover: emit.Discoverer(shortDir(t))}
-	if code := pushInject(&stdout, &stderr, false, loc, emit.SocketEnqueuer{}, testPushEvent); code != conformance.ExitUnavailable {
+	if code := pushInject(&stdout, &stderr, false, loc, emit.SocketEnqueuer{}, testPushEvent); code != participant.ExitUnavailable {
 		t.Fatalf("exit = %d, want 3 (unavailable)", code)
 	}
 	if !strings.Contains(stderr.String(), "no running core") {
@@ -198,7 +198,7 @@ func TestPushInject_NoDiscoverableCoreIsExit3(t *testing.T) {
 func TestPushInject_JSONFailureIsStillJSON(t *testing.T) {
 	var stdout, stderr strings.Builder
 	loc := injectedLocator(filepath.Join(shortDir(t), "gone.sock"), "tok")
-	if code := pushInject(&stdout, &stderr, true, loc, emit.SocketEnqueuer{}, testPushEvent); code != conformance.ExitUnavailable {
+	if code := pushInject(&stdout, &stderr, true, loc, emit.SocketEnqueuer{}, testPushEvent); code != participant.ExitUnavailable {
 		t.Fatalf("exit = %d, want 3 (unavailable)", code)
 	}
 	var got struct {
@@ -230,7 +230,7 @@ func TestPushInject_RejectsMalformedEvent(t *testing.T) {
 		t.Run(desc, func(t *testing.T) {
 			var stdout, stderr strings.Builder
 			// An empty locator would yield ErrNoCore if locate ran at all.
-			if code := pushInject(&stdout, &stderr, false, emit.Locator{}, emit.SocketEnqueuer{}, arg); code != conformance.ExitError {
+			if code := pushInject(&stdout, &stderr, false, emit.Locator{}, emit.SocketEnqueuer{}, arg); code != participant.ExitError {
 				t.Fatalf("exit = %d, want 1", code)
 			}
 			if strings.Contains(stderr.String(), "no running core") {
@@ -253,8 +253,8 @@ func TestPushInject_DiscriminatesErrorBeforeReplySchema(t *testing.T) {
 
 	var stdout, stderr strings.Builder
 	code := pushInject(&stdout, &stderr, false, injectedLocator(svc.Ref().Socket, "wrong-token"), emit.SocketEnqueuer{}, testPushEvent)
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d", code, participant.ExitError)
 	}
 	if !strings.Contains(stderr.String(), "unauthorized") {
 		t.Fatalf("stderr = %q, want the discriminated protocol refusal named", stderr.String())
@@ -274,7 +274,7 @@ func TestPushInject_QueueEnqueuerIsRefused(t *testing.T) {
 	var stdout, stderr strings.Builder
 	code := pushInject(&stdout, &stderr, false, emit.Locator{Discover: emit.Discoverer(dir)},
 		emit.QueueEnqueuer{Q: svc.Queue()}, testPushEvent)
-	if code != conformance.ExitError {
+	if code != participant.ExitError {
 		t.Fatalf("exit = %d, want 1 — QueueEnqueuer cannot serve a discovered core", code)
 	}
 	if !strings.Contains(stderr.String(), "cannot reach the located core") {
@@ -298,9 +298,9 @@ func TestRunPushInject_UsageErrorsExitUsageNotBusy(t *testing.T) {
 	}
 	for desc, args := range cases {
 		t.Run(desc, func(t *testing.T) {
-			if code := runPushInject(args); code != conformance.ExitUsage {
+			if code := runPushInject(args); code != participant.ExitUsage {
 				t.Fatalf("exit = %d, want %d/usage (never %d/busy or %d/unexpected)",
-					code, conformance.ExitUsage, conformance.ExitBusy, conformance.ExitError)
+					code, participant.ExitUsage, participant.ExitBusy, participant.ExitError)
 			}
 		})
 	}

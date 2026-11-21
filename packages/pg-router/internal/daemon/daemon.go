@@ -14,7 +14,6 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/activity"
 	"github.com/phillipgreenii/pg-router/internal/calstate"
 	"github.com/phillipgreenii/pg-router/internal/config"
@@ -28,6 +27,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/settle"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
@@ -496,7 +496,7 @@ func BootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 			_ = store.Close()
 			return nil, nil, nil, nil, fmt.Errorf("register role %s: %w", r.Name, err)
 		}
-		if err := svc.Registry().SetLifecycle(r.Name, conformance.Started); err != nil {
+		if err := svc.Registry().SetLifecycle(r.Name, participant.Started); err != nil {
 			_ = store.Close()
 			return nil, nil, nil, nil, fmt.Errorf("promote role %s to started: %w", r.Name, err)
 		}

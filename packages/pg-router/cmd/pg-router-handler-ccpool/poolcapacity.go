@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/ccpool"
 	"github.com/phillipgreenii/pg-router/internal/handlers/config"
 )
@@ -86,18 +86,18 @@ func runPoolCapacity(args []string) int {
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Print(helpText)
-		return conformance.ExitOK
+		return participant.ExitOK
 	case err != nil:
 		fmt.Fprintln(os.Stderr, "pool-capacity:", err)
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintln(os.Stderr, "pool-capacity: unexpected argument:", fs.Arg(0))
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	if len(pools.entries) == 0 {
 		fmt.Fprintln(os.Stderr, "pool-capacity: at least one --pool name=dir is required")
-		return conformance.ExitUsage
+		return participant.ExitUsage
 	}
 	return emitPoolCapacity(os.Stderr, pools.entries, ccpoolEmitFor)
 }
@@ -106,7 +106,7 @@ func runPoolCapacity(args []string) int {
 // with dirs sorted by role name for deterministic ordering. A failure is
 // reported on w as one `pool-capacity:` line naming the roles; ccpool itself
 // continues past a failing pool, so the healthy pools are still emitted. The
-// result is conformance.ExitError iff the emit failed. Nothing is written on
+// result is participant.ExitError iff the emit failed. Nothing is written on
 // success: the data goes out over OTLP, not stdout (the former
 // pool-capacity.prom exposition text and its temp-file writer are retired).
 func emitPoolCapacity(w io.Writer, pools []poolEntry, emit poolEmitFn) int {
@@ -120,7 +120,7 @@ func emitPoolCapacity(w io.Writer, pools []poolEntry, emit poolEmitFn) int {
 	}
 	if err := emit(context.Background(), dirs); err != nil {
 		fmt.Fprintf(w, "pool-capacity: roles=%q: %v\n", roles, err)
-		return conformance.ExitError
+		return participant.ExitError
 	}
-	return conformance.ExitOK
+	return participant.ExitOK
 }

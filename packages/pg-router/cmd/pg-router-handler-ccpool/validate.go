@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/rolefile"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -24,7 +24,7 @@ import (
 //
 // Exit 0 with a reply means "ran" (an empty problems list means valid, and
 // problems are listed, never an exit code). A request without a usable role is
-// an error reply with conformance.ExitUsage.
+// an error reply with participant.ExitUsage.
 func runValidate(args []string) int {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -67,7 +67,7 @@ func serveValidate(stdin io.Reader, stdout io.Writer, skipPoolDirs bool) int {
 		"problems":      problems,
 		"warnings":      warnings,
 	})
-	return conformance.ExitOK
+	return participant.ExitOK
 }
 
 // sessionEnvKeys returns the sorted keys of the config's sessionEnv map, or nil

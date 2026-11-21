@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
 // TestMain lets the test binary stand in for the adapter: with
@@ -18,22 +18,22 @@ func TestMain(m *testing.M) {
 }
 
 func TestRun_SubcommandSet(t *testing.T) {
-	if got := run(nil); got != conformance.ExitUsage {
-		t.Errorf("no subcommand: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run(nil); got != participant.ExitUsage {
+		t.Errorf("no subcommand: exit %d, want %d", got, participant.ExitUsage)
 	}
 	for _, ok := range []string{"help", "version"} {
-		if got := run([]string{ok}); got != conformance.ExitOK {
+		if got := run([]string{ok}); got != participant.ExitOK {
 			t.Errorf("%s: exit %d, want 0", ok, got)
 		}
 	}
 	// The ccpool handler's own subcommands do not belong to this binary.
 	for _, gone := range []string{"origin", "pool-capacity", "split", "query", "register", "self-status", "bogus"} {
-		if got := run([]string{gone}); got != conformance.ExitUsage {
-			t.Errorf("%s: exit %d, want %d (not a subcommand)", gone, got, conformance.ExitUsage)
+		if got := run([]string{gone}); got != participant.ExitUsage {
+			t.Errorf("%s: exit %d, want %d (not a subcommand)", gone, got, participant.ExitUsage)
 		}
 	}
 	// Requests are JSON on stdin, never arguments.
-	if got := run([]string{"validate", "stray"}); got != conformance.ExitUsage {
-		t.Errorf("validate with an argument: exit %d, want %d", got, conformance.ExitUsage)
+	if got := run([]string{"validate", "stray"}); got != participant.ExitUsage {
+		t.Errorf("validate with an argument: exit %d, want %d", got, participant.ExitUsage)
 	}
 }

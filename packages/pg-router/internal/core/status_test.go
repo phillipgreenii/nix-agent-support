@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/activity"
@@ -126,13 +127,13 @@ func TestListenerCounts_LastDeliveredAtNanos_ZeroUntilSet(t *testing.T) {
 func TestStatusListeners_SelfReportStateJoinsByRoleName(t *testing.T) {
 	declared := []roles.Role{{Name: "df-feedback", Enabled: true, Binds: []string{"pr.changed"}}}
 	counts := map[string]*ListenerCounts{"df-feedback": {}}
-	// Registration.State is conformance.Lifecycle (an int-based Stringer,
+	// Registration.State is participant.Lifecycle (an int-based Stringer,
 	// internal/conformance's top-level conformance package,
 	// conformance/transport.go:14), not a plain string -- conformance.
 	// Started is the constant whose .String() is "started" (matching the
 	// existing pattern at statusRegistrations' own `"state": r.State.
 	// String()`).
-	regs := []Registration{{ID: "df-feedback", Kind: "handler", State: conformance.Started, Self: SelfDegraded}}
+	regs := []Registration{{ID: "df-feedback", Kind: "handler", State: participant.Started, Self: SelfDegraded}}
 
 	rows := statusListeners(declared, nil, counts, regs, nil, nil)
 	if got := rows[0].SelfReportState; got != "degraded" {
@@ -149,7 +150,7 @@ func TestStatusListeners_SelfReportStateJoinsByRoleName(t *testing.T) {
 func TestStatusListeners_UnavailableRoleShowsSelfStatusAndReason(t *testing.T) {
 	declared := []roles.Role{{Name: "w", Enabled: true, Binds: []string{"x"}}}
 	counts := map[string]*ListenerCounts{"w": {}}
-	regs := []Registration{{ID: "w", Kind: "handler", State: conformance.Started, Self: SelfUnavailable, UnavailableReason: "bad pool dir"}}
+	regs := []Registration{{ID: "w", Kind: "handler", State: participant.Started, Self: SelfUnavailable, UnavailableReason: "bad pool dir"}}
 
 	rows := statusListeners(declared, nil, counts, regs, nil, nil)
 	if got := rows[0].SelfReportState; got != "unavailable" {

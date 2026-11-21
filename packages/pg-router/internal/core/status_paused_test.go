@@ -3,6 +3,7 @@ package core
 import (
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/levels"
@@ -34,7 +35,7 @@ func TestStatusReply_pausedRolesCarryTheFailingClauses(t *testing.T) {
 	q.RegisterListener("worker", levels.Requirement{Clauses: []levels.Clause{{Index: 0, Text: "cpu == LOW", Resource: "cpu", Allowed: []string{"LOW"}}}})
 
 	reply, code := serveStatus(t, svc, statusRequest)
-	if code != conformance.ExitOK {
+	if code != participant.ExitOK {
 		t.Fatalf("status exit %d", code)
 	}
 	if got := reply["pausedRoles"].([]any); len(got) != 0 {

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/internal/kvstore"
 	"github.com/phillipgreenii/pg-router/schemas"
@@ -21,7 +22,7 @@ import (
 func startedServiceWithStore(t *testing.T, store kvstore.Store) *Service {
 	t.Helper()
 	return &Service{
-		state:    conformance.Started,
+		state:    participant.Started,
 		q:        newQueue(t),
 		bindings: testBindings(),
 		reg:      NewRegistry(nil),
@@ -55,8 +56,8 @@ func TestStorePutGetDelete_InMemoryDefault(t *testing.T) {
 	svc := startedServiceWithStore(t, kvstore.NewInMemory())
 
 	putReply, code := serveStore(t, svc, SubcommandPut, `{"schemaVersion":"1","id":"s-1","op":"put","key":"k1","value":"v1"}`)
-	if code != conformance.ExitOK {
-		t.Fatalf("put exit = %d, want %d; reply=%v", code, conformance.ExitOK, putReply)
+	if code != participant.ExitOK {
+		t.Fatalf("put exit = %d, want %d; reply=%v", code, participant.ExitOK, putReply)
 	}
 	if err := conformance.Check(StoreReplySchema, putReply); err != nil {
 		t.Fatalf("put reply failed its own schema (INV-INTF-2): %v", err)
@@ -66,8 +67,8 @@ func TestStorePutGetDelete_InMemoryDefault(t *testing.T) {
 	}
 
 	getReply, code := serveStore(t, svc, SubcommandGet, `{"schemaVersion":"1","id":"s-1","op":"get","key":"k1"}`)
-	if code != conformance.ExitOK {
-		t.Fatalf("get exit = %d, want %d; reply=%v", code, conformance.ExitOK, getReply)
+	if code != participant.ExitOK {
+		t.Fatalf("get exit = %d, want %d; reply=%v", code, participant.ExitOK, getReply)
 	}
 	if err := conformance.Check(StoreReplySchema, getReply); err != nil {
 		t.Fatalf("get reply failed its own schema: %v", err)
@@ -77,16 +78,16 @@ func TestStorePutGetDelete_InMemoryDefault(t *testing.T) {
 	}
 
 	delReply, code := serveStore(t, svc, SubcommandDelete, `{"schemaVersion":"1","id":"s-1","op":"delete","key":"k1"}`)
-	if code != conformance.ExitOK {
-		t.Fatalf("delete exit = %d, want %d; reply=%v", code, conformance.ExitOK, delReply)
+	if code != participant.ExitOK {
+		t.Fatalf("delete exit = %d, want %d; reply=%v", code, participant.ExitOK, delReply)
 	}
 	if delReply["ok"] != true {
 		t.Fatalf("delete reply ok = %v, want true", delReply["ok"])
 	}
 
 	afterReply, code := serveStore(t, svc, SubcommandGet, `{"schemaVersion":"1","id":"s-1","op":"get","key":"k1"}`)
-	if code != conformance.ExitOK {
-		t.Fatalf("get-after-delete exit = %d, want %d; reply=%v", code, conformance.ExitOK, afterReply)
+	if code != participant.ExitOK {
+		t.Fatalf("get-after-delete exit = %d, want %d; reply=%v", code, participant.ExitOK, afterReply)
 	}
 	if err := conformance.Check(StoreReplySchema, afterReply); err != nil {
 		t.Fatalf("absent-key reply failed its own schema (must accept value: null): %v", err)
@@ -106,8 +107,8 @@ func TestStorePutGetDelete_InMemoryDefault(t *testing.T) {
 func TestStoreDelete_AbsentKeyIsNoOp(t *testing.T) {
 	svc := startedServiceWithStore(t, kvstore.NewInMemory())
 	reply, code := serveStore(t, svc, SubcommandDelete, `{"schemaVersion":"1","id":"s-1","op":"delete","key":"never-put"}`)
-	if code != conformance.ExitOK || reply["ok"] != true {
-		t.Fatalf("delete-absent reply=%v code=%d, want ok=true exit=%d", reply, code, conformance.ExitOK)
+	if code != participant.ExitOK || reply["ok"] != true {
+		t.Fatalf("delete-absent reply=%v code=%d, want ok=true exit=%d", reply, code, participant.ExitOK)
 	}
 }
 
@@ -118,8 +119,8 @@ func TestStoreDelete_AbsentKeyIsNoOp(t *testing.T) {
 func TestStoreRequest_OpMismatchRejected(t *testing.T) {
 	svc := startedServiceWithStore(t, kvstore.NewInMemory())
 	_, code := serveStore(t, svc, SubcommandGet, `{"schemaVersion":"1","id":"s-1","op":"put","key":"k1","value":"v1"}`)
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d for a request whose op does not match the dispatched subcommand", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d for a request whose op does not match the dispatched subcommand", code, participant.ExitError)
 	}
 }
 
@@ -185,23 +186,23 @@ func TestStore_WireForwardingToFakeParticipant(t *testing.T) {
 	}
 
 	putReply, code := serveStore(t, svc, SubcommandPut, `{"schemaVersion":"1","id":"s-1","op":"put","key":"k1","value":"v1"}`)
-	if code != conformance.ExitOK || putReply["ok"] != true {
-		t.Fatalf("put reply=%v code=%d, want ok=true exit=%d", putReply, code, conformance.ExitOK)
+	if code != participant.ExitOK || putReply["ok"] != true {
+		t.Fatalf("put reply=%v code=%d, want ok=true exit=%d", putReply, code, participant.ExitOK)
 	}
 
 	getReply, code := serveStore(t, svc, SubcommandGet, `{"schemaVersion":"1","id":"s-1","op":"get","key":"k1"}`)
-	if code != conformance.ExitOK || getReply["ok"] != true || getReply["value"] != "v1" {
-		t.Fatalf("get reply=%v code=%d, want ok=true value=v1 exit=%d", getReply, code, conformance.ExitOK)
+	if code != participant.ExitOK || getReply["ok"] != true || getReply["value"] != "v1" {
+		t.Fatalf("get reply=%v code=%d, want ok=true value=v1 exit=%d", getReply, code, participant.ExitOK)
 	}
 
 	delReply, code := serveStore(t, svc, SubcommandDelete, `{"schemaVersion":"1","id":"s-1","op":"delete","key":"k1"}`)
-	if code != conformance.ExitOK || delReply["ok"] != true {
-		t.Fatalf("delete reply=%v code=%d, want ok=true exit=%d", delReply, code, conformance.ExitOK)
+	if code != participant.ExitOK || delReply["ok"] != true {
+		t.Fatalf("delete reply=%v code=%d, want ok=true exit=%d", delReply, code, participant.ExitOK)
 	}
 
 	afterReply, code := serveStore(t, svc, SubcommandGet, `{"schemaVersion":"1","id":"s-1","op":"get","key":"k1"}`)
-	if code != conformance.ExitOK {
-		t.Fatalf("get-after-delete exit = %d, want %d", code, conformance.ExitOK)
+	if code != participant.ExitOK {
+		t.Fatalf("get-after-delete exit = %d, want %d", code, participant.ExitOK)
 	}
 	value, hasValue := afterReply["value"]
 	if !hasValue || value != nil {
@@ -225,7 +226,7 @@ func TestStore_WireForwardingWithNoCommandResolverErrors(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 	_, code := serveStore(t, svc, SubcommandGet, `{"schemaVersion":"1","id":"s-1","op":"get","key":"k1"}`)
-	if code != conformance.ExitError {
-		t.Fatalf("exit = %d, want %d (no command-resolution configured for the registered storage participant)", code, conformance.ExitError)
+	if code != participant.ExitError {
+		t.Fatalf("exit = %d, want %d (no command-resolution configured for the registered storage participant)", code, participant.ExitError)
 	}
 }

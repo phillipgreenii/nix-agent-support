@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/pg-router/conformance"
+	"github.com/phillipgreenii/pg-router/api/participant"
 	"github.com/phillipgreenii/pg-router/internal/handlers/wire"
 )
 
@@ -107,8 +107,8 @@ func emitInline(f string) string {
 // none of the decline body's reason/kind.
 func assertSkippedCompletion(t *testing.T, code int, reply map[string]any, wantReason string) {
 	t.Helper()
-	if code != conformance.ExitOK {
-		t.Fatalf("exit = %d (reply %v), want ExitOK (%d): a moot event is completed, never declined", code, reply, conformance.ExitOK)
+	if code != participant.ExitOK {
+		t.Fatalf("exit = %d (reply %v), want ExitOK (%d): a moot event is completed, never declined", code, reply, participant.ExitOK)
 	}
 	if reply["skipped"] != wantReason {
 		t.Fatalf("skipped = %v (reply %v), want %q", reply["skipped"], reply, wantReason)
@@ -165,8 +165,8 @@ func TestDispatch_reviewPrecheck(t *testing.T) {
 			if tc.wantSkipped {
 				assertSkippedCompletion(t, code, reply, tc.wantReason)
 			} else {
-				if code != conformance.ExitBusy {
-					t.Fatalf("exit = %d, want ExitBusy (%d)", code, conformance.ExitBusy)
+				if code != participant.ExitBusy {
+					t.Fatalf("exit = %d, want ExitBusy (%d)", code, participant.ExitBusy)
 				}
 				if reply["reason"] != tc.wantReason {
 					t.Fatalf("reason = %v, want %q", reply["reason"], tc.wantReason)
@@ -207,8 +207,8 @@ func TestDispatch_reviewPrecheckConnectorErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setEnv("open", prOpen, noPending, tc.script+"\n")
 			code, reply := runDispatchReply(t, role, reviewEvent)
-			if code != conformance.ExitBusy {
-				t.Fatalf("exit = %d, want ExitBusy (%d)", code, conformance.ExitBusy)
+			if code != participant.ExitBusy {
+				t.Fatalf("exit = %d, want ExitBusy (%d)", code, participant.ExitBusy)
 			}
 			if reply["reason"] != tc.wantReason || reply["kind"] != tc.wantKind {
 				t.Fatalf("reply = %v, want reason %q kind %q", reply, tc.wantReason, tc.wantKind)
@@ -225,7 +225,7 @@ func TestDispatch_reviewPrecheckFailsOpenWithoutConnector(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, reply := runDispatchReply(t, role, reviewEvent)
-	if code != conformance.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
+	if code != participant.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
 		t.Fatalf("got exit %d reply %v, want the unchanged launch path (pool-unreadable: no ccpool on PATH)", code, reply)
 	}
 }
@@ -283,7 +283,7 @@ func TestDispatch_readyPrecheck(t *testing.T) {
 				assertSkippedCompletion(t, code, reply, tc.wantReason)
 				return
 			}
-			if code != conformance.ExitBusy || reply["reason"] != tc.wantReason {
+			if code != participant.ExitBusy || reply["reason"] != tc.wantReason {
 				t.Fatalf("got exit %d reply %v, want ExitBusy with %q", code, reply, tc.wantReason)
 			}
 		})
@@ -320,7 +320,7 @@ esac
 	assertSkippedCompletion(t, code, reply, "skipped-bead-closed")
 
 	code, reply = runDispatchReply(t, triager, event("esc-open"))
-	if code != conformance.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
+	if code != participant.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
 		t.Fatalf("the event behind the settled head: got exit %d reply %v, want the unchanged launch path (pool-unreadable: no ccpool on PATH)", code, reply)
 	}
 }
@@ -351,7 +351,7 @@ esac
 	assertSkippedCompletion(t, code, reply, "skipped-bead-not-escalated")
 
 	code, reply = runDispatchReply(t, triager, event("esc-open"))
-	if code != conformance.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
+	if code != participant.ExitBusy || reply["reason"] != wire.BusyReasonPoolUnreadable {
 		t.Fatalf("the event behind the settled head: got exit %d reply %v, want the unchanged launch path (pool-unreadable: no ccpool on PATH)", code, reply)
 	}
 
