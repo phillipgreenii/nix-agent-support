@@ -74,6 +74,14 @@ may hold it, or the cause is not yet known).
    it on branch `<work-branch>` with a `WIP (parked): <id> <why>` message; if
    pre-commit hooks block the commit, leave the changes uncommitted in the retained
    worktree (do NOT use `--no-verify`).
+   When the stuck reason is a lander `stopped:<reason>`, run `pg-git-lander status --json
+--repo <canonical-root>` and resolve any stopped operation for `<work-branch>` BEFORE
+   releasing the claim: `pg-git-lander land <work-branch> --continue --repo <canonical-root>`
+   if its cause is fixed, else `--abort` (which restores the source branch; a stopped
+   operation leaves the worktree on a `pg-git-lander/<op>` branch by design). If `--abort`
+   cannot be run, the escalation comment MUST carry the exact commands `pg-git-lander land
+<work-branch> --continue --repo <canonical-root>` and `pg-git-lander land <work-branch>
+--abort --repo <canonical-root>`. See `drain-one/references/land.md`.
 2. FRESHNESS CHECK — re-verify the bead's PREMISE against CURRENT reality BEFORE you
    write any escalation comment or apply any label. The bead body is a snapshot from FILING
    time and the reason you are stuck may already be answered: in one pass over the

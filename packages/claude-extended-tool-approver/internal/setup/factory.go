@@ -29,6 +29,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgconnector"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggitlander"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggwm"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggwmworktree"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgnixlogwrapped"
@@ -357,6 +358,13 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// spec, which alone drives only evaluate/replay. The raw-worktree deny is the
 		// separate pggwmworktree rule above.
 		pggwm.New(),
+		// pg-git-lander approves its read-only verbs and the resume forms
+		// (--abort/--quit/--continue/--skip) of an interrupted land or rebase,
+		// mirroring the pg-git-lander command spec, which alone drives only
+		// evaluate/replay. Without it every pg-git-lander call abstained live, so an
+		// unattended (dontAsk) lander could not abort a stopped land. Starting a
+		// land stays unapproved here.
+		pggitlander.New(pe),
 		// pg-connector approves the `pg-connector issue show/comment/update/
 		// close` verb family already granted by
 		// PG_ROUTER_CCPOOL_HANDLER_CONFIG's allowedTools (bead pg2-s9zh5),

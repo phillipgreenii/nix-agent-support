@@ -245,6 +245,9 @@ and the container's own priority, then:
      text alone. Pinned AND the strategy is `ff-merge-to-main` → do NOT dispatch:
      release policy `release` releases the bead to `open` with no `human` label and
      returns `released`; release policy `park` ESCALATES it through `pb:drain-stuck`.
+   - Run `pg-git-lander status --json --repo <canonical-root>` before dispatching and after any
+     `stopped:<reason>`: a stopped operation for `<work-branch>` MUST be resolved (`--continue`
+     or `--abort`) before the bead is released; `references/land.md` has the rule.
    - VERIFY the reported verdict with one observation before recording it.
    - A lost fast-forward race or a rejected non-fast-forward push is TRANSIENT:
      re-dispatch at most once more. A genuine `stopped:` routes to STUCK. When the work is

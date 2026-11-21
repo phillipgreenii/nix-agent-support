@@ -28,6 +28,10 @@ func TestPgGitLanderInterpretation(t *testing.T) {
 		"pg-git-lander land drain/x --keep-source-worktree --keep-source-branch",
 		"pg-git-lander land --continue --json",
 		"pg-git-lander land drain/x --abort",
+		"pg-git-lander land drain/x --abort --repo /repo",
+		"pg-git-lander land drain/x --quit --repo /repo",
+		"pg-git-lander land drain/x --continue --repo /repo",
+		"pg-git-lander rebase drain/x --abort --repo /repo",
 		"pg-git-lander rebase drain/x --onto main --context k=v",
 	}
 	for _, cmd := range sufficient {
@@ -44,6 +48,10 @@ func TestPgGitLanderInterpretation(t *testing.T) {
 		"pg-git-lander rebase drain/x --onto main --no-verify",
 		"pg-git-lander land drain/x --frobnicate",
 		"pg-git-lander status --no-verify",
+		"pg-git-lander land drain/x --abort --no-verify",
+		"pg-git-lander land drain/x --abort --repo",
+		"pg-git-lander land drain/x --quit --frobnicate",
+		"pg-git-lander status --abort --frobnicate",
 	}
 	for _, cmd := range insufficient {
 		if in := run(cmd); in.Sufficient {

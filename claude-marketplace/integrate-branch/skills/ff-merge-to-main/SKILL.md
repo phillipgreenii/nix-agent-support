@@ -272,6 +272,13 @@ context, roles and flags and accepts no worktree or keep flags, but it still tak
 `--repo <repo-root>`, which MUST be passed. The operation word
 MUST match the stopped operation (`land`).
 
+When the permission system denies `--abort` or `--continue` (an unattended session),
+the stop is still not resolved: the handler MUST report `stopped:<reason>` with the exact
+commands `pg-git-lander land "$FB" --continue --repo "$CC"` and
+`pg-git-lander land "$FB" --abort --repo "$CC"` so the caller can put them in its
+escalation. A stopped operation leaves the source worktree on a `pg-git-lander/<op>`
+branch by design; `--abort` restores the source branch.
+
 ## Bringing a branch up to date — `pg-git-lander rebase`
 
 Whenever this skill or its caller needs a branch brought up to date with the

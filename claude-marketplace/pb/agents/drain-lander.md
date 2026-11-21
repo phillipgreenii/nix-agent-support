@@ -16,3 +16,6 @@ You land ONE branch that the orchestrator already validated.
 - Never implement, close or claim beads, or edit code beyond what landing requires.
 - Report in the brief's format: `landed`, `pr-opened`, `pr-updated` or `stopped:<reason>`, with
   the SHA per repo and any PR number and URL.
+- Never end with a land left stopped: resolve it (`--continue` if the cause is fixed, else
+  `--abort`), or, when the command is denied, report `stopped:<reason>` with the exact
+  `pg-git-lander land <branch> --continue --repo <root>` and `... --abort --repo <root>` commands.

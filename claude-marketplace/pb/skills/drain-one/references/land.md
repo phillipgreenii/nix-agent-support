@@ -200,3 +200,20 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
    only for a canonical-ADVANCING strategy: `pull-request`'s PR-0 surfaces it
    and PROCEEDS, since it never touches the canonical clone (R-8's carve-out);
    there it MUST be reported and NOT treated as a stop).
+
+   **A stopped land is never left behind.** `pg-git-lander` leaves a stopped
+   operation parked on a `pg-git-lander/<op>` branch in the source worktree BY
+   DESIGN; it stays until someone resumes or aborts it, and a dead session strands
+   it. So, run `pg-git-lander status --json --repo <canonical-root>` before
+   dispatching a lander (a leftover stopped operation for `<work-branch>` MUST be
+   resolved first) and again after ANY `stopped:<reason>` outcome. A stopped
+   operation for the bead's branch MUST be resolved before the bead is released or
+   escalated: `pg-git-lander land <work-branch> --continue --repo <canonical-root>`
+   when its cause is fixed, otherwise `pg-git-lander land <work-branch> --abort
+   --repo <canonical-root>`, which restores the source branch. A worker that cannot
+   run `--abort` (for example a denied command in an unattended session) MUST put
+   both exact commands, `pg-git-lander land <work-branch> --continue --repo
+   <canonical-root>` and `pg-git-lander land <work-branch> --abort --repo
+   <canonical-root>`, in its escalation comment. A retry after a `timeout` stop MUST
+   first check for nix store contention (`pgrep -fl 'nix (build|flake|eval)'` or
+   equivalent) and MUST NOT retry immediately more than once.
