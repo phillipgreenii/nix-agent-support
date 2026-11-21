@@ -355,10 +355,24 @@ func discardInterrupted(ctx context.Context, open Opener, wt gitclient.WorktreeM
 		if err := os.MkdirAll(filepath.Dir(aside), 0o755); err != nil {
 			return false, fmt.Errorf("mkdir holding dir for %s: %w", path, err)
 		}
-		slog.Warn("worktree: moving interrupted checkout with unique commits aside and re-attaching its branch",
-			"path", path, "aside", aside, "branch", branch, "unique_commits", ahead)
-		if err := os.Rename(path, aside); err != nil {
-			return false, fmt.Errorf("move interrupted worktree %s aside: %w", path, err)
+		// Record what makes the checkout recoverable, verified readable, BEFORE
+		// the full tree is dropped. If that fails the tree is kept whole (moved
+		// aside, as before) and the error is logged.
+		if merr := manifestWriter(ctx, path, aside, beadID, branch); merr == nil {
+			slog.Warn("worktree: recorded recovery manifest for interrupted checkout and dropping its tree; re-attaching its branch",
+				"path", path, "manifest_dir", aside, "branch", branch, "unique_commits", ahead)
+			if err := os.RemoveAll(path); err != nil {
+				return false, fmt.Errorf("remove interrupted worktree %s after manifest: %w", path, err)
+			}
+		} else {
+			slog.Error("worktree: recovery manifest failed; keeping the full interrupted tree aside",
+				"path", path, "aside", aside, "err", merr)
+			if err := os.RemoveAll(aside); err != nil {
+				return false, fmt.Errorf("clear partial manifest dir %s: %w", aside, err)
+			}
+			if err := os.Rename(path, aside); err != nil {
+				return false, fmt.Errorf("move interrupted worktree %s aside: %w", path, err)
+			}
 		}
 		if err := root.PruneWorktrees(ctx); err != nil {
 			return false, fmt.Errorf("prune after moving %s aside: %w", path, err)

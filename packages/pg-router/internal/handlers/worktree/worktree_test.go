@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -701,10 +702,16 @@ func TestEnsure_interruptedCheckoutWithUniqueCommits_recoversBranchRealGit(t *te
 	if b, err := os.ReadFile(filepath.Join(path, "work.txt")); err != nil || string(b) != "committed" {
 		t.Errorf("recovered worktree lacks the branch commit: %q %v", b, err)
 	}
-	// The uncommitted edit is preserved in the holding area, not deleted.
-	held, _ := filepath.Glob(filepath.Join(wtDir+"-interrupted", bead+"-*", "scratch.txt"))
+	// The uncommitted edit survives as a patch in the manifest dir; the tree is gone.
+	held, _ := filepath.Glob(filepath.Join(wtDir+"-interrupted", bead+"-*", PatchFile))
 	if len(held) != 1 {
-		t.Errorf("uncommitted edit not preserved aside: %v", held)
+		t.Fatalf("recovery patch not preserved aside: %v", held)
+	}
+	if b, _ := os.ReadFile(held[0]); !strings.Contains(string(b), "scratch.txt") {
+		t.Errorf("patch lacks the uncommitted edit:\n%s", b)
+	}
+	if left, _ := filepath.Glob(filepath.Join(wtDir+"-interrupted", bead+"-*", "work.txt")); len(left) != 0 {
+		t.Errorf("full tree still retained: %v", left)
 	}
 	// A second Ensure for the same bead no longer fails (no lock left).
 	got2, err := Ensure(ctx, open, wtDir, repoRoot, bead)
