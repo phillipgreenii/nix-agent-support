@@ -1995,7 +1995,7 @@ func (e *Engine) evaluateRedirections(redirs []hooktypes.Redirection, override *
 			// for the relaxed case (see the comment above).
 		}
 		if !access.CanWrite() {
-			return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: write to non-writable path " + path, Module: "engine"}
+			return hookio.RuleResult{Decision: hookio.NoOpinion, Reason: "redirection: write to non-writable path " + path + pe.ScratchHint(path), Module: "engine"}
 		}
 	}
 	if dynamic != nil {

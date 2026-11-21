@@ -304,7 +304,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 			if access.CanWrite() {
 				return hookio.RuleResult{Decision: hookio.Approve, Reason: "path allows write: " + path, Module: r.Name()}, nil
 			}
-			return r.refuse("path-safety: path access unknown: " + path + " (deferred to claude-code)")
+			return r.refuse("path-safety: path access unknown: " + path + r.eval.ScratchHint(path) + " (deferred to claude-code)")
 		default:
 			// Unreachable in practice (fileTools gates the switch), and DELIBERATELY not a
 			// refusal: a tool name this switch does not enumerate has had no path

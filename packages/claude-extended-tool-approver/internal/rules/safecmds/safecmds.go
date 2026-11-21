@@ -646,7 +646,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 					}
 				}
 				if unsafe, path := hasUnsafeWritePath(innerArgs, pe); unsafe {
-					return r.refuse("safe-commands: xargs " + innerBase + " references non-writable path " + path + " (deferred to claude-code)")
+					return r.refuse("safe-commands: xargs " + innerBase + " references non-writable path " + path + pe.ScratchHint(path) + " (deferred to claude-code)")
 				}
 				continue
 			}
@@ -768,7 +768,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		if basename == "sed" {
 			if isSedInPlace(pc.Args) {
 				if unsafe, path := hasUnsafeWritePath(pc.Args, pe); unsafe {
-					return r.refuse("safe-commands: sed -i references non-writable path " + path + " (deferred to claude-code)")
+					return r.refuse("safe-commands: sed -i references non-writable path " + path + pe.ScratchHint(path) + " (deferred to claude-code)")
 				}
 				continue
 			}
@@ -863,7 +863,7 @@ func (r *Rule) Evaluate(input *hookio.HookInput) (hookio.RuleResult, error) {
 		}
 		if safeWriteCmds[basename] {
 			if unsafe, path := hasUnsafeWritePath(pc.Args, pe); unsafe {
-				return r.refuse("safe-commands: " + basename + " references non-writable path " + path + " (deferred to claude-code)")
+				return r.refuse("safe-commands: " + basename + " references non-writable path " + path + pe.ScratchHint(path) + " (deferred to claude-code)")
 			}
 			continue
 		}
