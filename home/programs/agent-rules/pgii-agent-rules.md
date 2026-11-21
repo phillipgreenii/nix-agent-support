@@ -31,6 +31,10 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 - **A-2** Resolve a repo-relative path as `<session-cwd>/<relative>`. If the root is uncertain, probe first (`ls` the parent, Glob the suffix, or `git ls-files -- '*<name>'`); MUST NOT Read a guessed absolute path.
 - **A-3** A subagent brief MUST state the absolute repo root once; relative paths without a root cause this defect.
 
+### Scratch Location
+
+- **S-3** Agent scratch (temporary files, clones, caches, drafts) MUST go under `$CLAUDE_CODE_TMPDIR` (set by `phillipgreenii.programs.claude-code-tmp`), never under `~/.cache`; a Go module cache created in scratch MUST use `GOFLAGS=-modcacherw` so the directory stays deletable.
+
 ### Development Standards
 
 #### Validation

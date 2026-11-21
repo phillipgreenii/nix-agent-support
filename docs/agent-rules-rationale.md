@@ -47,6 +47,18 @@ The A-1 known-absent-roots sentence is machine-class-specific and is composed in
 `home/programs/agent-rules/default.nix` from `phillipgreenii.programs.claude-code.knownAbsentRoots`.
 A-3: a brief that lists relative paths without a root causes exactly this defect.
 
+## Scratch Location (S-3)
+
+Operator question, Phillip, 2026-11-19: where should agent scratch live, given what `~/.cache` had
+become. The audit that followed found 955 entries in `~/.cache`, about 4 GB of them agent scratch
+(examples: `absorb-A-*.md`, `audit-worktrees*`, `ccaudit-live`, `ccpool-dashboard-split`,
+`ccr-memory-plan`), several holding read-only Go module cache files that a plain `rm -rf` cannot
+delete. The standing rule (scratch under `$CLAUDE_CODE_TMPDIR`, never `~/.cache`) lived only in the
+operator's auto-memory, which subagents and headless sessions may not load, so S-3 ships it in the
+Always-Apply rules. `GOFLAGS=-modcacherw` keeps module cache files writable and so removable. The
+drain-one delegate brief (`claude-marketplace/pb/skills/drain-one/references/delegate.md`) repeats
+the rule, as A-3 does for repo roots.
+
 ## Validation gates
 
 - Both gate bullets (hooks exist; `flake.nix` exists) stay in the core unconditionally (tc-ql0o

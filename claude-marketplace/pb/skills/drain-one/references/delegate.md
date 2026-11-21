@@ -96,6 +96,9 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
      description and acceptance criteria;
    - the absolute repo root and the worktree/set path (state the root once —
      A-3);
+   - the scratch root: scratch files MUST go under `$CLAUDE_CODE_TMPDIR`, never
+     `~/.cache`, and a Go module cache created there MUST use
+     `GOFLAGS=-modcacherw` (S-3);
    - the paths of any docs the bead references, with the instruction to read
      them ITSELF from inside the worktree;
    - the standing constraints: explicit timeouts or `run_in_background` for
