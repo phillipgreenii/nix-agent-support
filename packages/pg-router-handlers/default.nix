@@ -1,6 +1,12 @@
 {
   lib,
   mkGoApp,
+  makeWrapper,
+  # pg-gwm and pg-origin-guard resolve automatically via callPackage against
+  # `final.pg-gwm` / `final.pg-origin-guard` (same overlay), like pg-router's
+  # own runtime deps.
+  pg-gwm,
+  pg-origin-guard,
 }:
 
 let
@@ -53,6 +59,24 @@ mkGoApp {
     "cmd/pg-router-handler-ccpool"
     "cmd/pg-router-handler-command"
   ];
+
+  # pg-router-handler-ccpool execs `pg-gwm` (worktree lease, teardown) and
+  # `pg-origin-guard` (origin check) by bare name, in its OWN process, which
+  # inherits the pg-router daemon's environment. The daemon deliberately does
+  # not carry the per-user profile on PATH (strict base env), and these tools
+  # are installed only through that profile, so the handler wraps its own
+  # runtime dependencies instead of relying on the caller (the same approach
+  # as packages/pg-router/default.nix). `--prefix` keeps the inherited PATH.
+  # The `test-pg-router-handler-ccpool-resolves-tools` flake check guards it.
+  nativeBuildInputs = [ makeWrapper ];
+  postInstall = ''
+    wrapProgram $out/bin/pg-router-handler-ccpool --prefix PATH : ${
+      lib.makeBinPath [
+        pg-gwm
+        pg-origin-guard
+      ]
+    }
+  '';
 
   meta = {
     description = "pg-router participant implementations (ccpool-backed and command-backed handlers), speaking INTF-HANDLER/INTF-SOURCE over the wire";

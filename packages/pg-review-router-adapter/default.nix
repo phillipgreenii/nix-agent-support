@@ -1,6 +1,9 @@
 {
   lib,
   mkGoApp,
+  makeWrapper,
+  # Resolves automatically via callPackage against `final.pg-review`.
+  pg-review,
 }:
 
 mkGoApp {
@@ -18,6 +21,17 @@ mkGoApp {
   subPackages = [ "cmd/pg-review-router-adapter" ];
 
   # The whole-module Go test gate is checks.<system>.pg-review-router-adapter-go-tests.
+
+  # The adapter execs `pg-review` by bare name in its own process, which
+  # inherits the pg-router daemon's environment. That environment does not
+  # carry the per-user profile on PATH (strict base env) and pg-review is
+  # installed only through that profile, so the adapter wraps its own runtime
+  # dependency. `--prefix` keeps the inherited PATH. Guarded by the
+  # `test-pg-review-router-adapter-resolves-pg-review` flake check.
+  nativeBuildInputs = [ makeWrapper ];
+  postInstall = ''
+    wrapProgram $out/bin/pg-review-router-adapter --prefix PATH : ${lib.makeBinPath [ pg-review ]}
+  '';
 
   meta = {
     description = "Adapter between a pg-router command role and pg-review: turns a router dispatch into a plain pg-review job command line and maps exit codes to router semantics";

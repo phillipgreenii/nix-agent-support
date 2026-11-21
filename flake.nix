@@ -11025,6 +11025,52 @@
                 esac
               '';
 
+              # The handler and adapter exec pg-gwm / pg-review by bare name in their
+              # own process, which inherits the pg-router daemon's environment, and
+              # that environment has no per-user profile on PATH. Source each real
+              # wrapper script with `exec` shadowed by a function that resolves the
+              # tool, under a PATH that holds only the system dirs: the check fails
+              # if the wrapper does not put the tool on PATH. Negative control: the
+              # same lookup without the wrapper must fail.
+              test-pg-router-handler-ccpool-resolves-tools =
+                pkgs.runCommand "pg-router-handler-ccpool-resolves-tools" { }
+                  ''
+                    w=${pkgs.pg-router-ccpool-handler}/bin/pg-router-handler-ccpool
+                    for t in pg-gwm pg-origin-guard; do
+                      if env -i PATH=/usr/bin:/bin ${pkgs.bash}/bin/bash -c "command -v $t" >/dev/null; then
+                        echo "negative control broken: $t resolves without the wrapper" >&2
+                        exit 1
+                      fi
+                      got=$(env -i PATH=/usr/bin:/bin ${pkgs.bash}/bin/bash -c "exec() { command -v $t; }; . $w") || {
+                        echo "pg-router-handler-ccpool cannot resolve $t without the profile PATH" >&2
+                        exit 1
+                      }
+                      case "$got" in
+                        /nix/store/*/bin/$t) ;;
+                        *) echo "unexpected $t resolution: '$got'" >&2; exit 1 ;;
+                      esac
+                    done
+                    touch "$out"
+                  '';
+
+              test-pg-review-router-adapter-resolves-pg-review =
+                pkgs.runCommand "pg-review-router-adapter-resolves-pg-review" { }
+                  ''
+                    w=${pkgs.pg-review-router-adapter}/bin/pg-review-router-adapter
+                    if env -i PATH=/usr/bin:/bin ${pkgs.bash}/bin/bash -c "command -v pg-review" >/dev/null; then
+                      echo "negative control broken: pg-review resolves without the wrapper" >&2
+                      exit 1
+                    fi
+                    got=$(env -i PATH=/usr/bin:/bin ${pkgs.bash}/bin/bash -c "exec() { command -v pg-review; }; . $w") || {
+                      echo "pg-review-router-adapter cannot resolve pg-review without the profile PATH" >&2
+                      exit 1
+                    }
+                    case "$got" in
+                      /nix/store/*/bin/pg-review) touch "$out" ;;
+                      *) echo "unexpected pg-review resolution: '$got'" >&2; exit 1 ;;
+                    esac
+                  '';
+
               # Same guard for the pg-router-handler-ccpool binary (versionPath in
               # packages/pg-router-handlers/default.nix).
               test-pg-router-handler-ccpool-version-stamped =
