@@ -486,12 +486,24 @@ func dirToWire(d *aggregate.Directory) *pb.Directory {
 // buildState constructs the wire DaemonState from the shared tree plus
 // daemon-level fields.
 func (s *server) buildState(ctx context.Context) *pb.DaemonState {
+	return s.buildStateFrom(ctx, true)
+}
+
+// buildPushState is buildState for the BridgeChannel push path. It NEVER reads
+// the DB: before the first tick refresh (or while the cache is empty) it pushes
+// an empty tree rather than a synchronous read, so a slow DB or a tick wedged
+// behind slow recorder work cannot delay a push past the bridge's watchdog.
+func (s *server) buildPushState(ctx context.Context) *pb.DaemonState {
+	return s.buildStateFrom(ctx, false)
+}
+
+func (s *server) buildStateFrom(ctx context.Context, liveFallback bool) *pb.DaemonState {
 	// Serve the tick-refreshed cache so this (a gRPC handler goroutine, e.g. the
 	// BridgeChannel writer) never does a synchronous SQLite read. Fall back to a
 	// live snapshot only on cold start, before the first tick refresh populates
 	// the cache. See sharedState.refreshSnapshot.
 	tree := s.state.cachedSnapshot()
-	if tree == nil {
+	if tree == nil && liveFallback {
 		tree = s.state.snapshot(ctx)
 	}
 	state := pb.FromTree(tree)

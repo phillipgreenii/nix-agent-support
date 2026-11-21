@@ -190,7 +190,13 @@ func (s *sharedState) snapshot(ctx context.Context) *aggregate.Tree {
 // only changes per tick, the cache is as fresh as a per-request read for the
 // tree itself; live pending-nudge annotations may lag by up to one tick.
 func (s *sharedState) refreshSnapshot(ctx context.Context) {
-	s.setCachedSnapshot(s.snapshot(ctx))
+	tree := s.snapshot(ctx)
+	if tree == nil {
+		// A failed or not-yet-wired read must not discard the last good tree:
+		// a nil cache would send every consumer back to a synchronous DB read.
+		return
+	}
+	s.setCachedSnapshot(tree)
 }
 
 // setCachedSnapshot publishes tree as the cached snapshot (pointer swap under
