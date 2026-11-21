@@ -99,7 +99,13 @@ const (
 	// VerifyModified: a pre-merge-verify entry exited cleanly (or was
 	// skipped) but changed tracked files or moved HEAD.
 	VerifyModified
+	// GuardBlocked: the entry's retry_guard exited non-zero on a retry after a
+	// timeout stop, so the entry did not run. The stop stays a timeout.
+	GuardBlocked
 )
+
+// GuardTimeout bounds one retry_guard run: it is a quick check, not a gate.
+const GuardTimeout = time.Minute
 
 // Failure is a hook failure; Effect says what the pipeline does with it.
 type Failure struct {
@@ -131,7 +137,7 @@ func (f *Failure) Effect() Effect {
 	switch f.Kind {
 	case Transient:
 		s = outcome.StopTransient
-	case TimedOut:
+	case TimedOut, GuardBlocked:
 		s = outcome.StopTimeout
 	case CommitRejected:
 		s = outcome.StopCommitRejected
@@ -168,6 +174,10 @@ type PointInput struct {
 	Point string
 	Hooks []config.Hook
 	Facts Facts
+	// AfterTimeout is true when this run resumes a `timeout` stop: an entry
+	// that names a retry_guard runs the guard first and does not run when the
+	// guard exits non-zero.
+	AfterTimeout bool
 }
 
 // RunPoint runs the hooks of one point in list order and stops at the first
@@ -192,6 +202,12 @@ func (r *Runner) RunPoint(ctx context.Context, in PointInput) (PointResult, erro
 }
 
 func (r *Runner) runEntry(ctx context.Context, in PointInput, idx int, h config.Hook, autofix bool, res *PointResult) error {
+	if in.AfterTimeout && len(h.RetryGuard) > 0 {
+		blocked, err := r.guard(ctx, in, idx, h, res)
+		if err != nil || blocked {
+			return err
+		}
+	}
 	if in.Point == PointPreMergeVerify {
 		return r.runVerifyEntry(ctx, in, idx, h, res)
 	}
@@ -247,6 +263,25 @@ func (r *Runner) runEntry(ctx context.Context, in PointInput, idx int, h config.
 			return nil
 		}
 	}
+}
+
+// guard runs the entry's retry_guard. It reports true (with res.Failure set)
+// when the guard did not exit 0: the entry is then held back, and the stop
+// stays a retryable timeout so the next --continue is guarded again. A guard
+// that cannot start or times out also holds the entry back (fail closed).
+func (r *Runner) guard(ctx context.Context, in PointInput, idx int, h config.Hook, res *PointResult) (bool, error) {
+	g := config.Hook{Run: h.RetryGuard, Timeout: GuardTimeout, Cwd: h.Cwd, Env: h.Env}
+	rec, _ := r.runOnce(ctx, in, idx, g)
+	res.Records = append(res.Records, rec)
+	if ctx.Err() != nil {
+		return true, ctx.Err()
+	}
+	if rec.Result == ResultPass {
+		return false, nil
+	}
+	f := r.failureFrom(rec, GuardBlocked)
+	res.Failure = f
+	return true, nil
 }
 
 func (r *Runner) failureFrom(rec CommandRecord, k FailKind) *Failure {

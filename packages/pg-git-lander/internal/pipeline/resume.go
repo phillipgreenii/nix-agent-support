@@ -810,6 +810,7 @@ func (rs *resumer) failed(ctx context.Context, o *outcome.Outcome, err error) (*
 func (rs *resumer) enter(ctx context.Context, rec locks.Record, plan *resumePlan) (*outcome.Outcome, error) {
 	p := rs.p
 	p.plan = plan
+	plan.afterTimeout = rs.prior.Stop != nil && rs.prior.Stop.Reason == string(outcome.StopTimeout)
 	if plan.entry == entryCleanup || plan.entry == entryContinueConflict ||
 		plan.entry == entrySkipConflict || plan.entry == entryRebased || plan.entry == entryPostRebaseFix || plan.entry == entryPreMergeVerify ||
 		plan.entry == entryMove {

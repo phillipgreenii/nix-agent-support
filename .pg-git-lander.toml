@@ -22,7 +22,11 @@ pre-merge-verify = [
   # or no free runner slot) stops the land as a retryable `transient`.
   { run = ["sh", "-c", "exec pg-hooks run pre-land --base \"$PG_GIT_LANDER_TARGET_TIP\""], timeout = "20m", skip_exit_codes = [13, 127] },
   # The eval-only gate: every flake output must still evaluate.
-  { run = ["pre-land-eval", ".", "HEAD"], timeout = "25m" },
+  # retry_guard: after a `timeout` stop, `--continue` runs the guard first and holds this entry
+  # back (the stop stays a retryable `timeout`) while another nix build, flake or eval process
+  # is running on the machine; the first run and every other reason are not guarded. The timeout
+  # itself is unchanged and no check is skipped: the entry still has to pass to land.
+  { run = ["pre-land-eval", ".", "HEAD"], timeout = "25m", retry_guard = ["sh", "-c", "! pgrep -f 'nix[ ](build|flake|eval)' >/dev/null"] },
 ]
 
 # Conflict rules. The file order matters: the first rule whose glob matches a path wins,

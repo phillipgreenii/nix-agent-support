@@ -624,3 +624,17 @@ func TestRevalidateKey(t *testing.T) {
 		}
 	})
 }
+
+func TestHookRetryGuardParsed(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.xdgFor(`trust_repo_config = true`, ``)
+	f.commit("cfg", map[string]string{config.RepoFileName: `
+[hooks.land]
+pre-merge-verify = [{ run = ["eval"], retry_guard = ["sh", "-c", "exit 0"] }, { run = ["plain"] }]
+`})
+	h := f.mustLoad(land).HooksFor("land", "pre-merge-verify")
+	if len(h) != 2 || len(h[0].RetryGuard) != 3 || h[0].RetryGuard[0] != "sh" || h[1].RetryGuard != nil {
+		t.Fatalf("hooks: %+v", h)
+	}
+}

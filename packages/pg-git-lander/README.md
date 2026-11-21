@@ -102,8 +102,14 @@ file `.pg-git-lander.toml` is read from the tip of the relevant ref. Validate ei
 | `[[conflict]]`              | all       | none                                | Conflict rules: `glob`, `run_per`, `resolve`, `verify`, `timeout`.                                                                                                                                                                                              |
 | `conflict_default`          | all       | none                                | A conflict rule without `glob`, for any path no rule matches.                                                                                                                                                                                                   |
 
-A hook entry is `{ run = [argv], timeout = duration, skip_exit_codes = [int], cwd = "worktree" | "repo", env = { } }`.
+A hook entry is `{ run = [argv], timeout = duration, skip_exit_codes = [int], cwd = "worktree" | "repo", env = { }, retry_guard = [argv] }`.
 `cwd` defaults to `worktree`. A missing `timeout` is 10 minutes.
+
+`retry_guard` is optional. When `--continue` resumes a stop whose reason was `timeout`, the tool runs the guard before
+each entry that names one (same `cwd` and `env`, a fixed 1 minute limit). A guard exit of 0 lets the entry run; any other
+result (non-zero, cannot start, timed out) holds the entry back and ends the run in the same retryable `timeout` stop
+(detail `retry-guard`), so the next `--continue` is guarded again. A first run and a resume after any other stop reason
+are never guarded, and the entry's own `timeout` is unchanged. The guard only delays a retry; it never skips an entry.
 
 ### Hook points
 

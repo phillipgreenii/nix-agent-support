@@ -224,9 +224,16 @@ post-rebase-fix = [
 ]
 pre-merge-verify = [
   { run = ["sh", "-c", "exec pg-hooks run pre-land --only check --base \"$PG_GIT_LANDER_TARGET_TIP\""], timeout = "20m", skip_exit_codes = [13, 127] },
-  { run = ["pre-land-eval", ".", "HEAD"], timeout = "25m" },
+  { run = ["pre-land-eval", ".", "HEAD"], timeout = "25m", retry_guard = ["sh", "-c", "! pgrep -f 'nix[ ](build|flake|eval)' >/dev/null"] },
 ]
 ```
+
+`retry_guard` is an optional argv on a hook entry. On a `--continue` of a stop whose reason
+was `timeout` the tool runs the guard first (1 minute limit) and does not run the entry
+while the guard exits non-zero; the stop stays a retryable `timeout`, so the next
+`--continue` is guarded again. The first run and every other stop reason are unguarded. The
+example guard holds the eval back while another `nix build`, `nix flake` or `nix eval`
+process runs. It skips no check and changes no timeout.
 
 What differs from the old steps, and what the handler MUST keep in mind:
 

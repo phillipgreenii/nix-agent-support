@@ -222,4 +222,7 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
    <canonical-root>` and `pg-git-lander land <work-branch> --abort --repo
    <canonical-root>`, in its escalation comment. A retry after a `timeout` stop MUST
    first check for nix store contention (`pgrep -fl 'nix (build|flake|eval)'` or
-   equivalent) and MUST NOT retry immediately more than once.
+   equivalent) and MUST NOT retry immediately more than once. A repo that sets
+   `retry_guard` on the timed-out hook entry in its `.pg-git-lander.toml` has the tool
+   enforce the contention check: `--continue` ends in the same `timeout` stop, with the
+   entry not run, while the guard still reports contention; the retry limit stays prose.

@@ -36,6 +36,9 @@ type Hook struct {
 	SkipExitCodes []int             `json:"skip_exit_codes"`
 	Cwd           string            `json:"cwd"` // "worktree" or "repo"
 	Env           map[string]string `json:"env"`
+	// RetryGuard, when set, runs before this entry on a --continue of a stop
+	// whose reason was `timeout`; a non-zero exit holds the entry back.
+	RetryGuard []string `json:"retry_guard,omitempty"`
 
 	// Key and Line locate the entry in its file; they are not part of the
 	// configuration in effect (nor of its digest).
@@ -365,7 +368,7 @@ func (p *parser) checkOldPoints(ot map[string]any, ob string) {
 }
 
 func (p *parser) hook(e map[string]any, key string) *Hook {
-	p.checkKeys(e, key, "run", "timeout", "skip_exit_codes", "cwd", "env")
+	p.checkKeys(e, key, "run", "timeout", "skip_exit_codes", "cwd", "env", "retry_guard")
 	h := &Hook{Timeout: DefaultTimeout, Cwd: "worktree", Env: map[string]string{}, Key: key, Line: lineFor(p.lines, key)}
 	n := len(p.errs)
 	if _, ok := e["run"]; !ok {
@@ -375,6 +378,9 @@ func (p *parser) hook(e map[string]any, key string) *Hook {
 	}
 	if d := p.duration(e, key, "timeout"); d != nil {
 		h.Timeout = *d
+	}
+	if g, ok := p.argv(e, key, "retry_guard"); ok {
+		h.RetryGuard = g
 	}
 	if raw, ok := e["skip_exit_codes"]; ok {
 		list, isList := raw.([]any)

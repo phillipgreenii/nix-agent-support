@@ -865,6 +865,8 @@ func hookWhy(f *hooks.Failure) string {
 	switch f.Kind {
 	case hooks.TimedOut:
 		why = "timed out"
+	case hooks.GuardBlocked:
+		why = fmt.Sprintf("was not retried: its retry_guard exited %d after a timeout (for example the machine is busy); retry later with --continue", f.Code)
 	case hooks.Transient:
 		why = fmt.Sprintf("exited %d (transient)", f.Code)
 	case hooks.VerifyModified:
@@ -883,6 +885,8 @@ func hookDetail(f *hooks.Failure) string {
 	switch f.Kind {
 	case hooks.TimedOut:
 		base = "timeout"
+	case hooks.GuardBlocked:
+		base = "retry-guard"
 	case hooks.Transient:
 		base = "transient"
 	case hooks.VerifyModified:

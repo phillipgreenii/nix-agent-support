@@ -769,6 +769,7 @@ func (s *runner) runHook(ctx context.Context, point, stage string) (*hooks.Failu
 	p.Facts.BaseMoved = s.baseMoved
 	hr, err := s.hookRunner().RunPoint(ctx, hooks.PointInput{
 		Point: point, Hooks: p.Config.HooksFor(string(p.Operation), point), Facts: p.Facts,
+		AfterTimeout: p.plan != nil && p.plan.afterTimeout,
 	})
 	for _, rec := range hr.Records {
 		p.Log.Command("hook", rec)
@@ -1158,6 +1159,8 @@ type resumePlan struct {
 	nothing bool
 	// conflictRounds is kept across a resume.
 	conflictRounds int
+	// afterTimeout is true when the stop being resumed was a `timeout`.
+	afterTimeout bool
 }
 
 // addWarning records a warning word once.

@@ -638,3 +638,67 @@ func TestLogTailDropsHintsAndKeepsFifty(t *testing.T) {
 		t.Fatalf("tail = %q", got)
 	}
 }
+
+// retry_guard: only a resume after a timeout stop runs the guard, and a guard
+// that does not exit 0 holds the entry back with a timeout stop.
+func TestRetryGuardHoldsBackARetryAfterATimeout(t *testing.T) {
+	t.Parallel()
+	f := newFx(t, 2)
+	marker := filepath.Join(f.scripts, "ran")
+	entry := func(guardBody string) config.Hook {
+		h := hk(f.script("entry", "echo ran >> "+marker))
+		h.RetryGuard = []string{f.script("guard", guardBody)}
+		return h
+	}
+	runs := func() int {
+		b, _ := os.ReadFile(marker)
+		return strings.Count(string(b), "ran")
+	}
+	retry := func(h config.Hook) hooks.PointResult {
+		res, err := f.r.RunPoint(t.Context(), hooks.PointInput{
+			Point: hooks.PointPreMergeVerify, Hooks: []config.Hook{h}, Facts: f.facts(), AfterTimeout: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	t.Run("a busy guard holds the entry back and the stop stays a timeout", func(t *testing.T) {
+		res := retry(entry("echo busy; exit 1"))
+		if res.Failure == nil || res.Failure.Kind != hooks.GuardBlocked || res.Failure.Code != 1 {
+			t.Fatalf("failure = %+v", res.Failure)
+		}
+		if e := res.Failure.Effect(); e.Stop == nil || *e.Stop != outcome.StopTimeout {
+			t.Fatalf("effect = %+v", e)
+		}
+		if runs() != 0 {
+			t.Fatal("the entry ran although its guard blocked it")
+		}
+	})
+	t.Run("a guard that cannot start blocks too", func(t *testing.T) {
+		h := entry("exit 0")
+		h.RetryGuard = []string{filepath.Join(f.scripts, "missing")}
+		res := retry(h)
+		if res.Failure == nil || res.Failure.Kind != hooks.GuardBlocked || runs() != 0 {
+			t.Fatalf("failure = %+v, runs = %d", res.Failure, runs())
+		}
+	})
+	t.Run("a quiet guard lets the entry run", func(t *testing.T) {
+		if res := retry(entry("exit 0")); res.Failure != nil || runs() != 1 {
+			t.Fatalf("failure = %+v, runs = %d", res.Failure, runs())
+		}
+	})
+	t.Run("a first run is never guarded", func(t *testing.T) {
+		res := f.run(hooks.PointPreMergeVerify, entry("exit 1"))
+		if res.Failure != nil || runs() != 2 {
+			t.Fatalf("failure = %+v, runs = %d", res.Failure, runs())
+		}
+	})
+	t.Run("an entry without a guard is unaffected", func(t *testing.T) {
+		h := hk(f.script("plain", "echo ran >> "+marker))
+		if res := retry(h); res.Failure != nil || runs() != 3 {
+			t.Fatalf("failure = %+v, runs = %d", res.Failure, runs())
+		}
+	})
+}
