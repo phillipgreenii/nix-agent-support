@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/phillipgreenii/pg-gwm/internal/config"
@@ -157,14 +158,45 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	return snap
 }
 
-// preserved counts the preserved branches by their refs; nil when git fails.
+// abandoned holds the repositories whose preserved-branch git call outlived a
+// scrape's budget and is still winding down (a cancelled git gets a SIGTERM
+// grace before SIGKILL). A later scrape skips such a repository instead of
+// stacking another git process on a starved host.
+var abandoned sync.Map
+
+type gitResult struct {
+	out string
+	err error
+}
+
+// preserved counts the preserved branches by their refs; nil when git fails,
+// when ctx ends first, or when an earlier abandoned call for main still runs.
+// It returns as soon as ctx ends: the git call is not waited for, because a
+// starved git can ignore its cancellation for the whole SIGTERM grace.
 func (c Collector) preserved(ctx context.Context, main string) *int {
-	out, err := c.Git.Exec(ctx, main, gitTimeout, "for-each-ref", "--format=%(refname)", "refs/heads/pg-gwm/")
-	if err != nil {
+	if ctx.Err() != nil {
+		return nil
+	}
+	if _, busy := abandoned.LoadOrStore(main, true); busy {
+		return nil
+	}
+	done := make(chan gitResult, 1)
+	go func() {
+		out, err := c.Git.Exec(ctx, main, gitTimeout, "for-each-ref", "--format=%(refname)", "refs/heads/pg-gwm/")
+		abandoned.Delete(main)
+		done <- gitResult{out, err}
+	}()
+	var res gitResult
+	select {
+	case res = <-done:
+	case <-ctx.Done():
+		return nil
+	}
+	if res.err != nil {
 		return nil
 	}
 	n := 0
-	for _, l := range strings.Split(out, "\n") {
+	for _, l := range strings.Split(res.out, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(l), PreservedPrefix) {
 			n++
 		}
