@@ -41,6 +41,7 @@ func newRootCmd() *cobra.Command {
 	}
 	root.AddCommand(newTickItemCmd())
 	root.AddCommand(newRunCmd())
+	root.AddCommand(newLanderStaleCmd())
 	return root
 }
 

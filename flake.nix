@@ -14389,6 +14389,21 @@
                     touch "$out"
                   '';
 
+              # test-pg-router-probe-lander-stale-hm: the scheduled lander-stale launchd
+              # entry of home/programs/pg-router-probe (eval cases in
+              # tests/pg-router-probe-lander-stale-hm.nix, real module, stubbed registry).
+              test-pg-router-probe-lander-stale-hm =
+                let
+                  r = import ./tests/pg-router-probe-lander-stale-hm.nix { inherit lib pkgs; };
+                in
+                pkgs.runCommand "test-pg-router-probe-lander-stale-hm" { } ''
+                  ${lib.optionalString (r.failures != [ ]) ''
+                    echo "pg-router-probe lander-stale eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                    exit 1
+                  ''}
+                  touch "$out"
+                '';
+
               # test-tmp-sweep (bead pg2-bo3n7, packet C of the build_tmp design): the daily
               # launchd sweep agent of home/programs/tmp-sweep. Eval cases
               # (tests/tmp-sweep.nix) run the REAL tmp-sweep, build-tmp, claude-code-tmp and
