@@ -26,13 +26,6 @@ func wireErrorCode(stdout []byte) string {
 	return client.NewExitError(nil, 0, stdout).Code
 }
 
-// wireErrorMessage best-effort extracts a human-readable message from a
-// failed call's stdout: "code: message" from an error envelope, else the raw
-// stdout text.
-func wireErrorMessage(stdout []byte) string {
-	return errorText(client.NewExitError(nil, 0, stdout))
-}
-
 // errorText is the "code: message" text of a typed client error (the bare
 // message when the call printed no error code).
 func errorText(e *client.Error) string {

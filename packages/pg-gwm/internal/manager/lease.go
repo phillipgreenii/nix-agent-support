@@ -228,7 +228,7 @@ func (m *Manager) reserve(ctx context.Context, r LeaseRequest, mayReclaim bool) 
 
 	p := &plan{spec: spec}
 	for _, c := range m.candidates(st) {
-		rel, err := m.Store.HoldOp(c.ID)
+		rel, err := m.Store.HoldOp(ctx, c.ID)
 		if err != nil {
 			continue // another command is working on it
 		}
@@ -255,7 +255,7 @@ func (m *Manager) reserve(ctx context.Context, r LeaseRequest, mayReclaim bool) 
 		if err != nil {
 			return nil, err
 		}
-		rel, err := m.Store.HoldOp(w.ID)
+		rel, err := m.Store.HoldOp(ctx, w.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -286,7 +286,7 @@ func (m *Manager) orRenewLive(ctx context.Context, lk *state.Locked, w *state.Wo
 	t := true
 	rec.Renewed = &t
 	if m.Registry.Path != "" {
-		_ = m.Registry.Add(m.Repo.Main)
+		_ = m.Registry.Add(ctx, m.Repo.Main)
 	}
 	if r.Branch != "" || r.Detach || r.CommitIsh != "" {
 		cur := "a detached HEAD"
@@ -454,11 +454,11 @@ func (m *Manager) provisionAndRecord(ctx context.Context, r LeaseRequest, p *pla
 		if err := m.Prov.Switch(ctx, p.w.Path, p.spec, runHook); err != nil {
 			return m.fail(ctx, p, err)
 		}
-		m.phase("switch", t0)
+		m.phase(ctx, "switch", t0)
 	} else {
 		t0 := time.Now()
 		rel, err := m.Store.HoldCreate(ctx, span(m.Cfg.CreateTimeout, 24*time.Hour))
-		m.phase("wait", t0)
+		m.phase(ctx, "wait", t0)
 		if err != nil {
 			if errors.Is(err, state.ErrBusy) {
 				return m.fail(ctx, p, ErrBusy("another worktree creation"))
@@ -471,7 +471,7 @@ func (m *Manager) provisionAndRecord(ctx context.Context, r LeaseRequest, p *pla
 		if err != nil {
 			return m.fail(ctx, p, err)
 		}
-		m.phase("create", t1)
+		m.phase(ctx, "create", t1)
 	}
 
 	lk, cancel, err := m.lockDetached(ctx)
@@ -509,7 +509,7 @@ func (m *Manager) finalRecord(ctx context.Context, w state.Worktree, r LeaseRequ
 		head = strings.TrimSpace(out)
 	}
 	if m.Registry.Path != "" {
-		_ = m.Registry.Add(m.Repo.Main)
+		_ = m.Registry.Add(ctx, m.Repo.Main)
 	}
 	rec := m.record(w, head)
 	if r.OrRenew {

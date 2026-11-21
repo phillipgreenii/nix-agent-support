@@ -45,7 +45,7 @@ func newFixture(t *testing.T) *fixture {
 		Git:          g,
 		Now:          func() time.Time { return t0 },
 	}
-	if err := (state.Registry{Path: f.c.RegistryPath}).Add(rp.Main); err != nil {
+	if err := (state.Registry{Path: f.c.RegistryPath}).Add(t.Context(), rp.Main); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -119,7 +119,7 @@ func TestLastReapAge(t *testing.T) {
 		t.Fatalf("age series without reaper.json:\n%s", out)
 	}
 	ok := t0.Add(-20 * time.Minute)
-	err := state.WriteReaperRecord(f.c.ReaperPath, state.ReaperRecord{
+	err := state.WriteReaperRecord(t.Context(), f.c.ReaperPath, state.ReaperRecord{
 		Started: ok, Ended: ok, Outcome: "completed", LastSuccess: &ok,
 		Repos: map[string]state.RepoReap{f.rp.Label: {Label: f.rp.Label, At: ok, Outcome: "completed"}},
 	})
@@ -170,10 +170,10 @@ func TestPreservedCountFromRefs(t *testing.T) {
 func TestCountersAndHistogram(t *testing.T) {
 	f := newFixture(t)
 	c := state.Counters{Path: f.c.CountersPath}
-	c.Refusal(f.rp.Label, "busy")
-	c.Refusal(f.rp.Label, "busy")
-	c.Reaped(f.rp.Label, 3, 2)
-	c.LeasePhase(f.rp.Label, "create", 3)
+	c.Refusal(t.Context(), f.rp.Label, "busy")
+	c.Refusal(t.Context(), f.rp.Label, "busy")
+	c.Reaped(t.Context(), f.rp.Label, 3, 2)
+	c.LeasePhase(t.Context(), f.rp.Label, "create", 3)
 	out := f.scrape()
 	l := fmt.Sprintf("repo=%q", f.rp.Label)
 	want(
@@ -202,7 +202,7 @@ func TestUnreadableAndUnreachable(t *testing.T) {
 	}
 	// A registered path that is no repository is unreachable.
 	gone := filepath.Join(t.TempDir(), "gone")
-	if err := (state.Registry{Path: f.c.RegistryPath}).Add(gone); err != nil {
+	if err := (state.Registry{Path: f.c.RegistryPath}).Add(t.Context(), gone); err != nil {
 		t.Fatal(err)
 	}
 	out := f.scrape()

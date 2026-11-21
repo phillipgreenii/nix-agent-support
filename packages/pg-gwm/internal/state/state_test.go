@@ -212,24 +212,24 @@ func TestIDs(t *testing.T) {
 
 func TestOpHeld(t *testing.T) {
 	s := newStore(t)
-	if held, err := s.OpHeld("w-1"); err != nil || held {
+	if held, err := s.OpHeld(t.Context(), "w-1"); err != nil || held {
 		t.Fatalf("held=%v err=%v", held, err)
 	}
-	rel, err := s.HoldOp("w-1")
+	rel, err := s.HoldOp(t.Context(), "w-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if held, err := s.OpHeld("w-1"); err != nil || !held {
+	if held, err := s.OpHeld(t.Context(), "w-1"); err != nil || !held {
 		t.Fatalf("held=%v err=%v", held, err)
 	}
-	if _, err := s.HoldOp("w-1"); !errors.Is(err, ErrBusy) {
+	if _, err := s.HoldOp(t.Context(), "w-1"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second hold: %v", err)
 	}
-	if held, _ := s.OpHeld("w-2"); held {
+	if held, _ := s.OpHeld(t.Context(), "w-2"); held {
 		t.Fatal("other op held")
 	}
 	rel()
-	if held, err := s.OpHeld("w-1"); err != nil || held {
+	if held, err := s.OpHeld(t.Context(), "w-1"); err != nil || held {
 		t.Fatalf("after release held=%v err=%v", held, err)
 	}
 }
@@ -330,7 +330,7 @@ func TestRegistry(t *testing.T) {
 		t.Fatalf("empty: %v %v", es, err)
 	}
 	for _, p := range []string{main, link, main} {
-		if err := r.Add(p); err != nil {
+		if err := r.Add(t.Context(), p); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -343,25 +343,25 @@ func TestRegistry(t *testing.T) {
 		t.Fatalf("main = %q, want %q", es[0].Main, want)
 	}
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := r.MarkMissing(link, t0); err != nil {
+	if err := r.MarkMissing(t.Context(), link, t0); err != nil {
 		t.Fatal(err)
 	}
-	_ = r.MarkMissing(main, t0.Add(time.Hour)) // first mark stays
+	_ = r.MarkMissing(t.Context(), main, t0.Add(time.Hour)) // first mark stays
 	es, _ = r.List()
 	if es[0].MissingSince == nil || !es[0].MissingSince.Equal(t0) {
 		t.Fatalf("missing = %v", es[0].MissingSince)
 	}
-	_ = r.Prune(48*time.Hour, t0.Add(47*time.Hour))
+	_ = r.Prune(t.Context(), 48*time.Hour, t0.Add(47*time.Hour))
 	if es, _ = r.List(); len(es) != 1 {
 		t.Fatal("pruned too early")
 	}
 	// Re-adding clears the mark.
-	_ = r.Add(main)
+	_ = r.Add(t.Context(), main)
 	if es, _ = r.List(); es[0].MissingSince != nil {
 		t.Fatal("Add keeps the missing mark")
 	}
-	_ = r.MarkMissing(main, t0)
-	_ = r.Prune(48*time.Hour, t0.Add(48*time.Hour))
+	_ = r.MarkMissing(t.Context(), main, t0)
+	_ = r.Prune(t.Context(), 48*time.Hour, t0.Add(48*time.Hour))
 	if es, _ = r.List(); len(es) != 0 {
 		t.Fatalf("not pruned at retention: %+v", es)
 	}
@@ -380,15 +380,15 @@ func TestCountersOutsideLock(t *testing.T) {
 	defer l.Unlock()
 	done := make(chan struct{})
 	go func() {
-		c.Refusal("app-abc123", "busy")
-		c.Refusal("app-abc123", "busy")
-		c.Refusal("app-abc123", "name-held")
-		c.Refusal("other-111111", "internal")
-		c.Reaped("app-abc123", 2, 1)
-		c.Reaped("app-abc123", 1, 0)
-		c.LeasePhase("app-abc123", "wait", 0.4)
-		c.LeasePhase("app-abc123", "wait", 3)
-		c.LeasePhase("app-abc123", "create", 5000)
+		c.Refusal(t.Context(), "app-abc123", "busy")
+		c.Refusal(t.Context(), "app-abc123", "busy")
+		c.Refusal(t.Context(), "app-abc123", "name-held")
+		c.Refusal(t.Context(), "other-111111", "internal")
+		c.Reaped(t.Context(), "app-abc123", 2, 1)
+		c.Reaped(t.Context(), "app-abc123", 1, 0)
+		c.LeasePhase(t.Context(), "app-abc123", "wait", 0.4)
+		c.LeasePhase(t.Context(), "app-abc123", "wait", 3)
+		c.LeasePhase(t.Context(), "app-abc123", "create", 5000)
 		close(done)
 	}()
 	select {
@@ -419,21 +419,21 @@ func TestCountersOutsideLock(t *testing.T) {
 		t.Fatal("largest bucket bound")
 	}
 	// Best effort: an unwritable location is swallowed.
-	Counters{Path: "/dev/null/x/counters.json"}.Refusal("x", "busy")
+	Counters{Path: "/dev/null/x/counters.json"}.Refusal(t.Context(), "x", "busy")
 }
 
 func TestReaperRecordMerges(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reaper.json")
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ok := t0.Add(time.Minute)
-	if err := WriteReaperRecord(path, ReaperRecord{
+	if err := WriteReaperRecord(t.Context(), path, ReaperRecord{
 		Started: t0, Ended: ok, Outcome: "ok", LastSuccess: &ok,
 		Repos: map[string]RepoReap{"a-111111": {Label: "a-111111", At: ok, Outcome: "ok", Removed: 2}, "b-222222": {Label: "b-222222", At: ok, Outcome: "ok"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	t1 := t0.Add(time.Hour)
-	if err := WriteReaperRecord(path, ReaperRecord{
+	if err := WriteReaperRecord(t.Context(), path, ReaperRecord{
 		Started: t1, Ended: t1.Add(time.Second), Outcome: "error",
 		Repos: map[string]RepoReap{"a-111111": {Label: "a-111111", At: t1, Outcome: "error", Kept: 3}},
 	}); err != nil {
@@ -462,15 +462,15 @@ func TestReaperRecordMerges(t *testing.T) {
 
 func TestHoldReapSingleFlight(t *testing.T) {
 	s := newStore(t)
-	rel, err := s.HoldReap()
+	rel, err := s.HoldReap(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.HoldReap(); !errors.Is(err, ErrBusy) {
+	if _, err := s.HoldReap(t.Context()); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second hold: %v", err)
 	}
 	rel()
-	rel2, err := s.HoldReap()
+	rel2, err := s.HoldReap(t.Context())
 	if err != nil {
 		t.Fatalf("after release: %v", err)
 	}
@@ -480,13 +480,13 @@ func TestHoldReapSingleFlight(t *testing.T) {
 func TestUpdateRepoReapLeavesRunFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reaper.json")
 	ok := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
-	if err := WriteReaperRecord(path, ReaperRecord{
+	if err := WriteReaperRecord(t.Context(), path, ReaperRecord{
 		Started: ok, Ended: ok, Outcome: "completed", LastSuccess: &ok,
 		Repos: map[string]RepoReap{"a-1": {Label: "a-1", Outcome: "completed"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpdateRepoReap(path, RepoReap{Label: "b-2", Outcome: "deadline", Removed: 3}); err != nil {
+	if err := UpdateRepoReap(t.Context(), path, RepoReap{Label: "b-2", Outcome: "deadline", Removed: 3}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadReaperRecord(path)

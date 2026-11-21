@@ -211,7 +211,7 @@ func (m *Manager) Release(ctx context.Context, k LeaseKey) (Record, error) {
 	id, leaseID, path := w.ID, w.Lease.ID, w.Path
 	lk.Unlock()
 
-	rel, err := m.Store.HoldOp(id)
+	rel, err := m.Store.HoldOp(ctx, id)
 	if err != nil {
 		return Record{}, ErrBusy("")
 	}

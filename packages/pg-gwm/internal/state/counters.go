@@ -65,8 +65,8 @@ func (c Counters) read() (Snapshot, error) {
 // missing file reads as empty.
 func (c Counters) Read() (Snapshot, error) { return c.read() }
 
-func (c Counters) update(label string, fn func(*RepoCounters)) {
-	unlock, err := flockFile(context.Background(), c.Path+".lock", countersWait)
+func (c Counters) update(ctx context.Context, label string, fn func(*RepoCounters)) {
+	unlock, err := flockFile(ctx, c.Path+".lock", countersWait)
 	if err != nil {
 		return
 	}
@@ -97,21 +97,21 @@ func (c Counters) update(label string, fn func(*RepoCounters)) {
 
 // Refusal counts one refusal (every error exit, including busy and internal)
 // by error name. Call it outside the repo lock.
-func (c Counters) Refusal(label, errorName string) {
-	c.update(label, func(rc *RepoCounters) { rc.Refusals[errorName]++ })
+func (c Counters) Refusal(ctx context.Context, label, errorName string) {
+	c.update(ctx, label, func(rc *RepoCounters) { rc.Refusals[errorName]++ })
 }
 
 // Reaped adds one reap's removed and kept worktree counts.
-func (c Counters) Reaped(label string, removed, kept int) {
-	c.update(label, func(rc *RepoCounters) {
+func (c Counters) Reaped(ctx context.Context, label string, removed, kept int) {
+	c.update(ctx, label, func(rc *RepoCounters) {
 		rc.ReapRemoved += int64(removed)
 		rc.ReapKept += int64(kept)
 	})
 }
 
 // LeasePhase records one observation of phase ("wait", "create" or "switch").
-func (c Counters) LeasePhase(label, phase string, seconds float64) {
-	c.update(label, func(rc *RepoCounters) {
+func (c Counters) LeasePhase(ctx context.Context, label, phase string, seconds float64) {
+	c.update(ctx, label, func(rc *RepoCounters) {
 		h := rc.LeasePhases[phase]
 		if h == nil {
 			h = &Histogram{}
@@ -176,8 +176,8 @@ func ReadReaperRecord(path string) (ReaperRecord, error) {
 // fields replace the stored ones, its Repos entries replace the stored entries
 // of the same repo label and never drop other repositories' entries, and a nil
 // LastSuccess keeps the stored one.
-func WriteReaperRecord(path string, r ReaperRecord) error {
-	unlock, err := flockFile(context.Background(), path+".lock", userLockWait)
+func WriteReaperRecord(ctx context.Context, path string, r ReaperRecord) error {
+	unlock, err := flockFile(ctx, path+".lock", userLockWait)
 	if err != nil {
 		return err
 	}
@@ -203,8 +203,8 @@ func WriteReaperRecord(path string, r ReaperRecord) error {
 // UpdateRepoReap replaces one repository's entry in the record at path and
 // leaves every other field, the run fields and the last-success time
 // included, as it was. A single-repository reap uses it.
-func UpdateRepoReap(path string, e RepoReap) error {
-	unlock, err := flockFile(context.Background(), path+".lock", userLockWait)
+func UpdateRepoReap(ctx context.Context, path string, e RepoReap) error {
+	unlock, err := flockFile(ctx, path+".lock", userLockWait)
 	if err != nil {
 		return err
 	}

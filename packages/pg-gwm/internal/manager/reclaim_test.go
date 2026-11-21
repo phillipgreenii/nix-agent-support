@@ -220,7 +220,7 @@ func TestMaxReclaim(t *testing.T) {
 		}
 		// The expired lease ended with a reclaimed tombstone.
 		_, err := e.m.Renew(t.Context(), LeaseKey{LeaseID: str(exp.LeaseID)}, nil, nil)
-		wantErr(t, err, "lease-lost", 25)
+		_ = wantErr(t, err, "lease-lost", 25)
 	})
 
 	t.Run("only leased worktrees: max-reached with the counts", func(t *testing.T) {

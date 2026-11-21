@@ -188,10 +188,9 @@ func (s Store) ReadUnlocked() (State, error) {
 
 // Locked is the state while the repo lock is held.
 type Locked struct {
-	s     Store
-	st    State
-	unl   func()
-	clock func() time.Time
+	s   Store
+	st  State
+	unl func()
 }
 
 // State returns the mutable in-memory state; Commit persists it.

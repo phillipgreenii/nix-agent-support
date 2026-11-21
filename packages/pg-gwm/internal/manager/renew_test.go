@@ -72,17 +72,17 @@ func TestTTLMatrix(t *testing.T) {
 	}
 
 	_, err = e.renew(LeaseKey{Name: "b"}, &config.Duration{}, nil)
-	wantErr(t, err, "usage", 2)
+	_ = wantErr(t, err, "usage", 2)
 	none := config.NoDuration
 	_, err = e.renew(LeaseKey{Name: "b"}, &none, nil)
-	wantErr(t, err, "usage", 2)
+	_ = wantErr(t, err, "usage", 2)
 	if got, _ := e.renew(LeaseKey{Name: "b"}, nil, nil); str(got.LeaseExpiration) != "2026-11-14T10:40:00Z" {
 		t.Errorf("a refused renew moved the expiry: %v", got.LeaseExpiration)
 	}
 	_, err = e.renew(LeaseKey{}, nil, nil)
-	wantErr(t, err, "usage", 2)
+	_ = wantErr(t, err, "usage", 2)
 	_, err = e.renew(LeaseKey{Name: "b", LeaseID: "l-x"}, nil, nil)
-	wantErr(t, err, "usage", 2)
+	_ = wantErr(t, err, "usage", 2)
 }
 
 func TestRenewStates(t *testing.T) {
@@ -132,10 +132,10 @@ func TestRenewStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = e.renew(LeaseKey{Name: "a"}, nil, nil)
-	wantErr(t, err, "lease-released", 24)
+	_ = wantErr(t, err, "lease-released", 24)
 	e.mustLease(LeaseRequest{Name: "c", Branch: "ab", Reset: true})
 	_, err = e.renew(LeaseKey{LeaseID: *a.LeaseID}, nil, nil)
-	wantErr(t, err, "lease-released", 24)
+	_ = wantErr(t, err, "lease-released", 24)
 
 	// Broken.
 	e.seed(func(st *state.State) {
@@ -145,11 +145,11 @@ func TestRenewStates(t *testing.T) {
 		})
 	})
 	_, err = e.renew(LeaseKey{LeaseID: "l-brokenbrok"}, nil, nil)
-	wantErr(t, err, "broken", 28)
+	_ = wantErr(t, err, "broken", 28)
 
 	// Nothing.
 	_, err = e.renew(LeaseKey{LeaseID: "l-nope000000"}, nil, nil)
-	wantErr(t, err, "not-found", 4)
+	_ = wantErr(t, err, "not-found", 4)
 	_, err = e.renew(LeaseKey{Name: "nope"}, nil, nil)
 	if ee := wantErr(t, err, "not-found", 4); !strings.Contains(ee.Hint, "held names:") {
 		t.Errorf("hint = %q", ee.Hint)
@@ -278,18 +278,18 @@ func TestReleaseDirty(t *testing.T) {
 		t.Fatalf("release: %+v %v", got, err)
 	}
 	_, err = e.renew(LeaseKey{LeaseID: *rec.LeaseID}, nil, nil)
-	wantErr(t, err, "lease-released", 24)
+	_ = wantErr(t, err, "lease-released", 24)
 	_, err = e.m.Release(t.Context(), LeaseKey{LeaseID: *rec.LeaseID})
-	wantErr(t, err, "lease-released", 24)
+	_ = wantErr(t, err, "lease-released", 24)
 	_, err = e.m.Release(t.Context(), LeaseKey{Name: "ign"})
-	wantErr(t, err, "lease-released", 24)
+	_ = wantErr(t, err, "lease-released", 24)
 
 	// A reclaimed lease.
 	e.seed(func(st *state.State) {
 		st.Tombstones = append(st.Tombstones, state.Tombstone{Kind: "reclaimed", LeaseID: "l-reclaimed0", Name: "rc", At: e.now})
 	})
 	_, err = e.m.Release(t.Context(), LeaseKey{LeaseID: "l-reclaimed0"})
-	wantErr(t, err, "lease-lost", 25)
+	_ = wantErr(t, err, "lease-lost", 25)
 }
 
 func TestReleaseThenLeaseSameName(t *testing.T) {
@@ -345,9 +345,9 @@ func TestExpire(t *testing.T) {
 		t.Errorf("holder renew after expire: %v %v", r.Status, err)
 	}
 	_, err = e.m.Expire(t.Context(), LeaseKey{Name: "nope"})
-	wantErr(t, err, "not-found", 4)
+	_ = wantErr(t, err, "not-found", 4)
 	_, err = e.m.Expire(t.Context(), LeaseKey{LeaseID: "l-nope000000"})
-	wantErr(t, err, "not-found", 4)
+	_ = wantErr(t, err, "not-found", 4)
 }
 
 func TestRenewDuringSlowCreation(t *testing.T) {
@@ -375,9 +375,9 @@ func TestRenewDuringSlowCreation(t *testing.T) {
 		t.Errorf("renew of the preparing lease: %v %v", got.Status, err)
 	}
 	_, err := e.m.Release(t.Context(), LeaseKey{Name: "slow"})
-	wantErr(t, err, "busy", 9)
+	_ = wantErr(t, err, "busy", 9)
 	_, err = e.m.Expire(t.Context(), LeaseKey{Name: "slow"})
-	wantErr(t, err, "busy", 9)
+	_ = wantErr(t, err, "busy", 9)
 	cancel()
 	<-done
 
@@ -389,7 +389,7 @@ func TestRenewDuringSlowCreation(t *testing.T) {
 	}
 	defer lk.Unlock()
 	_, err = short.Renew(t.Context(), LeaseKey{LeaseID: *other.LeaseID}, nil, nil)
-	wantErr(t, err, "busy", 9)
+	_ = wantErr(t, err, "busy", 9)
 }
 
 func TestInfo(t *testing.T) {
@@ -423,14 +423,14 @@ func TestInfo(t *testing.T) {
 	// A forcing flag does not fall back to the other kinds.
 	for _, k := range []InfoKey{{ID: "inf"}, {Name: rec.ID}, {LeaseID: rec.ID}, {Path: "inf"}} {
 		_, err := e.m.Info(t.Context(), k)
-		wantErr(t, err, "not-found", 4)
+		_ = wantErr(t, err, "not-found", 4)
 	}
 	_, err := e.m.Info(t.Context(), InfoKey{})
-	wantErr(t, err, "usage", 2)
+	_ = wantErr(t, err, "usage", 2)
 	_, err = e.m.Info(t.Context(), InfoKey{Raw: "a", Name: "b"})
-	wantErr(t, err, "usage", 2)
+	_ = wantErr(t, err, "usage", 2)
 	_, err = e.m.Info(t.Context(), InfoKey{Raw: "no-such"})
-	wantErr(t, err, "not-found", 4)
+	_ = wantErr(t, err, "not-found", 4)
 
 	// Unmanaged: a worktree of the repository's own, and the main checkout.
 	own := filepath.Join(filepath.Dir(e.mainDir), "manual-wt")

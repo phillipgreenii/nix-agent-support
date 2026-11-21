@@ -291,7 +291,7 @@ func renewRacesReap(t *testing.T, iterations int, mk func(*testing.T, ...func(*c
 			e.mustReap(ReapOptions{})
 			continue
 		}
-		wantErr(t, renewErr, "lease-lost", 25)
+		_ = wantErr(t, renewErr, "lease-lost", 25)
 		if w.Lease != nil || w.Status != state.Available {
 			t.Fatalf("iteration %d: lease lost but the worktree is %+v", i, w)
 		}
@@ -374,7 +374,7 @@ func TestReapNoProcessProbe(t *testing.T) {
 
 func TestReapSingleFlight(t *testing.T) {
 	e := newFakeEnv(t)
-	rel, err := e.m.Store.HoldReap()
+	rel, err := e.m.Store.HoldReap(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestReapBusyRepoLock(t *testing.T) {
 	}
 	defer lk.Unlock()
 	res, err := e.m.Reap(t.Context(), ReapOptions{})
-	wantErr(t, err, "busy", 9)
+	_ = wantErr(t, err, "busy", 9)
 	if res.Outcome != ReapSkipped {
 		t.Errorf("outcome = %s", res.Outcome)
 	}
@@ -457,7 +457,7 @@ func TestReapAll(t *testing.T) {
 	}
 	reg := state.Registry{Path: state.RegistryPath()}
 	gone := filepath.Join(t.TempDir(), "vanished")
-	if err := reg.Add(gone); err != nil {
+	if err := reg.Add(t.Context(), gone); err != nil {
 		t.Fatal(err)
 	}
 

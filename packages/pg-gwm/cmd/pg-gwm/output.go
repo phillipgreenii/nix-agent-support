@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -131,7 +132,7 @@ func writeRecordText(w io.Writer, r manager.Record) {
 func (a *app) emitErr(format string, printPath bool, err error) int {
 	e := manager.AsError(err)
 	if e.Name != "interrupted" && a.counters.Path != "" && a.label != "" {
-		a.counters.Refusal(a.label, e.Name)
+		a.counters.Refusal(context.Background(), a.label, e.Name)
 	}
 	if format == "json" && !printPath {
 		var hint any

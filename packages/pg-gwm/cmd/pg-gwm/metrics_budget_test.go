@@ -22,11 +22,11 @@ func TestMetricsAnswersWithinScrapeTimeoutWhenGitBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (state.Registry{Path: state.RegistryPath()}).Add(rp.Main); err != nil {
+	if err := (state.Registry{Path: state.RegistryPath()}).Add(t.Context(), rp.Main); err != nil {
 		t.Fatal(err)
 	}
 	ok := time.Now().Add(-5 * time.Minute)
-	if err := state.WriteReaperRecord(state.ReaperPath(), state.ReaperRecord{
+	if err := state.WriteReaperRecord(t.Context(), state.ReaperPath(), state.ReaperRecord{
 		Started: ok, Ended: ok, Outcome: "completed", LastSuccess: &ok,
 		Repos: map[string]state.RepoReap{rp.Label: {Label: rp.Label, At: ok, Outcome: "completed"}},
 	}); err != nil {
@@ -68,11 +68,11 @@ func TestMetricsAnswersWithinScrapeTimeoutWhenGitIgnoresCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (state.Registry{Path: state.RegistryPath()}).Add(rp.Main); err != nil {
+	if err := (state.Registry{Path: state.RegistryPath()}).Add(t.Context(), rp.Main); err != nil {
 		t.Fatal(err)
 	}
 	ok := time.Now().Add(-5 * time.Minute)
-	if err := state.WriteReaperRecord(state.ReaperPath(), state.ReaperRecord{
+	if err := state.WriteReaperRecord(t.Context(), state.ReaperPath(), state.ReaperRecord{
 		Started: ok, Ended: ok, Outcome: "completed", LastSuccess: &ok,
 		Repos: map[string]state.RepoReap{rp.Label: {Label: rp.Label, At: ok, Outcome: "completed"}},
 	}); err != nil {

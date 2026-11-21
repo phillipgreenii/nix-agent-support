@@ -41,8 +41,7 @@ func runServe(cfg *config.Config, args []string, stderr io.Writer) int {
 	spec := serveSpec(cfg, stderr, hooks, nil)
 	spec.Args = args
 	// Opt-in profiling endpoint (see pprof.go): the kernel starts it for the serve
-	// mode only, from the process environment; serveWith (the injected-context
-	// seam used by tests) never does.
+	// mode only, from the process environment.
 	spec.PprofEnv = pprofEnv
 	return daemon.Run(context.Background(), spec)
 }
@@ -59,15 +58,4 @@ func serveSpec(cfg *config.Config, stderr io.Writer, hooks serve.Hooks, setPhase
 		return parentwatch.ExitWithParent(ctx, hooks.ParentWatch, os.Getppid)
 	}
 	return spec
-}
-
-// serveWith is the daemon with the shutdown context injected; setPhase (nil
-// allowed) names the drain step in progress for the run group's overrun report.
-func serveWith(ctx context.Context, cfg *config.Config, stderr io.Writer, setPhase func(string)) int {
-	hooks, err := serve.ParseHooks(serveHooks)
-	if err != nil {
-		fmt.Fprintf(stderr, "pg-connector-issue-jira serve: %v\n", err)
-		return exitServe
-	}
-	return daemon.Serve(ctx, serveSpec(cfg, stderr, hooks, setPhase))
 }

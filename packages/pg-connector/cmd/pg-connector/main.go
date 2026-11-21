@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/phillipgreenii/x/exitcode"
+	"github.com/spf13/cobra"
 )
 
 // exitError carries a specific process exit code without printing anything
@@ -25,16 +26,19 @@ func main() {
 	// SIGINT and SIGTERM cancel the command's context, so a backend child in
 	// flight is ended (its whole process group, via x/cmdrun) instead of
 	// outliving this process.
+	root := newRootCmd()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	code := runContext(ctx, os.Args[1:])
+	code := runContext(ctx, root, os.Args[1:])
 	stop()
 	os.Exit(code)
 }
 
-func run(args []string) int { return runContext(context.Background(), args) }
+func run(args []string) int { return runContext(context.Background(), newRootCmd(), args) }
 
-func runContext(ctx context.Context, args []string) int {
-	root := newRootCmd()
+// runContext executes root with args under ctx. The caller builds root, so no
+// context is in scope where the command tree is constructed: each subcommand
+// reads its context from cmd.Context(), which ExecuteContext sets to ctx.
+func runContext(ctx context.Context, root *cobra.Command, args []string) int {
 	root.SetArgs(args)
 
 	err := root.ExecuteContext(ctx)

@@ -168,7 +168,7 @@ func (m *Manager) Reap(ctx context.Context, o ReapOptions) (ReapResult, error) {
 
 func (r *reaper) run() (ReapResult, error) {
 	m := r.m
-	rel, err := m.Store.HoldReap()
+	rel, err := m.Store.HoldReap(r.ctx)
 	if errors.Is(err, state.ErrBusy) {
 		r.res.Outcome = ReapSkipped
 		return r.res, nil
@@ -274,9 +274,9 @@ func (r *reaper) record() {
 		},
 	})
 	if m.Counters.Path != "" {
-		m.Counters.Reaped(m.Repo.Label, len(res.Removed), len(res.Kept))
+		m.Counters.Reaped(r.ctx, m.Repo.Label, len(res.Removed), len(res.Kept))
 	}
-	_ = state.UpdateRepoReap(state.ReaperPath(), m.reapEntry(res))
+	_ = state.UpdateRepoReap(r.ctx, state.ReaperPath(), m.reapEntry(res))
 }
 
 func (m *Manager) reapEntry(res ReapResult) state.RepoReap {
@@ -289,7 +289,7 @@ func (m *Manager) reapEntry(res ReapResult) state.RepoReap {
 
 // held reports whether some command holds the operation hold of worktree id.
 func (r *reaper) held(id string) bool {
-	h, err := r.m.Store.OpHeld(id)
+	h, err := r.m.Store.OpHeld(r.ctx, id)
 	return err != nil || h
 }
 
@@ -359,7 +359,7 @@ func (r *reaper) dropMissing() {
 		if r.stop() {
 			return
 		}
-		rel, err := m.Store.HoldOp(id)
+		rel, err := m.Store.HoldOp(r.ctx, id)
 		if err != nil {
 			continue
 		}
@@ -422,7 +422,7 @@ func (r *reaper) retryBroken() {
 			return
 		}
 		r.res.Broken = append(r.res.Broken, w.ID)
-		rel, err := m.Store.HoldOp(w.ID)
+		rel, err := m.Store.HoldOp(r.ctx, w.ID)
 		if err != nil {
 			continue
 		}
@@ -651,7 +651,7 @@ func (r *reaper) removeAvailable(id string) {
 // back to a detached head.
 func (r *reaper) checkOne(id string) {
 	m := r.m
-	rel, err := m.Store.HoldOp(id)
+	rel, err := m.Store.HoldOp(r.ctx, id)
 	if err != nil {
 		return
 	}
@@ -758,7 +758,7 @@ func (r *reaper) reserveStandby() (id, path string, stopped bool) {
 		}
 		return "", "", true
 	}
-	rel, err := m.Store.HoldOp(w.ID)
+	rel, err := m.Store.HoldOp(r.ctx, w.ID)
 	if err != nil {
 		r.fail("%v", err)
 		return "", "", true
@@ -968,7 +968,7 @@ func ReapAll(ctx context.Context, f config.File, reg state.Registry, newManager 
 			res.Outcome = ReapUnreachable
 			res.Warnings = []string{err.Error()}
 			if _, serr := os.Stat(p); serr != nil && t.registered && !o.DryRun {
-				_ = reg.MarkMissing(p, reapAllNow())
+				_ = reg.MarkMissing(ctx, p, reapAllNow())
 				anyVanished = true
 			}
 			res.normalize()
@@ -977,7 +977,7 @@ func ReapAll(ctx context.Context, f config.File, reg state.Registry, newManager 
 			continue
 		}
 		if t.registered && !o.DryRun {
-			_ = reg.Add(rp.Main) // clears a stale missing mark
+			_ = reg.Add(ctx, rp.Main) // clears a stale missing mark
 		}
 		m, err := newManager(rp)
 		if err != nil {
@@ -1003,7 +1003,7 @@ func ReapAll(ctx context.Context, f config.File, reg state.Registry, newManager 
 	if reg.Path != "" && !o.DryRun {
 		retention := f.For(repo.Repo{}).TombstoneRetention
 		if !retention.None && retention.D > 0 {
-			_ = reg.Prune(retention.D, reapAllNow())
+			_ = reg.Prune(ctx, retention.D, reapAllNow())
 		}
 	}
 
@@ -1021,7 +1021,7 @@ func ReapAll(ctx context.Context, f config.File, reg state.Registry, newManager 
 		if !errored && ran {
 			rec.LastSuccess = &ended
 		}
-		_ = state.WriteReaperRecord(state.ReaperPath(), rec)
+		_ = state.WriteReaperRecord(ctx, state.ReaperPath(), rec)
 	}
 	if results == nil {
 		results = []ReapResult{}

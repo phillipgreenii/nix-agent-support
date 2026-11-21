@@ -57,11 +57,11 @@ func (m *Manager) freeBytes(p string) (uint64, error) {
 }
 
 // phase records one lease phase's duration for the metrics.
-func (m *Manager) phase(name string, since time.Time) {
+func (m *Manager) phase(ctx context.Context, name string, since time.Time) {
 	if m.Counters.Path == "" {
 		return
 	}
-	m.Counters.LeasePhase(m.Repo.Label, name, time.Since(since).Seconds())
+	m.Counters.LeasePhase(ctx, m.Repo.Label, name, time.Since(since).Seconds())
 }
 
 func (m *Manager) event(e state.Event) {

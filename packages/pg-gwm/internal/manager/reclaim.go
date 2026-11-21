@@ -97,10 +97,10 @@ func (m *Manager) reclaimWorktree(ctx context.Context, l *state.Locked, id strin
 	// Reap also retires an available worktree above max through here, with
 	// keep false.
 	if w == nil || (w.Effective(now) != state.Released && w.Effective(now) != state.LeaseExpired &&
-		!(w.Status == state.Available && w.Lease == nil && !keep)) {
+		(w.Status != state.Available || w.Lease != nil || keep)) {
 		return nil, ErrInternal(errors.New("worktree " + id + " is not reclaimable"))
 	}
-	rel, err := m.Store.HoldOp(id)
+	rel, err := m.Store.HoldOp(ctx, id)
 	if err != nil {
 		return nil, errHeld
 	}
@@ -195,7 +195,7 @@ func (m *Manager) reclaimWorktree(ctx context.Context, l *state.Locked, id strin
 func (m *Manager) removeWorktree(ctx context.Context, path string) error {
 	// A retry after a failed removal meets a worktree already unlocked.
 	var ge *gitrun.GitError
-	if err := m.Prov.Unlock(ctx, path); err != nil && !(errors.As(err, &ge) && strings.Contains(ge.Stderr, "not locked")) {
+	if err := m.Prov.Unlock(ctx, path); err != nil && (!errors.As(err, &ge) || !strings.Contains(ge.Stderr, "not locked")) {
 		return err
 	}
 	if err := m.Prov.StopFSMonitor(ctx, path); err != nil {

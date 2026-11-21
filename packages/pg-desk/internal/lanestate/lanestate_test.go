@@ -420,7 +420,6 @@ func TestASkipDocumentStillNeedsPRAndModeAndAKnownReason(t *testing.T) {
 }
 
 func TestResidualOfAMergedOrInactivePRIsNotLive(t *testing.T) {
-	ctx := context.Background()
 	cases := []struct {
 		name  string
 		facts string
@@ -435,12 +434,12 @@ func TestResidualOfAMergedOrInactivePRIsNotLive(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			st := store.OpenNewSchemaForTest(t)
-			if err := st.UpsertEntityForTest(ctx, store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#7", Facts: c.facts, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
+			if err := st.UpsertEntityForTest(context.Background(), store.Entity{Repo: "o/r", EntityType: "pr", EntityID: "o/r#7", Facts: c.facts, AsOf: "2026-10-01T00:00:00Z"}); err != nil {
 				t.Fatal(err)
 			}
 			mustRecord(t, st, "apply", t0, RunInput{PR: "o/r#7", Mode: "apply", Residual: intp(2)})
 			if c.inact {
-				if _, err := MarkInactive(ctx, st, "o/r", "o/r#7"); err != nil {
+				if _, err := MarkInactive(context.Background(), st, "o/r", "o/r#7"); err != nil {
 					t.Fatal(err)
 				}
 			}

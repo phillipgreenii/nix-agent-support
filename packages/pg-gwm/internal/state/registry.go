@@ -74,8 +74,8 @@ func (r Registry) read() (registryFile, error) {
 }
 
 // update runs fn on the registry under its own flock and writes the result.
-func (r Registry) update(fn func(*registryFile)) error {
-	unlock, err := flockFile(context.Background(), r.Path+".lock", userLockWait)
+func (r Registry) update(ctx context.Context, fn func(*registryFile)) error {
+	unlock, err := flockFile(ctx, r.Path+".lock", userLockWait)
 	if err != nil {
 		return err
 	}
@@ -96,9 +96,9 @@ func (r Registry) update(fn func(*registryFile)) error {
 
 // Add registers the main checkout (deduped by real path) and clears any
 // missing mark on it. Its added time comes from the wall clock.
-func (r Registry) Add(main string) error {
+func (r Registry) Add(ctx context.Context, main string) error {
 	p := realPath(main)
-	return r.update(func(f *registryFile) {
+	return r.update(ctx, func(f *registryFile) {
 		for i := range f.Repos {
 			if f.Repos[i].Main == p {
 				f.Repos[i].MissingSince = nil
@@ -117,9 +117,9 @@ func (r Registry) List() ([]RegistryEntry, error) {
 
 // MarkMissing records that main was found missing at now; the first mark
 // stays. An unknown path is ignored.
-func (r Registry) MarkMissing(main string, now time.Time) error {
+func (r Registry) MarkMissing(ctx context.Context, main string, now time.Time) error {
 	p := realPath(main)
-	return r.update(func(f *registryFile) {
+	return r.update(ctx, func(f *registryFile) {
 		for i := range f.Repos {
 			if (f.Repos[i].Main == p || f.Repos[i].Main == filepath.Clean(main)) && f.Repos[i].MissingSince == nil {
 				t := now.UTC()
@@ -132,8 +132,8 @@ func (r Registry) MarkMissing(main string, now time.Time) error {
 // Prune drops entries missing since at least retention before now
 // (MissingSince + retention <= now). A caller whose retention is "none" does
 // not call it.
-func (r Registry) Prune(retention time.Duration, now time.Time) error {
-	return r.update(func(f *registryFile) {
+func (r Registry) Prune(ctx context.Context, retention time.Duration, now time.Time) error {
+	return r.update(ctx, func(f *registryFile) {
 		kept := f.Repos[:0]
 		for _, e := range f.Repos {
 			if e.MissingSince != nil && !e.MissingSince.Add(retention).After(now) {

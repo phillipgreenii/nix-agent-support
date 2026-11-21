@@ -149,8 +149,12 @@ func TestOutputFormats(t *testing.T) {
 
 	// A warning goes to standard error and never to standard output.
 	c.run("version")
-	c.out.Truncate(0)
-	c.errf.Truncate(0)
+	if err := c.out.Truncate(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.errf.Truncate(0); err != nil {
+		t.Fatal(err)
+	}
 	c.a.warnf("careful %d", 1)
 	o, _ := os.ReadFile(c.out.Name())
 	e, _ := os.ReadFile(c.errf.Name())
@@ -394,8 +398,12 @@ func TestCompletionScripts(t *testing.T) {
 		code := c.a.run([]string{"completion", shell})
 		o, _ := os.ReadFile(c.out.Name())
 		out := string(o)
-		c.out.Truncate(0)
-		c.out.Seek(0, 0)
+		if err := c.out.Truncate(0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.out.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
 		if code != 0 {
 			t.Fatalf("%s: exit %d", shell, code)
 		}

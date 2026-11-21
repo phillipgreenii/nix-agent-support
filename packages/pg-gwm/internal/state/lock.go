@@ -72,13 +72,13 @@ func (s Store) opPath(id string) string { return filepath.Join(s.Dir, "ops", id+
 // HoldOp takes the exclusive hold of operation id (Dir/ops/<id>.lock) and
 // fails at once with ErrBusy when another holder has it. The hold dies with
 // its process.
-func (s Store) HoldOp(id string) (release func(), err error) {
-	return flockFile(context.Background(), s.opPath(id), 0)
+func (s Store) HoldOp(ctx context.Context, id string) (release func(), err error) {
+	return flockFile(ctx, s.opPath(id), 0)
 }
 
 // OpHeld reports whether some holder keeps operation id, by a try-lock probe.
-func (s Store) OpHeld(id string) (bool, error) {
-	rel, err := flockFile(context.Background(), s.opPath(id), 0)
+func (s Store) OpHeld(ctx context.Context, id string) (bool, error) {
+	rel, err := flockFile(ctx, s.opPath(id), 0)
 	if errors.Is(err, ErrBusy) {
 		return true, nil
 	}
@@ -98,6 +98,6 @@ func (s Store) HoldCreate(ctx context.Context, wait time.Duration) (release func
 // HoldReap takes the single-flight hold of a reap (Dir/reap.lock) and fails at
 // once with ErrBusy while another reap of this repository holds it. The hold
 // dies with its process.
-func (s Store) HoldReap() (release func(), err error) {
-	return flockFile(context.Background(), filepath.Join(s.Dir, "reap.lock"), 0)
+func (s Store) HoldReap(ctx context.Context) (release func(), err error) {
+	return flockFile(ctx, filepath.Join(s.Dir, "reap.lock"), 0)
 }

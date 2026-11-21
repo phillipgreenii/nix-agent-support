@@ -254,7 +254,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 			logger.Info("pg-desk serve shutting down", "reason", ctx.Err())
 			g.SetPhase("http_shutdown")
 			logShutdownPhase(logger, clk, "http drain started")
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+			// ctx is already cancelled here; the drain needs its values but a fresh deadline.
+			shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
 			defer cancel()
 			if err := srv.Shutdown(shutdownCtx); err != nil {
 				logger.Error("serve: shutdown failed", "error", err)

@@ -172,7 +172,7 @@ func TestPreservation(t *testing.T) {
 			}
 		})
 		_, err := e.lease(LeaseRequest{Name: "next", Detach: true})
-		wantErr(t, err, "broken", 28)
+		_ = wantErr(t, err, "broken", 28)
 		if w, ok := e.worktreeOf(rec.ID); !ok || w.Status != state.Broken {
 			t.Errorf("worktree after = %+v (present %v), want broken", w, ok)
 		}
@@ -241,7 +241,7 @@ func TestLeasePreservedBranch(t *testing.T) {
 
 	// The preserved namespace itself stays closed to -b.
 	_, err = e.lease(LeaseRequest{Name: "z", Branch: pb + "-2", Create: true})
-	wantErr(t, err, "usage", 2)
+	_ = wantErr(t, err, "usage", 2)
 }
 
 func TestHandOutPreservesWrites(t *testing.T) {

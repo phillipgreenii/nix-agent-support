@@ -73,7 +73,7 @@ func TestLeaseDefaultTTLGivesExpiry(t *testing.T) {
 func TestLeaseTTLMustBePositive(t *testing.T) {
 	e := newEnv(t)
 	_, err := e.lease(LeaseRequest{Name: "n", Detach: true, TTL: &config.Duration{}})
-	wantErr(t, err, "usage", 2)
+	_ = wantErr(t, err, "usage", 2)
 }
 
 func TestBranchTable(t *testing.T) {
@@ -126,7 +126,7 @@ func TestBranchTable(t *testing.T) {
 		e := newFakeEnv(t)
 		e.fake.addBranch("b5")
 		_, err := e.lease(LeaseRequest{Branch: "b5", Create: true})
-		wantErr(t, err, "usage", 2)
+		_ = wantErr(t, err, "usage", 2)
 	})
 	t.Run("6 -B creates or resets", func(t *testing.T) {
 		e := newEnv(t)
@@ -149,7 +149,7 @@ func TestBranchTable(t *testing.T) {
 		}
 		// -B never resets a branch a worktree holds.
 		_, err := e.lease(LeaseRequest{Branch: "b6", Reset: true, CommitIsh: first})
-		wantErr(t, err, "branch-in-use", 22)
+		_ = wantErr(t, err, "branch-in-use", 22)
 	})
 	t.Run("7 --detach", func(t *testing.T) {
 		e := newFakeEnv(t)
@@ -170,7 +170,7 @@ func TestBranchTable(t *testing.T) {
 			t.Errorf("existing branch = %v", rec.Branch)
 		}
 		_, err := e.lease(LeaseRequest{Name: "bad name"})
-		wantErr(t, err, "usage", 2)
+		_ = wantErr(t, err, "usage", 2)
 	})
 	t.Run("9 nothing", func(t *testing.T) {
 		e := newFakeEnv(t)
@@ -183,7 +183,7 @@ func TestBranchTable(t *testing.T) {
 	t.Run("10 branch held outside pg-gwm", func(t *testing.T) {
 		e := newFakeEnv(t)
 		_, err := e.lease(LeaseRequest{CommitIsh: fakeMainBranch})
-		wantErr(t, err, "branch-in-use", 22)
+		_ = wantErr(t, err, "branch-in-use", 22)
 		other := filepath.Join(filepath.Dir(e.mainDir), "unmanaged")
 		if err := e.fake.Create(t.Context(), other, provision.BranchSpec{Branch: "outside", Create: true}, ""); err != nil {
 			t.Fatal(err)
@@ -237,7 +237,7 @@ func TestBranchTable(t *testing.T) {
 			{Name: "pg-gwm/x"},
 		} {
 			_, err := e.lease(r)
-			wantErr(t, err, "usage", 2)
+			_ = wantErr(t, err, "usage", 2)
 		}
 	})
 }
@@ -275,12 +275,12 @@ func TestNameRules(t *testing.T) {
 	e.mustLease(LeaseRequest{Name: "worker/bd-1", Detach: true})
 	for _, name := range []string{strings.Repeat("x", 101), "two\nlines"} {
 		_, err := e.lease(LeaseRequest{Name: name, Detach: true})
-		wantErr(t, err, "usage", 2)
+		_ = wantErr(t, err, "usage", 2)
 	}
 	e.mustLease(LeaseRequest{Name: strings.Repeat("x", 100), Detach: true})
 	e.mustLease(LeaseRequest{Name: "Potato", Detach: true})
 	_, err := e.lease(LeaseRequest{Name: "potato", Detach: true})
-	wantErr(t, err, "name-held", 21)
+	_ = wantErr(t, err, "name-held", 21)
 }
 
 func TestNameBranchConflict(t *testing.T) {
@@ -313,7 +313,7 @@ func TestNameHeldWhilePreparing(t *testing.T) {
 		t.Errorf("details = %v", ee.Details)
 	}
 	cancel()
-	wantErr(t, <-done, "interrupted", 130)
+	_ = wantErr(t, <-done, "interrupted", 130)
 }
 
 func TestSameNameRace(t *testing.T) {
@@ -440,7 +440,7 @@ func TestCancelMidCreate(t *testing.T) {
 	<-bp.started
 	cancel()
 	err := <-done
-	wantErr(t, err, "interrupted", 130)
+	_ = wantErr(t, err, "interrupted", 130)
 	got := e.state().Worktrees
 	if len(got) != 1 || got[0].Status != state.Broken || got[0].Lease != nil {
 		t.Fatalf("state = %+v", got)
