@@ -781,7 +781,9 @@ func TestIntegration_SubstitutionBodyRecursion(t *testing.T) {
 		command string
 		want    hookio.Decision
 	}{
-		// mktemp is unclassified (no rule approves it as a command), i.e. an
+		// mktemp is modelled by safe-commands: a bare mktemp approves only when
+		// $TMPDIR is a writable temp root, otherwise it is refused, so the verdict
+		// depends on $TMPDIR. Historically it was unclassified, i.e. an
 		// EXHAUSTION body — on no static allowlist and owned by no rule. Before
 		// pg2-whumr's commandSubstitutionFloor (operator ruling pg2-gwp57, ADR 0048)
 		// that fell through to a bare NoOpinion, auto-approved in `auto` mode; the
@@ -1332,6 +1334,10 @@ func TestIntegration_HashInAMultiLineQuotedSpanNeverHidesASubstitution(t *testin
 // env-free / benign-env commands stay approvable (no false positives).
 func TestIntegration_EnvVarGuard(t *testing.T) {
 	t.Setenv("WORKSPACE_ROOT", "/Users/testuser/workspace")
+	// A bare mktemp is judged against $TMPDIR, and the nix check runs with a
+	// /nix-rooted $TMPDIR that is not writable per the path evaluator. Pin a
+	// fixed /tmp path (t.TempDir() would inherit the /nix-rooted TMPDIR).
+	t.Setenv("TMPDIR", "/tmp/ceta-envvarguard-test")
 	projectRoot := "/Users/testuser/workspace/my-project"
 	cwd := projectRoot
 	eng := buildFullEngine(projectRoot, cwd)
@@ -1694,7 +1700,8 @@ func TestIntegration_EnvVarGuard(t *testing.T) {
 		// Mixed value: one approvable substitution is NOT enough — every enumerated
 		// substitution must positively Approve or the fallback applies. Here the
 		// fallback is the SAME relieved exhaustion floor as the row above (`mktemp`
-		// approves, `curl evil` is exhaustion, and exhaustionOnly requires every body
+		// approves only with a writable temp-root $TMPDIR, pinned above;
+		// `curl evil` is exhaustion, and exhaustionOnly requires every body
 		// to be Approve-or-exhaustion, which this mix satisfies).
 		{"leading value mixed approvable and not", "FOO=$(mktemp)$(curl evil) echo hi", hookio.NoOpinion},
 		// The NAME-derived verdict is never demoted by an approvable body. Trailing
