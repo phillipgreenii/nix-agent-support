@@ -326,10 +326,10 @@ repository may instead configure that refresh as an `after` hook.
 The tool removes the source worktree (with plain `git worktree remove`, never
 forced) and deletes the branch, unless the keep flags say otherwise. A failure to
 remove the worktree is the warning `source-worktree-not-removed` and the outcome
-stays `landed`: relay it. A worktree held by a pg-gwm lease is never removed by the
-tool: it is parked on the placeholder branch with fate `kept` and no warning, and its
-lease owner releases it (`pb drain release` or `pg-gwm release`). The handler MUST NOT
-run `wtdone` for a worktree the tool already removed or for a pg-gwm-managed one. Before the call the shell MUST NOT be standing in a worktree the
+stays `landed`: relay it. A worktree held by a worktree-manager lease is never removed by
+the tool: it is parked on the placeholder branch with fate `kept` and no warning, and
+its lease owner releases it. The handler MUST NOT run `wtdone` for a worktree the tool
+already removed or for a leased one. Before the call the shell MUST NOT be standing in a worktree the
 tool will remove unless `--source-worktree` confirmed it; after a `landed`, change
 directory to `<CC>` before further commands, because the shell's own worktree is
 gone.
