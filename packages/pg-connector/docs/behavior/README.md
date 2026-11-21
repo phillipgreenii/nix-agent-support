@@ -120,7 +120,7 @@ the GitHub backend's own set ([github](github/README.md)). The Jira backend's si
 implements (`INTF-JIRA-WIRE`). The GitHub set owns the read-answer provenance
 (`INV-GH-FRESH-8`), the budget governor's hard cap, priority classes, background share and limit
 handling (`INV-GH-BUDGET-1`, `INV-GH-BUDGET-2`, `INV-GH-BUDGET-3`, `INV-GH-BUDGET-5`), and the
-operator verbs that explain and refresh a stale entity and that inspect whether a PR is tracked or watched (`INV-GH-DIAG-2`, `INV-GH-DIAG-3`, `INV-GH-DIAG-4`). The
+operator verbs that explain and refresh a stale entity and that inspect whether a PR is tracked or watched (`INV-GH-DIAG-2`, `INV-GH-DIAG-3`, `INV-GH-DIAG-4`). It also owns the keep-alive set that tracks an entity until its PR closes (`INV-GH-FRESH-3`), the `entity_meta.watched` flag a show or list answer states (`INV-GH-FRESH-13`), and the rule that a CI change is a change of the PR (`INV-GH-CHG-10`); the Jira set owns the store-served read with its local hit (`INV-JIRA-FRESH-2`) and the failure taxonomy the backend adds no code to (`INV-JIRA-ERR-1`). The
 as-of contract (`INV-ASOF-1`) and the single-computer rule for the staleness flag (`INV-ASOF-2`),
 the pair every read capability's wire result carries, are this set's own
 ([invariants](invariants.md), "Read as-of and staleness"), so they are not listed below.

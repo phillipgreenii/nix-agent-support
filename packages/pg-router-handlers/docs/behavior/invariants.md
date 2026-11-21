@@ -17,7 +17,8 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   states no exception of its own. The core's own de-duplication by event id (`INV-EVT-3`) is bounded
   by its retention and does not lift the obligation. Tolerating a duplicate never means adopting a finished session:
   only the same event's turn still in progress is absorbed, and every other dispatch either runs
-  in a fresh session of its own or, while another attempt is in flight, declines (`INV-CCH-30`).
+  in a fresh session of its own or, while another attempt is in flight, declines (`INV-CCH-30`). A command-backed role
+  likewise declines a redelivered event while an earlier run of it is alive (`INV-CMA-11`).
 - **`INV-CCH-3`** — a handler session's post-accept outcome (`retryable`, `resource-limit`,
   `critical`) MUST be surfaced only on this module's own logs/metrics or turned into a new event —
   never reported back to the core as anything but the opaque completion-outcome string
