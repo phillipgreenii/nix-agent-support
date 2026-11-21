@@ -1,6 +1,6 @@
 # Eval-level test of the go-env home-manager module against the REAL home-manager
 # `programs.go` module: home/default.nix must import it, and enabled it must render
-# GOFLAGS=-p=3 and GOTOOLCHAIN=local into the Go env file that `go env GOENV` names
+# GOFLAGS=-p=3 -trimpath and GOTOOLCHAIN=local into the Go env file that `go env GOENV` names
 # on the host platform. A custom toolchain value renders as given; toolchain = null
 # and enable = false each leave GOTOOLCHAIN out (enable = false drops GOFLAGS too).
 # Consumed by checks.<system>.test-go-env-eval in flake.nix.
@@ -69,6 +69,7 @@ let
   three = evalWith { phillipgreenii.programs.go-env.parallelism = 5; };
   off = evalWith { phillipgreenii.programs.go-env.enable = false; };
   customToolchain = evalWith { phillipgreenii.programs.go-env.toolchain = "go1.26.10"; };
+  noTrimpath = evalWith { phillipgreenii.programs.go-env.trimpath = false; };
   noToolchain = evalWith { phillipgreenii.programs.go-env.toolchain = null; };
 
   cases = [
@@ -77,12 +78,16 @@ let
       ok = lib.elem ../home/programs/go-env (import ../home/default.nix { }).imports;
     }
     {
-      name = "enabled by default: the Go env file contains GOFLAGS=-p=3";
-      ok = lib.hasInfix "GOFLAGS=-p=3\n" (fileText on);
+      name = "enabled by default: the Go env file contains GOFLAGS=-p=3 -trimpath";
+      ok = lib.hasInfix "GOFLAGS=-p=3 -trimpath\n" (fileText on);
     }
     {
       name = "parallelism option changes the value";
-      ok = lib.hasInfix "GOFLAGS=-p=5\n" (fileText three);
+      ok = lib.hasInfix "GOFLAGS=-p=5 -trimpath\n" (fileText three);
+    }
+    {
+      name = "trimpath = false: the Go env file contains GOFLAGS=-p=3 with no -trimpath";
+      ok = lib.hasInfix "GOFLAGS=-p=3\n" (fileText noTrimpath);
     }
     {
       name = "disabled: no GOFLAGS in the Go env file";
@@ -100,7 +105,7 @@ let
       name = "toolchain = null: no GOTOOLCHAIN in the Go env file, GOFLAGS kept";
       ok =
         !(lib.hasInfix "GOTOOLCHAIN" (fileText noToolchain))
-        && lib.hasInfix "GOFLAGS=-p=3\n" (fileText noToolchain);
+        && lib.hasInfix "GOFLAGS=-p=3 -trimpath\n" (fileText noToolchain);
     }
     {
       name = "disabled: no GOTOOLCHAIN in the Go env file";

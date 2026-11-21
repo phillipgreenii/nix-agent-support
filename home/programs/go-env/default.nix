@@ -10,10 +10,33 @@
 # file is only written when `programs.go.enable` is on (nix-personal's go module
 # enables it).
 #
-# GOFLAGS=-p=<parallelism>. Without a bound, every direct `go` command uses
+# GOFLAGS=-p=<parallelism> -trimpath. Without a bound, every direct `go` command uses
 # -p <cores>, and a burst of concurrent agent sessions drove the host to a load
 # average near 100. An environment GOFLAGS REPLACES the file value, so a script
-# that sets GOFLAGS must append to the existing value.
+# that sets GOFLAGS must append to the existing value. The value is built by
+# ./goflags.nix, which the pg-router daemon's launchd environment also imports,
+# so the two cannot drift.
+#
+# -trimpath (option `trimpath`, default true). Without it Go hashes each
+# non-GOROOT package's absolute directory into its compile action key, so every
+# worktree, workforest checkout and per-task worktree compiles its own copy of
+# every package it touches into the shared GOCACHE (a 2026-11-20 sample found
+# 78% of cache bytes embedding a worktree path; entries of removed worktrees can
+# never be hit again). With -trimpath the key records module path@version
+# instead, so two checkouts of the same source share every entry. The ZR
+# monorepo already sets GOFLAGS=-trimpath in its own environment, which replaces
+# this file, so it is unaffected. Overrides: `-trimpath=false` on a command line
+# overrides GOFLAGS; an empty `GOFLAGS=` in the environment does NOT override the
+# file (only a non-empty value replaces it). Known costs: delve file breakpoints
+# need substitute-path (or build with -trimpath=false); panics and stack traces
+# show import-path-relative file paths; `go tool pprof -list` needs -source_path;
+# runtime.GOROOT() is empty in a -trimpath binary unless GOROOT is set; test
+# results (cached) now carry over between worktrees of the same source, since
+# the test binary is identical (files a test opens are still tracked by absolute
+# path; files outside the module root are not); debug.BuildInfo drops -ldflags
+# and CGO_* and records -trimpath=true; after the first apply every cache key
+# changes once, so the cache briefly grows until old entries age out (5 unused
+# days).
 #
 # GOTOOLCHAIN=local. Go hashes the compiler's build ID into every compile action
 # key, so each distinct compiler binary keeps its own full copy of everything it
@@ -36,6 +59,7 @@
 
 let
   cfg = config.phillipgreenii.programs.go-env;
+  goflags = import ./goflags.nix;
 in
 {
   options.phillipgreenii.programs.go-env = {
@@ -47,8 +71,18 @@ in
 
     parallelism = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 3;
+      default = goflags.defaultParallelism;
       description = "Value of the `-p` go build flag (packages built or tested in parallel).";
+    };
+
+    trimpath = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Append `-trimpath` to GOFLAGS so the build cache keys do not embed each
+        checkout's absolute path and worktrees share cache entries. See the
+        module header for overrides and known costs.
+      '';
     };
 
     toolchain = lib.mkOption {
@@ -65,7 +99,9 @@ in
 
   config = lib.mkIf cfg.enable {
     programs.go.env = {
-      GOFLAGS = "-p=${toString cfg.parallelism}";
+      GOFLAGS = goflags.mkGoflags {
+        inherit (cfg) parallelism trimpath;
+      };
     }
     // lib.optionalAttrs (cfg.toolchain != null) {
       GOTOOLCHAIN = cfg.toolchain;

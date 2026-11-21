@@ -11172,6 +11172,25 @@
 
               test-pg-router-module =
                 let
+                  # Value the home-manager go-env module renders into the Go env
+                  # file, evaluated with a stub for the one option it writes
+                  # (programs.go.env). The daemon's launchd GOFLAGS replaces
+                  # that file value, so the two MUST be equal (drift check).
+                  goEnvFileGoflags =
+                    extra:
+                    (lib.evalModules {
+                      modules = [
+                        ./home/programs/go-env/default.nix
+                        {
+                          options.programs.go.env = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.str;
+                            default = { };
+                          };
+                        }
+                        extra
+                      ];
+                    }).config.programs.go.env.GOFLAGS;
+
                   hmAssertionSubmodule = lib.types.submodule {
                     options = {
                       assertion = lib.mkOption { type = lib.types.bool; };
@@ -11647,13 +11666,27 @@
                 assert
                   darwinPprofOff.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables
                   == {
-                    GOFLAGS = "-p=3";
+                    GOFLAGS = "-p=3 -trimpath";
                     GOTOOLCHAIN = "local";
                   };
                 # Go build parallelism bound for the agent sessions the daemon starts.
                 assert
                   darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables.GOFLAGS
-                  == "-p=3";
+                  == "-p=3 -trimpath";
+                # Drift check: the daemon's GOFLAGS equals what the go-env module
+                # writes to the Go env file (an environment GOFLAGS replaces the
+                # file value, so a difference would silently drop a flag), and the
+                # negative controls prove the comparison can fail: a go-env
+                # configured differently renders a different value.
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables.GOFLAGS
+                  == goEnvFileGoflags { };
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables.GOFLAGS
+                  != goEnvFileGoflags { phillipgreenii.programs.go-env.trimpath = false; };
+                assert
+                  darwinWithDaemon.phillipgreenii.system.launchdServices.userAgents.pg-router-daemon.serviceConfig.EnvironmentVariables.GOFLAGS
+                  != goEnvFileGoflags { phillipgreenii.programs.go-env.parallelism = 5; };
                 # No downloaded toolchain for those sessions: a too-old `go` fails
                 # instead of adding another compiler to the shared GOCACHE.
                 assert

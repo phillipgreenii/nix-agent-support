@@ -5,6 +5,8 @@
   ...
 }:
 let
+  goEnvFlags = import ../../../home/programs/go-env/goflags.nix;
+
   # phillipgreenii.observability.logSources is declared at darwin/system scope in
   # phillipgreenii-nix-support-apps (darwin/modules/observability/registration.nix),
   # so this lives in darwin, not in the home-manager module — setting it from HM
@@ -152,12 +154,13 @@ assert lib.assertMsg (exitTimeOutSeconds <= 60)
           # Absent when daemon.pprof.enable is false. Capture recipe:
           # docs/go-daemon-profiling-runbook.md in nix-repo-base.
           #
-          # GOFLAGS=-p=3 bounds the Go build parallelism of the agent sessions
-          # this daemon starts under tmux. The Go env file written by the
-          # home-manager go-env module already carries it; this is insurance
-          # for a session whose HOME or Go env file is not the usual one. An
-          # environment GOFLAGS replaces the file value, so this stays the
-          # same value as the file's.
+          # GOFLAGS (-p=3 -trimpath) bounds the Go build parallelism of the
+          # agent sessions this daemon starts under tmux and keeps their build
+          # cache keys free of the checkout path (see the go-env module header).
+          # The value comes from the same definition the home-manager go-env
+          # module uses (home/programs/go-env/goflags.nix). It is not just
+          # insurance: an environment GOFLAGS replaces the Go env file value, so
+          # without -trimpath here a daemon-started session would lose it.
           #
           # GOTOOLCHAIN=local is the same insurance for the go-env module's
           # toolchain setting: a session's `go` older than a module's go
@@ -168,7 +171,10 @@ assert lib.assertMsg (exitTimeOutSeconds <= 60)
           EnvironmentVariables =
             emitterEnv
             // {
-              GOFLAGS = "-p=3";
+              GOFLAGS = goEnvFlags.mkGoflags {
+                parallelism = goEnvFlags.defaultParallelism;
+                trimpath = true;
+              };
               GOTOOLCHAIN = "local";
             }
             // lib.optionalAttrs daemonCfg.pprof.enable {
