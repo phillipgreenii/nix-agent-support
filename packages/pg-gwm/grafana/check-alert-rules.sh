@@ -143,6 +143,7 @@ printf '%s\n' "$alerts_json" | jq --argjson uids "$rule_uids" '
         | ({ gt: ">", lt: "<" }[$e.type] // error("unsupported evaluator \($e.type)")) as $op
         | "(\($a)) \($op) \($e.params[0])" as $wrapped
         | ( { alert: .uid, expr: $wrapped, for: .for, labels: .labels },
+            { record: ("raw:" + (.uid | gsub("-"; "_"))), expr: $a },
             { record: ("wrapped:" + (.uid | gsub("-"; "_"))), expr: $wrapped } ) ]
     } ] }' >rules.yml
 

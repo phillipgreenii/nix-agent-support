@@ -8,11 +8,17 @@ evaluation_interval: 1m
 
 # The rule's noDataState is Alerting (pinned by check-alert-rules.sh, because promtool sees no
 # series and so cannot assert it): a reaper that never ran leaves no series at all.
+# Every case carries host-activity's gauges (full wake at 200 s, last sleep at 100 s: awake and
+# settled) unless it says otherwise; the rule is gated on the host being awake for over 600 s.
 # Ages grow one second per second, so the series below are ages in seconds at each minute.
 tests:
   - name: a last success older than 1800 seconds fires
     interval: 1m
     input_series:
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x200"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x200"
       - series: pg_gwm_reaper_last_success_age_seconds
         values: "0+60x120"
     alert_rule_test:
@@ -28,6 +34,10 @@ tests:
   - name: a repository whose reap keeps being skipped fires on its own age
     interval: 1m
     input_series:
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x200"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x200"
       - series: pg_gwm_reaper_last_success_age_seconds
         values: "0+10x120"
       - series: pg_gwm_last_reap_age_seconds{repo="r-aaaaaa"}
@@ -43,6 +53,10 @@ tests:
   - name: a fresh reaper stays quiet
     interval: 1m
     input_series:
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x200"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x200"
       - series: pg_gwm_reaper_last_success_age_seconds
         values: "0+10x120"
       - series: pg_gwm_last_reap_age_seconds{repo="r-aaaaaa"}
@@ -55,6 +69,10 @@ tests:
   - name: missed scrapes with ages under 1800 seconds stay quiet
     interval: 1m
     input_series:
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x200"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x200"
       # Ages grow 10 per minute; minutes 20 to 22 are timed-out scrapes (stale markers).
       - series: pg_gwm_reaper_last_success_age_seconds
         values: "0+10x19 stale stale stale 0+10x80"
@@ -74,6 +92,10 @@ tests:
   - name: an age over 1800 seconds still fires through missed scrapes
     interval: 1m
     input_series:
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x200"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x200"
       - series: pg_gwm_reaper_last_success_age_seconds
         values: "0+60x32 stale stale stale 2100+60x20"
     alert_rule_test:
@@ -92,3 +114,95 @@ tests:
       - eval_time: 100m
         alertname: pg-gwm-reaper-stale
         exp_alerts: []
+
+  - name: awake with no reaper series at all is empty, which noDataState Alerting fires
+    interval: 1m
+    input_series:
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x200"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x200"
+    promql_expr_test:
+      - expr: raw:pg_gwm_reaper_stale
+        eval_time: 60m
+        exp_samples: []
+
+  - name: a sleeping host does not fire on a wall-clock age, and returns a 0 sample (not no data)
+    interval: 1m
+    input_series:
+      # Last sleep newer than the last wake; the reaper age keeps growing through the sleep.
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "100x200"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "200x200"
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "2100+60x120"
+    promql_expr_test:
+      - expr: raw:pg_gwm_reaper_stale
+        eval_time: 60m
+        exp_samples:
+          - labels: "raw:pg_gwm_reaper_stale"
+            value: 0
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+
+  - name: a host-activity push that has aged out (asleep) neither fires nor reads as no data
+    interval: 1m
+    input_series:
+      # Every host-activity series ends at minute 10; the ages keep arriving afterwards.
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x10 stale"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x10 stale"
+      - series: host_power_transitions_total
+        values: "3x10 stale"
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "2100+60x120"
+    promql_expr_test:
+      - expr: raw:pg_gwm_reaper_stale
+        eval_time: 60m
+        exp_samples:
+          - labels: "raw:pg_gwm_reaper_stale"
+            value: 0
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+
+  - name: just woken, within one 600 second reaper interval, a stale wall-clock age does not fire
+    interval: 1m
+    input_series:
+      # Full wake at 3000 s (minute 50); the age is still the pre-sleep one.
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "3000x200"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "2900x200"
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "2100+60x120"
+    alert_rule_test:
+      # 3300 s: 300 s after the wake.
+      - eval_time: 55m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+      # 3660 s: 660 s after the wake, so the age counts again.
+      - eval_time: 61m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: awake with no sleep ever recorded still fires on an age over 1800 seconds
+    interval: 1m
+    input_series:
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x200"
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "2100+60x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning

@@ -15,6 +15,21 @@
 # the whole window (the reaper never ran, or the exporter has been unreadable for over 5 minutes;
 # the exporter-down rule names the second case). The exporter also bounds its git work to 60 percent
 # of the scrape timeout, so a scrape under host load still carries these ages.
+#
+# Host sleep gate (the awake gate of pg-router-liveness-down and pg-router-sensor-stale in the
+# pg-router alerts). The reaper is a launchd agent and does not run while the host sleeps, so its
+# wall-clock ages keep growing through a sleep, and the first evaluation after a wake finds no
+# sample at all (Prometheus did not scrape while asleep); both used to page though the reaper was
+# healthy. The expression is
+#   (<ages> and on() <settled>) or (vector(0) unless on() <settled>)
+# where <settled> is host-activity's full-wake timestamp newer than its last-sleep timestamp (or
+# no sleep ever recorded, or neither gauge exported while host_power_transitions_total is present)
+# AND that wake more than 600 seconds ago (one reaper interval, so the reaper has had one run since
+# the wake before a wall-clock age counts). While the host sleeps, or has just woken, <settled> is
+# empty and the second branch returns a single 0 sample: Normal, not NoData. While the host is
+# awake and settled, the first branch applies unchanged: an age over 1800 fires, and no age series
+# at all (the reaper never ran) is empty, so noDataState Alerting fires. Cases:
+# rule-tests/pg-gwm-reaper-stale.test.yaml.
 apiVersion: 1
 groups:
   - orgId: 1
@@ -45,7 +60,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max by (repo) (last_over_time({__name__=~"pg_gwm_reaper_last_success_age_seconds|pg_gwm_last_reap_age_seconds"}[5m]))'
+              expr: '(max by (repo) (last_over_time({__name__=~"pg_gwm_reaper_last_success_age_seconds|pg_gwm_last_reap_age_seconds"}[5m])) and on() (((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or ((host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total)))) or (vector(0) unless on() (((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or ((host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total))))'
           - refId: B
             datasourceUid: __expr__
             model:
