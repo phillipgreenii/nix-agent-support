@@ -154,6 +154,7 @@
   "cmd/pg-connector-github/serve.go"
   "cmd/pg-connector-github/status_cmd.go"
   "pkg/connectord/changemetrics/changemetrics.go"
+  "pkg/connectord/daemon/daemon.go"
   "pkg/connectord/daemoncfg/block.go"
   "pkg/connectord/daemoncfg/duration.go"
   "pkg/connectord/doc.go"

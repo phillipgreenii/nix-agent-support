@@ -124,6 +124,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/sidecar/legacyimport"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/summary"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/telemetry"
+	kernel "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/daemon"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
@@ -181,29 +182,40 @@ type Options struct {
 	MeterProvider metric.MeterProvider
 }
 
-// Run runs the daemon until ctx ends and returns the process exit code.
+// Run runs the daemon until ctx ends and returns the process exit code. The
+// start protocol and the shutdown lifecycle are the kernel's
+// (pkg/connectord/daemon); this package supplies the Spec.
 func Run(ctx context.Context, o Options) int {
-	cfg := o.Config
-	stderr := o.Stderr
-	if stderr == nil {
-		stderr = io.Discard
-	}
-	log := logs.NewStructuredLog(cfg.StateDir, o.Version)
-	lockPath := filepath.Join(cfg.StateDir, config.LockFileName)
+	return kernel.Serve(ctx, NewSpec(o))
+}
 
-	srv, err := proc.StartCtx(ctx, proc.Config{
-		StateDir:   cfg.StateDir,
-		SocketPath: cfg.SocketPath,
-		LockPath:   lockPath,
-		Logger:     log,
-		PeerUID:    o.PeerUID,
-		OwnUID:     o.OwnUID,
-		OnPhase:    o.OnPhase,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "pg-connector-github serve: %v\n", err)
-		return ExitRefused
+// NewSpec is the daemon kernel's description of the GitHub daemon: the lock and
+// socket configuration and Assemble, which builds the daemon, its drain hooks
+// (in the order they must run) and its startup. The caller may set the Spec's
+// Args and WrapContext before handing it to daemon.Run.
+func NewSpec(o Options) kernel.Spec {
+	cfg := o.Config
+	lockPath := filepath.Join(cfg.StateDir, config.LockFileName)
+	log := logs.NewStructuredLog(cfg.StateDir, o.Version)
+	return kernel.Spec{
+		Name:   "pg-connector-github",
+		Stderr: o.Stderr,
+		Proc: proc.Config{
+			StateDir:   cfg.StateDir,
+			SocketPath: cfg.SocketPath,
+			LockPath:   lockPath,
+			Logger:     log,
+			PeerUID:    o.PeerUID,
+			OwnUID:     o.OwnUID,
+			OnPhase:    o.OnPhase,
+		},
+		Assemble: func() kernel.Assembly { return assemble(o, log, lockPath) },
 	}
+}
+
+// assemble builds the daemon once the lock is held.
+func assemble(o Options, log *logs.StructuredLog, lockPath string) kernel.Assembly {
+	cfg := o.Config
 	log.LockAcquired(lockPath)
 
 	d := &daemon{o: o, cfg: cfg, log: log, ev: logs.NewEventLog(cfg.StateDir, o.Version)}
@@ -214,39 +226,17 @@ func Run(ctx context.Context, o Options) int {
 	d.rt.SetMigrating(true, "the daemon is starting")
 	d.rt.Use(d.ev.Middleware())
 
-	// The hooks are registered now, in the order they must run, and act on
-	// whatever startup got to.
-	drain := &proc.Hooks{}
-	drain.Register("writes", d.drainWrites)
-	drain.Register("background", d.stopBackground)
-	drain.Register("changes", d.flushChanges)
-	drain.Register("telemetry", d.stopTelemetry)
-	drain.Register("store", d.closeStore)
-
-	serveCtx, stopServe := context.WithCancel(ctx)
-	defer stopServe()
-	served := make(chan error, 1)
-	go func() {
-		served <- srv.Serve(serveCtx, socket.Handler(d.rt, socket.ServerConfig{Build: o.Version, Logger: log}), drain)
-	}()
-
-	if err := d.start(ctx); err != nil {
-		stopServe()
-		<-served
-		if ctx.Err() != nil {
-			// The shutdown signal arrived during startup: whatever startup was
-			// doing failed because of it, and the drain above is the answer.
-			return ExitOK
-		}
-		fmt.Fprintf(stderr, "pg-connector-github serve: %v\n", err)
-		return ExitRefused
+	return kernel.Assembly{
+		Handler: socket.Handler(d.rt, socket.ServerConfig{Build: o.Version, Logger: log}),
+		Drain: []kernel.Hook{
+			{Name: "writes", Run: d.drainWrites},
+			{Name: "background", Run: d.stopBackground},
+			{Name: "changes", Run: d.flushChanges},
+			{Name: "telemetry", Run: d.stopTelemetry},
+			{Name: "store", Run: d.closeStore},
+		},
+		Start: d.start,
 	}
-
-	if err := <-served; err != nil {
-		fmt.Fprintf(stderr, "pg-connector-github serve: %v\n", err)
-		return ExitRefused
-	}
-	return ExitOK
 }
 
 // errCancelled marks a startup cut short by the shutdown signal.
