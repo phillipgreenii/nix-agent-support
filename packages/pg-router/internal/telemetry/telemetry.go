@@ -31,9 +31,9 @@ import (
 	"os"
 	"strings"
 
+	"go.opentelemetry.io/otel"
 	otlploggrpc "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	otlploghttp "go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
-	logglobal "go.opentelemetry.io/otel/log/global"
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -70,7 +70,7 @@ func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error
 	if endpoint == "" {
 		// No collector configured — install a no-op provider so callers can
 		// use the global LoggerProvider without nil worries.
-		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
+		otel.SetLoggerProvider(lognoop.NewLoggerProvider())
 		return noopShutdown, nil
 	}
 
@@ -78,7 +78,7 @@ func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error
 	if err != nil {
 		fmt.Fprintf(os.Stderr,
 			"pg-router: OTel log exporter init failed (%v); logs will be no-op\n", err)
-		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
+		otel.SetLoggerProvider(lognoop.NewLoggerProvider())
 		return noopShutdown, nil
 	}
 
@@ -87,7 +87,7 @@ func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
 		sdklog.WithResource(res),
 	)
-	logglobal.SetLoggerProvider(lp)
+	otel.SetLoggerProvider(lp)
 	return lp.Shutdown, nil
 }
 
