@@ -467,6 +467,47 @@ serialize occupancy). No alert reads the per-listener gauges. The decision and i
 `DEC-OBS-12` in `docs/decisions/observability.md`; a worked example is
 `docs/investigations/2026-11-04-pr-changed-queue-backlog.md` at the repository root.
 
+### Measuring the ack-after-accept rollout
+
+Design: `docs/superpowers/specs/2026-11-11-pg-router-source-ack-after-accept-design.md` (section 10). Metric names
+below are the registered names in `internal/metrics/metrics.go`. Read each query before the opt-in
+(`--deferred-ack` and settle on the cursor-feed queries) is deployed and again after it.
+
+```promql
+# Baseline, and after: events that expired while a listener matched them and never accepted them, per role
+sum by (role) (increase(pg_router_listener_expired_pending_total{type="pr.changed"}[7d]))
+
+# Loss signal after the change: events abandoned by the hold limit (the only loss left)
+sum by (query, type) (increase(pg_router_source_ack_abandoned_total[7d]))
+
+# Held cursor: age of the oldest unsettled event per query and lane
+max by (query, lane) (pg_router_source_frontier_age_seconds)
+
+# Cost: failed settle reports per query
+sum by (query) (increase(pg_router_source_settle_failures_total[7d]))
+
+# A held frontier shows as a growing oldest pending age per role
+max by (role) (pg_router_listener_oldest_pending_age_seconds)
+```
+
+Success criterion: `pg_router_source_ack_abandoned_total` stays 0 over a 7 day window that contains at least one
+dispatcher outage shorter than `ack_hold_limit`, while `expired_pending` over the same window is non-zero (events
+expired and were replayed, not lost). A flat `expired_pending` is NOT the criterion: after the change a redelivered
+row can expire and count again, so the counter is expected to stay at or above the baseline during a handler outage.
+
+#### Recorded baseline
+
+- Read on 2026-11-21 (about 13:50 EST) from the local Prometheus at `127.0.0.1:9090` (retention 1 week, oldest
+  `pg-router` sample about 2026-11-14).
+- Query: `sum by (role) (increase(pg_router_listener_expired_pending_total{type="pr.changed"}[7d]))`.
+- Result: empty. `count(pg_router_listener_expired_pending_total{type="pr.changed"})` is also empty: no
+  `type="pr.changed"` series exists in the store, so no `pr.changed` event expired unaccepted in the retained window.
+  The only series of the counter were `role="drain-pg2"` (`type="drain.pg2"`, value 37) and `role="repo-verify"`
+  (`type="repo.tip"`, value 1), neither a pull `pr.changed` source.
+- Reading: the 7 day baseline per role for `pr.changed` is 0 (series absent). The "non-zero `expired_pending`"
+  half of the success criterion therefore needs a window in which a handler outage actually occurs; the store holds
+  at most one week, so re-read the baseline immediately before the opt-in lands.
+
 ### Queue log compaction
 
 `<LogDir>/queue.jsonl` is the append-only write-ahead log behind both the event queue and the
