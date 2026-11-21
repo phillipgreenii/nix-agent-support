@@ -21,12 +21,7 @@ func TestASlowFetchReturnsThePendingStaleRowAndIsNotCancelled(t *testing.T) {
 	release := f[groups.Detail].Block()
 	t.Cleanup(release)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	res, err := r.Svc.Ensure(ctx, node, []string{groups.Detail}, groupsvc.EnsureOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	res := ensureAtDeadline(t, r, func() { waitStarted(t, f[groups.Detail]) }, node, []string{groups.Detail})
 	g := result(t, res, groups.Detail)
 	if g.Status != groupsvc.Stale || !g.Pending || string(g.Row.Content) != "old" || g.FromOrigin {
 		t.Fatalf("detail = %+v, want the pending stale row", g)
@@ -59,12 +54,10 @@ func TestASlowFetchWithNoRowInsideExpiryIsUnavailableNamingTheDeadline(t *testin
 	t.Cleanup(f[groups.Detail].Block())
 	t.Cleanup(f[groups.Conversation].Block())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	res, err := r.Svc.Ensure(ctx, node, []string{groups.Detail, groups.Conversation}, groupsvc.EnsureOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	res := ensureAtDeadline(t, r, func() {
+		waitStarted(t, f[groups.Detail])
+		waitStarted(t, f[groups.Conversation])
+	}, node, []string{groups.Detail, groups.Conversation})
 	for _, name := range []string{groups.Detail, groups.Conversation} {
 		g := result(t, res, name)
 		if g.Status != groupsvc.Unavailable || !g.Pending || !errors.Is(g.Err, context.DeadlineExceeded) {

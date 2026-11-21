@@ -62,13 +62,7 @@ func TestASummaryStillRunningAtTheDeadlineLeavesEveryGroupPending(t *testing.T) 
 	release, entered := r.Origin.Block()
 	t.Cleanup(release)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	res, err := r.Svc.Ensure(ctx, node, []string{groups.Summary, groups.Detail}, groupsvc.EnsureOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	<-entered
+	res := ensureAtDeadline(t, r, func() { <-entered }, node, []string{groups.Summary, groups.Detail})
 	for _, g := range res.Groups {
 		if g.Status != groupsvc.Stale || !g.Pending {
 			t.Errorf("%s = %+v, want the stale row, pending", g.Group, g)
@@ -78,14 +72,9 @@ func TestASummaryStillRunningAtTheDeadlineLeavesEveryGroupPending(t *testing.T) 
 	r2 := groupsvctest.NewRig(t, groupsvctest.RigOptions{})
 	r2.Start()
 	register(r2, groups.Detail)
-	release2, _ := r2.Origin.Block()
+	release2, entered2 := r2.Origin.Block()
 	t.Cleanup(release2)
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel2()
-	res, err = r2.Svc.Ensure(ctx2, node, []string{groups.Detail}, groupsvc.EnsureOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	res = ensureAtDeadline(t, r2, func() { <-entered2 }, node, []string{groups.Detail})
 	if g := res.Groups[0]; g.Status != groupsvc.Unavailable || !g.Pending || !errors.Is(g.Err, context.DeadlineExceeded) {
 		t.Errorf("detail = %+v, want unavailable, pending, naming the deadline", g)
 	}

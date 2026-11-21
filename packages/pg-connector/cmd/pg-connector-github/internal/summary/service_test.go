@@ -482,6 +482,23 @@ func TestConcurrentRequestsForOneEntityShareOneFetch(t *testing.T) {
 	}
 }
 
+// firedDeadline is a context whose deadline passes when the test closes done.
+type firedDeadline struct {
+	context.Context
+	done chan struct{}
+}
+
+func (c *firedDeadline) Done() <-chan struct{} { return c.done }
+
+func (c *firedDeadline) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
 func TestFetchStillRunningAtTheCallersDeadlineCompletesAndIsStored(t *testing.T) {
 	r := newRig(t, rigOpts{})
 	r.fetch.block = make(chan struct{})
@@ -491,10 +508,14 @@ func TestFetchStillRunningAtTheCallersDeadlineCompletesAndIsStored(t *testing.T)
 	defer cancel()
 	go r.sched.Run(bg)
 
-	ctx, stop := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer stop()
-	got := r.svc.Interactive(ctx, []string{"e"})
+	// The caller's deadline is fired by the test once the fetch is running, not
+	// by the wall clock, so host load cannot expire it before the fetch starts.
+	ctx := &firedDeadline{Context: context.Background(), done: make(chan struct{})}
+	gotCh := make(chan []InteractiveResult, 1)
+	go func() { gotCh <- r.svc.Interactive(ctx, []string{"e"}) }()
 	<-entered
+	close(ctx.done)
+	got := <-gotCh
 	if !got[0].Pending || got[0].Fresh {
 		t.Fatalf("at the deadline the result must be pending: %+v", got[0])
 	}

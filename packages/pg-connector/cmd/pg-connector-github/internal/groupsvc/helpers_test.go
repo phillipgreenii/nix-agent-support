@@ -15,6 +15,63 @@ import (
 
 const node = "PR_1"
 
+// deadlineCtx is a context whose deadline is fired by the test (expire), not by
+// the wall clock, so a loaded host cannot make it elapse before the code under
+// test has reached the point the test is about. Its Err is DeadlineExceeded.
+type deadlineCtx struct {
+	context.Context
+	done chan struct{}
+	once sync.Once
+}
+
+func newDeadlineCtx() *deadlineCtx {
+	return &deadlineCtx{Context: context.Background(), done: make(chan struct{})}
+}
+
+func (c *deadlineCtx) Done() <-chan struct{} { return c.done }
+
+func (c *deadlineCtx) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+func (c *deadlineCtx) expire() { c.once.Do(func() { close(c.done) }) }
+
+// ensureAtDeadline runs Ensure and fires the caller's deadline once started()
+// reports the fetch is running, so the call returns only because of the deadline.
+func ensureAtDeadline(t *testing.T, r *groupsvctest.Rig, started func(), id string, names []string) groupsvc.EnsureResult {
+	t.Helper()
+	ctx := newDeadlineCtx()
+	type out struct {
+		res groupsvc.EnsureResult
+		err error
+	}
+	done := make(chan out, 1)
+	go func() {
+		res, err := r.Svc.Ensure(ctx, id, names, groupsvc.EnsureOptions{})
+		done <- out{res, err}
+	}()
+	started()
+	ctx.expire()
+	o := <-done
+	if o.err != nil {
+		t.Fatal(o.err)
+	}
+	return o.res
+}
+
+// waitStarted blocks until the fake fetcher has been entered once.
+func waitStarted(t *testing.T, f *groupsvctest.Fetcher) {
+	t.Helper()
+	if !f.WaitStarted(1, 30*time.Second) {
+		t.Fatal("the fetch never started")
+	}
+}
+
 // fetchers maps a group to its fake.
 type fetchers map[string]*groupsvctest.Fetcher
 
