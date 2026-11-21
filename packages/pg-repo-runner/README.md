@@ -138,6 +138,10 @@ and ignores the kill switch: it only reads refs and the verdict store.
    slow, not a failing check), and the sibling-override check is skipped. The sibling-override check of
    any other red is capped at a quarter of the check cap. The `pg_repo_runner_check_timeouts` gauge
    counts these and the `pg-repo-runner-check-timeouts` alert fires on repeats.
+   If the run itself is cancelled (SIGTERM, SIGINT or SIGHUP, for example a pg-router restart), the
+   runner forwards TERM to the capped child, which stops `nix flake check` and its children (the
+   sibling-override check likewise), waits for it, and exits 143, 130 or 129; no verdict is stored
+   (the tip stays unverified and is re-offered) and the lease is released.
 4. Throttle: when a `green` or `red` check of this repo finished less than `thresholds.check_interval`
    seconds ago (default 3600, `PG_REPO_RUNNER_CHECK_INTERVAL`, 0 turns it off), the run declines with
    exit 9 "not now" and stores NO verdict. A `superseded` verdict is terminal (step 1 ends on any stored

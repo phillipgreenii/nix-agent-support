@@ -956,6 +956,29 @@ only_alpha_verified() {
   [[ $output == *'pg_repo_runner_check_timeouts 1 repo=nix-alpha'* ]]
 }
 
+@test "a cancelled run (SIGTERM) stops the check's whole process tree, stores no verdict and releases the lease" {
+  local mark="30.$RANDOM$RANDOM" pid i
+  PG_ROUTER_ITEM_ID="nix-alpha@$ALPHA_SHA" SHIM_SLEEP="$mark" "${RUNNER[@]}" verify >"$TEST_DIR/cancel.out" 2>&1 3>&- &
+  pid=$!
+  # wait (bounded) until the shim's sleeping child exists: the check is running under the cap
+  for i in $(seq 1 100); do
+    pgrep -f "sleep $mark" >/dev/null && break
+    sleep 0.1
+  done
+  pgrep -f "sleep $mark" >/dev/null
+  kill -TERM "$pid"
+  local rc=0
+  wait "$pid" || rc=$?
+  [ "$rc" -eq 143 ]
+  for i in $(seq 1 50); do
+    pgrep -f "sleep $mark" >/dev/null || break
+    sleep 0.1
+  done
+  run ! pgrep -f "sleep $mark"
+  [ ! -e "$(verdict_file nix-alpha "$ALPHA_SHA")" ]
+  assert_no_lease
+}
+
 @test "the cap unset leaves a quick check unaffected, and a cap of 0 disables it" {
   local f
   verify

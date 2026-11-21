@@ -319,7 +319,7 @@ rr_verify_override() {
   local -a cap=()
   rr_cap_pre "$(($(rr_check_cap "$repo") / 4))"
   cap=("${RR_CAP_PRE[@]}")
-  PN_WORKSPACE_ROOT="$root" "${cap[@]}" "${RR_NICE_BIN:-nice}" -n "$(rr_nice_level)" \
+  PN_WORKSPACE_ROOT="$root" rr_run_cancellable "${cap[@]}" "${RR_NICE_BIN:-nice}" -n "$(rr_nice_level)" \
     env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE -u GIT_PREFIX -u GIT_OBJECT_DIRECTORY \
     "${RR_PN_BIN:-pn}" workspace flake-check --no-build --rev "$sha" "$repo" >"$olog" 2>&1 || rc=$?
   finished="$(rr_now)"
@@ -831,11 +831,13 @@ run_role() {
   if [[ $scope == workspace ]]; then
     # a signal ends the run through the EXIT trap, which removes the throwaway set
     RR_EXIT_CLEANUP=(rr_ws_exit_cleanup rr_lease_release)
-    trap 'exit 143' TERM
-    trap 'exit 130' INT
   else
     RR_EXIT_CLEANUP=(rr_lease_release)
   fi
+  # a cancelled run stops its capped child's process group, then ends through the EXIT trap
+  trap 'rr_cancel 143' TERM
+  trap 'rr_cancel 130' INT
+  trap 'rr_cancel 129' HUP
 
   # 7. act
   rr_log "admitted"

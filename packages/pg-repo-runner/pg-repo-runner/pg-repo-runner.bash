@@ -435,11 +435,39 @@ rr_nix_run() {
   rr_cap_pre "${RR_NIX_CAP:-0}"
   cap=("${RR_CAP_PRE[@]}")
   if [[ -n $wrapped ]]; then
-    "${cap[@]}" "$nice" -n "$level" "$wrapped" "$nix" "$@"
+    rr_run_cancellable "${cap[@]}" "$nice" -n "$level" "$wrapped" "$nix" "$@"
   else
     rr_err "pg-nix-log-wrapped is not configured; running nix without it"
-    "${cap[@]}" "$nice" -n "$level" "$nix" "$@"
+    rr_run_cancellable "${cap[@]}" "$nice" -n "$level" "$nix" "$@"
   fi
+}
+
+# rr_run_cancellable CMD...: runs CMD in the background and waits for it, so a signal
+# the runner traps (see rr_cancel) is handled at once instead of after the foreground
+# child ends. The child is GNU timeout in its own process group, so only a forwarded
+# signal reaches nix and its children. Returns CMD's exit status.
+rr_run_cancellable() {
+  local rc=0
+  "$@" &
+  RR_CHILD_PID=$!
+  wait "$RR_CHILD_PID" || rc=$?
+  RR_CHILD_PID=""
+  return "$rc"
+}
+
+# rr_cancel STATUS: the TERM/INT/HUP handler of a role run. Forwards TERM to the capped
+# child (timeout relays it to its whole process group), waits for it to end, then
+# exits STATUS; the EXIT trap releases the lease. No verdict is stored.
+# shellcheck disable=SC2329  # run from the signal trap strings
+rr_cancel() {
+  local pid="${RR_CHILD_PID:-}"
+  trap '' TERM INT HUP
+  if [[ -n $pid ]]; then
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    rr_log "cancelled by signal: the capped child (pid $pid) was stopped"
+  fi
+  exit "$1"
 }
 
 # rr_cap_pre SECONDS: sets the array RR_CAP_PRE to a wall-clock-cap prefix: the
