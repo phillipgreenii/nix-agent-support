@@ -42,6 +42,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
+	github.com/phillipgreenii/pg-router v0.0.0
 	github.com/prometheus/common v0.71.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -77,3 +78,5 @@ replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-c
 
 // pg-sqlite is the shared sqlite-open helper (ADR 0125), resolved by a local replace like pg-connector.
 replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite => ../pg-sqlite
+
+replace github.com/phillipgreenii/pg-router => ../pg-router

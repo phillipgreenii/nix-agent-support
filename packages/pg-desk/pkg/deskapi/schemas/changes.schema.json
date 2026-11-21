@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "pg-desk.changes/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "type", "consumer", "cursor", "sources", "records"],
+  "properties": {
+    "contract": { "const": "pg-desk.changes/v1" },
+    "type": { "type": "string" },
+    "consumer": { "type": "string" },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "type": "integer" },
+        "to": { "type": "integer" }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query", "status"],
+        "properties": {
+          "query": { "type": "string" },
+          "status": { "enum": ["ok", "degraded", "failed"] },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "seq",
+          "type",
+          "id",
+          "title",
+          "version",
+          "kinds",
+          "origin",
+          "at"
+        ],
+        "properties": {
+          "seq": { "type": "integer" },
+          "type": { "type": "string" },
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "version": { "type": "integer" },
+          "kinds": { "type": "array", "items": { "type": "string" } },
+          "origin": { "type": "string" },
+          "at": { "type": "string" },
+          "ack": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["lane", "token"],
+            "properties": {
+              "lane": { "type": "string" },
+              "token": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

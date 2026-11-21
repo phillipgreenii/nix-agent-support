@@ -14,10 +14,11 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/links"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/pkg/deskapi"
 )
 
 // viewContract names the composite view's JSON contract [design 9.5].
-const viewContract = "pg-desk.view/v1"
+const viewContract = deskapi.ViewContract
 
 func init() {
 	for _, t := range typedEntityTypes {
@@ -61,116 +62,21 @@ when it failed entirely.`, entityType),
 
 // ---- JSON contract (schema 9.5) ----
 
-type viewJSON struct {
-	Contract    string          `json:"contract"`
-	Type        string          `json:"type"`
-	ID          string          `json:"id"`
-	Version     int64           `json:"version"`
-	AsOf        string          `json:"as_of"`
-	Stale       bool            `json:"stale"`
-	Snapshot    json.RawMessage `json:"snapshot"`
-	Decorations viewDecorations `json:"decorations"`
-	Annotations viewAnnotations `json:"annotations"`
-	// Review is a PR's pending-agent-review state (pr only; omitted for the
-	// other types).
-	Review *viewReview `json:"review,omitempty"`
-	Links  []viewLink  `json:"links"`
-	// LinksAsOf is the newest time any of the entity's links was last
-	// confirmed; null when it has no links.
-	LinksAsOf *string `json:"links_as_of"`
-	// CI is a PR's CI runs for its head commit (pr only; omitted for the
-	// other types). It is the last member: an additive extension of
-	// pg-desk.view/v1.
-	CI *viewCI `json:"ci,omitempty"`
-}
-
-// viewCI is the ci section: raw stored CI run data with no computed verdict.
-// A build id is a run's id plus its attempt.
-type viewCI struct {
-	Runs []viewCIRun `json:"runs"`
-}
-
-// viewCIRun is one run, named after pg-connector's schema.CIRun fields
-// (which pg-desk does not import). Attempt is 0 when the backend reported
-// none.
-type viewCIRun struct {
-	ID         string `json:"id"`
-	Attempt    int    `json:"attempt"`
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	URL        string `json:"url"`
-	// Required is pg-connector's per-run `required` fact passed through: true
-	// when the merge gate requires the run's check, false when it does not, and
-	// omitted when the connector did not say (a consumer treats that as
-	// required).
-	Required *bool `json:"required,omitempty"`
-}
-
-type viewDecorations struct {
-	Relationship string            `json:"relationship"`
-	Dispositions []viewDisposition `json:"dispositions"`
-	// Urgency is the stored urgency level ("" when the entity has no stored
-	// interpretation).
-	Urgency  string `json:"urgency"`
-	Category string `json:"category"`
-}
-
-type viewDisposition struct {
-	CommentID string  `json:"comment_id"`
-	Computed  string  `json:"computed"`
-	Override  *string `json:"override"`
-}
-
-type viewHidden struct {
-	Value  bool    `json:"value"`
-	Reason *string `json:"reason"`
-}
-
-type viewAnnotations struct {
-	Hidden      viewHidden `json:"hidden"`
-	WIP         bool       `json:"wip"`
-	Suppress    []string   `json:"suppress"`
-	ForceReview bool       `json:"force_review"`
-	// ForceReviewSHA is the head SHA the force_review flag was requested at,
-	// or null when no flag is set.
-	ForceReviewSHA *string `json:"force_review_sha"`
-	// ReadyToLand is the reserved ready_to_land annotation: true or false
-	// once written, null when unset.
-	ReadyToLand *bool `json:"ready_to_land"`
-	// FocusSelected is the reserved focus_selected annotation: a period key
-	// or "none" once written, null when unset. It is always emitted, so a
-	// reader can tell an unset selection from a view that predates the member.
-	FocusSelected *string                      `json:"focus_selected"`
-	Decider       map[string]map[string]string `json:"decider"`
-}
-
-// viewLink is one links[] entry. State, Labels, Metadata and Assignee are
-// present only when the linked entity has a stored row; Assignee is "" when
-// it is unclaimed. There is deliberately no closed_by [design 9.5, S26].
-type viewLink struct {
-	Type     string `json:"type"`
-	ID       string `json:"id"`
-	Relation string `json:"relation"`
-	// Title is the linked entity's stored title, "" when none is stored.
-	Title    string             `json:"title"`
-	URL      string             `json:"url,omitempty"`
-	State    string             `json:"state,omitempty"`
-	Labels   *[]string          `json:"labels,omitempty"`
-	Metadata *map[string]string `json:"metadata,omitempty"`
-	Assignee *string            `json:"assignee,omitempty"`
-	// Priority is a linked work item's stored priority, backend-native
-	// ("P0".."P4" for the beads backend). It is omitted when the linked
-	// entity has no stored row or its snapshot carries no priority.
-	Priority string       `json:"priority,omitempty"`
-	Origins  []viewOrigin `json:"origins"`
-}
-
-type viewOrigin struct {
-	Origin string `json:"origin"`
-	At     string `json:"at,omitempty"`
-	Reason string `json:"reason,omitempty"`
-}
+// The view types are the published contract package's (pkg/deskapi); the
+// aliases keep this package's names.
+type (
+	viewJSON        = deskapi.View
+	viewCI          = deskapi.CI
+	viewCIRun       = deskapi.CIRun
+	viewDecorations = deskapi.Decorations
+	viewDisposition = deskapi.Disposition
+	viewHidden      = deskapi.Hidden
+	viewAnnotations = deskapi.Annotations
+	viewLink        = deskapi.Link
+	viewOrigin      = deskapi.Origin
+	viewReview      = deskapi.Review
+	viewLastAppend  = deskapi.LastAppend
+)
 
 // hiddenState is the decoded hidden annotation.
 type hiddenState struct {
@@ -432,7 +338,7 @@ func runTypedShow(cmd *cobra.Command, entityType, ref string, f typedShowFlags) 
 		return fmt.Errorf("show: %w", err)
 	}
 	if resolveJSONOutput(f.jsonOut) {
-		b, merr := json.MarshalIndent(vd.view, "", "  ")
+		b, merr := deskapi.EncodeView(vd.view)
 		if merr != nil {
 			return fmt.Errorf("show: marshal json: %w", merr)
 		}

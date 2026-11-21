@@ -2373,6 +2373,9 @@
                       ./packages/pg-router/cmd/pg-router-probe
                       # pg-desk/internal/store imports pg-sqlite via a local replace.
                       ./packages/pg-sqlite
+                      # pg-desk imports the router api/event contract via a local replace.
+                      ./packages/pg-router/go.mod
+                      ./packages/pg-router/api/event
                     ];
                   };
                 })
@@ -2475,6 +2478,9 @@
                       ./packages/pg-router/cmd/pg-router-probe
                       # pg-desk/internal/store imports pg-sqlite via a local replace.
                       ./packages/pg-sqlite
+                      # pg-desk imports the router api/event contract via a local replace.
+                      ./packages/pg-router/go.mod
+                      ./packages/pg-router/api/event
                     ];
                   };
                 })
@@ -8707,6 +8713,8 @@
                       ./packages/pg-desk
                       ./packages/pg-connector
                       ./packages/pg-sqlite
+                      ./packages/pg-router/go.mod
+                      ./packages/pg-router/api/event
                     ];
                   };
                   modRoot = "pg-desk";
@@ -10613,6 +10621,9 @@
                       ./packages/pg-router/cmd/pg-router-probe
                       # pg-desk/internal/store imports pg-sqlite via a local replace.
                       ./packages/pg-sqlite
+                      # pg-desk imports the router api/event contract via a local replace.
+                      ./packages/pg-router/go.mod
+                      ./packages/pg-router/api/event
                     ];
                   };
                   modRoot = "pg-desk";
@@ -22056,6 +22067,9 @@
                     ./packages/pg-router/cmd/pg-router-probe
                     # pg-desk/internal/store imports pg-sqlite via a local replace.
                     ./packages/pg-sqlite
+                    # pg-desk imports the router api/event contract via a local replace.
+                    ./packages/pg-router/go.mod
+                    ./packages/pg-router/api/event
                   ];
                 };
                 modRoot = "pg-desk";

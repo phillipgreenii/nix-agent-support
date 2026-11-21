@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/pkg/deskapi"
 )
 
 // changesNow is the clock a changes call stamps seen_at and prunes with;
@@ -171,7 +171,7 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 }
 
 func writeChangesJSON(w io.Writer, env changes.Envelope) error {
-	b, err := json.MarshalIndent(env, "", "  ")
+	b, err := deskapi.EncodeChanges(env)
 	if err != nil {
 		return fmt.Errorf("changes: marshal json: %w", err)
 	}

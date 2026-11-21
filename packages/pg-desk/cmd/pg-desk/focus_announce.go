@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	apievent "github.com/phillipgreenii/pg-router/api/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
@@ -120,24 +121,23 @@ func removalEvent(k focus.Key, period string, now time.Time) (string, error) {
 	if suffix == "000000000000" {
 		suffix = "000000000001"
 	}
-	ev := map[string]any{
-		"id":        "focus-remove:" + k.ID + "@" + period + "@" + stamp,
-		"type":      "pr.changed",
-		"at":        now.Format(time.RFC3339),
-		"expiresAt": now.Add(focusAnnounceTTL).Format(time.RFC3339),
-		"payload": map[string]any{
-			"id":    k.ID + "@" + suffix,
-			"type":  "pr",
-			"title": k.ID,
-			"metadata": map[string]any{
+	b, err := apievent.Encode(apievent.Event{
+		ID:        "focus-remove:" + k.ID + "@" + period + "@" + stamp,
+		Type:      "pr.changed",
+		At:        now.Format(time.RFC3339),
+		ExpiresAt: now.Add(focusAnnounceTTL).Format(time.RFC3339),
+		Payload: itemPayload(apievent.Item{
+			ID:    k.ID + "@" + suffix,
+			Type:  "pr",
+			Title: k.ID,
+			Metadata: map[string]any{
 				"entity_type": "pr",
 				"entity_id":   k.ID,
 				"kinds":       []string{"focus_removed"},
 				"origin":      "pg-desk",
 			},
-		},
-	}
-	b, err := json.Marshal(ev)
+		}),
+	})
 	return string(b), err
 }
 
@@ -153,23 +153,34 @@ func selectionEvent(k focus.Key, period string, now time.Time) (string, error) {
 	if suffix == "000000000000" {
 		suffix = "000000000001"
 	}
-	ev := map[string]any{
-		"id":        "focus-select:" + k.ID + "@" + period,
-		"type":      "pr.changed",
-		"at":        now.Format(time.RFC3339),
-		"expiresAt": now.Add(focusAnnounceTTL).Format(time.RFC3339),
-		"payload": map[string]any{
-			"id":    k.ID + "@" + suffix,
-			"type":  "pr",
-			"title": k.ID,
-			"metadata": map[string]any{
+	b, err := apievent.Encode(apievent.Event{
+		ID:        "focus-select:" + k.ID + "@" + period,
+		Type:      "pr.changed",
+		At:        now.Format(time.RFC3339),
+		ExpiresAt: now.Add(focusAnnounceTTL).Format(time.RFC3339),
+		Payload: itemPayload(apievent.Item{
+			ID:    k.ID + "@" + suffix,
+			Type:  "pr",
+			Title: k.ID,
+			Metadata: map[string]any{
 				"entity_type": "pr",
 				"entity_id":   k.ID,
 				"kinds":       []string{"focus_selected"},
 				"origin":      "pg-desk",
 			},
-		},
-	}
-	b, err := json.Marshal(ev)
+		}),
+	})
 	return string(b), err
+}
+
+// itemPayload is the event payload of an item built from the router's api/event
+// contract type: the event wire carries the item as its payload object.
+func itemPayload(it apievent.Item) map[string]any {
+	b, err := json.Marshal(it)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	return m
 }

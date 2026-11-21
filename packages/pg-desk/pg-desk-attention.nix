@@ -33,6 +33,8 @@ mkGoApp {
       ./cmd/pg-desk-attention
       ../pg-connector
       ../pg-sqlite
+      ../pg-router/go.mod
+      ../pg-router/api/event
     ];
   };
   modRoot = "pg-desk";

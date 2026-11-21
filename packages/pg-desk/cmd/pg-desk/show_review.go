@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/pkg/deskapi"
 )
 
 // reviewNow is the clock the last_append age is measured against; a test seam.
@@ -21,55 +22,11 @@ var reviewNow interpret.Clock = interpret.SystemClock{}
 
 // Review states in viewReview.State.
 const (
-	reviewStateNone    = "none"    // the lookup affirmatively found no pending review
-	reviewStateCurrent = "current" // a pending review with something anchored to the PR head
-	reviewStateStale   = "stale"   // a pending review with nothing anchored to the PR head
-	reviewStateUnknown = "unknown" // the lookup failed or was never made, or predates the per-head counts
+	reviewStateNone    = deskapi.ReviewNone    // the lookup affirmatively found no pending review
+	reviewStateCurrent = deskapi.ReviewCurrent // a pending review with something anchored to the PR head
+	reviewStateStale   = deskapi.ReviewStale   // a pending review with nothing anchored to the PR head
+	reviewStateUnknown = deskapi.ReviewUnknown // the lookup failed or was never made, or predates the per-head counts
 )
-
-// viewReview is the `review` object of a PR's pg-desk.view/v1 (absent for
-// other types). A failed or missing lookup is state "unknown" with the
-// reason in Error: it is never reported as "none".
-type viewReview struct {
-	// State is none, current, stale or unknown.
-	State string `json:"state"`
-	// Pending is whether the acting identity has a pending review; null when
-	// State is unknown.
-	Pending *bool `json:"pending"`
-	// ReviewID and URL identify the pending review, when there is one.
-	ReviewID string `json:"review_id,omitempty"`
-	URL      string `json:"url,omitempty"`
-	// AnchoredCommit is the review-level commit the pending review was
-	// created at; HeadSHA is the PR head the lookup compared against.
-	AnchoredCommit string `json:"anchored_commit,omitempty"`
-	HeadSHA        string `json:"head_sha,omitempty"`
-	// CommentsTotal is how many comments the pending review holds and
-	// CommentsAtHead how many of them were made at the current head; both are
-	// absent without a pending review.
-	CommentsTotal  *int `json:"comments_total,omitempty"`
-	CommentsAtHead *int `json:"comments_at_head,omitempty"`
-	// Stale is the CONNECTOR's verdict, read from the stored record and never
-	// recomputed here: true only when a pending review exists, nothing of it
-	// is at the head (comments_at_head 0) and the head is not otherwise
-	// reviewed. Null when there is no pending review or State is unknown.
-	Stale *bool `json:"stale"`
-	// LastAppend is the connector's record of the tool's last append to the
-	// pending review; absent when nothing was ever appended.
-	LastAppend *viewLastAppend `json:"last_append,omitempty"`
-	// ExtraPendingReviews is how many further pending reviews the identity
-	// has beyond the one reported; absent without a pending review.
-	ExtraPendingReviews *int `json:"extra_pending_reviews,omitempty"`
-	// Error is why State is unknown.
-	Error string `json:"error,omitempty"`
-}
-
-// viewLastAppend is the last append to a PR's pending review: when, how many
-// comments it added, and the head it was made at.
-type viewLastAppend struct {
-	At    string `json:"at"`
-	Added int    `json:"added"`
-	Head  string `json:"head,omitempty"`
-}
 
 // buildReview derives a PR's review state from its stored facts JSON. Facts
 // stored before the lookup existed, or by a hydration that skipped it, carry
