@@ -8,9 +8,8 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/serve"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/daemon"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/parentwatch"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/rungroup"
-	"github.com/phillipgreenii/x/lifecycle"
 )
 
 // exitServe is the exit status of a serve that refused to start or failed
@@ -34,22 +33,33 @@ var serveHooks = ""
 // launchd's ExitTimeOut from it); past the deadline the process exits 10, and a
 // second signal takes its default action.
 func runServe(cfg *config.Config, args []string, stderr io.Writer) int {
-	deadline, err := rungroup.ParseArgs("pg-connector-issue-jira serve", args)
+	hooks, err := serve.ParseHooks(serveHooks)
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-connector-issue-jira serve: %v\n", err)
-		return exitUsage
+		return exitServe
 	}
 	// Opt-in profiling endpoint (see pprof.go): the serve mode only. It reports
 	// on stderr and a rejected value never stops the daemon. runServe is the
 	// real-process entry, so it reads the process environment directly;
 	// serveWith (the injected-context seam used by tests) does not start it.
 	defer startPprofFromEnv(os.Getenv, stderr)()
-	return rungroup.Run(context.Background(), lifecycle.Options{
-		Deadline: deadline,
-		Log:      rungroup.Logger(stderr),
-	}, func(ctx context.Context, setPhase func(string)) int {
-		return serveWith(ctx, cfg, stderr, setPhase)
-	})
+	spec := serveSpec(cfg, stderr, hooks, nil)
+	spec.Args = args
+	return daemon.Run(context.Background(), spec)
+}
+
+// serveSpec is the daemon kernel's Spec for the Jira daemon. The kernel owns
+// the run group, the start protocol and the shutdown order; the parent watch
+// (test builds only, hooks.ParentWatch: drain when the parent ends, so a daemon
+// whose test process was killed without running its cleanups does not outlive
+// it) wraps the daemon's context. A zero ParentWatch (every shipped build) is
+// inert.
+func serveSpec(cfg *config.Config, stderr io.Writer, hooks serve.Hooks, setPhase func(string)) daemon.Spec {
+	spec := serve.NewSpec(serve.Options{Config: cfg, Version: Version, Stderr: stderr, Hooks: hooks, OnPhase: setPhase})
+	spec.WrapContext = func(ctx context.Context) (context.Context, func()) {
+		return parentwatch.ExitWithParent(ctx, hooks.ParentWatch, os.Getppid)
+	}
+	return spec
 }
 
 // serveWith is the daemon with the shutdown context injected; setPhase (nil
@@ -60,11 +70,5 @@ func serveWith(ctx context.Context, cfg *config.Config, stderr io.Writer, setPha
 		fmt.Fprintf(stderr, "pg-connector-issue-jira serve: %v\n", err)
 		return exitServe
 	}
-	// Test builds only (hooks.ParentWatch): drain when the parent ends, so a
-	// daemon whose test process was killed without running its cleanups does not
-	// outlive it (pg2-krpw80, as pg2-qupkv0 for the GitHub daemon). A zero
-	// ParentWatch (every shipped build) is inert.
-	ctx, stopWatch := parentwatch.ExitWithParent(ctx, hooks.ParentWatch, os.Getppid)
-	defer stopWatch()
-	return serve.Run(ctx, serve.Options{Config: cfg, Version: Version, Stderr: stderr, Hooks: hooks, OnPhase: setPhase})
+	return daemon.Serve(ctx, serveSpec(cfg, stderr, hooks, setPhase))
 }

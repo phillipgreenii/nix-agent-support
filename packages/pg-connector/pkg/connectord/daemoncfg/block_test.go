@@ -1,4 +1,4 @@
-package config
+package daemoncfg
 
 import (
 	"encoding/json"
@@ -28,25 +28,22 @@ func TestBlockStamp(t *testing.T) {
 }
 
 func TestCheckBlock(t *testing.T) {
-	cfg, err := Load(write(t, `{"state_dir": "/tmp/s", "pjira_path": "/p", "config_hash": "good"}`), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	const hash, path = "good", "/etc/daemon.json"
 	for _, ok := range []string{``, `null`, `{}`, `{"unrelated": true}`, `{"config_hash": "good"}`, `{"config_hash": "good", "config_path": "/x"}`} {
-		if err := CheckBlock(cfg, json.RawMessage(ok)); err != nil {
+		if err := CheckBlock(hash, path, json.RawMessage(ok)); err != nil {
 			t.Errorf("block %q must be accepted: %v", ok, err)
 		}
 	}
-	err = CheckBlock(cfg, json.RawMessage(`{"config_hash": "bad", "config_path": "/etc/other.json"}`))
+	err := CheckBlock(hash, path, json.RawMessage(`{"config_hash": "bad", "config_path": "/etc/other.json"}`))
 	if !errors.Is(err, ErrConfigHashMismatch) {
 		t.Fatalf("a differing hash must be rejected, got %v", err)
 	}
-	for _, want := range []string{"bad", "good", "/etc/other.json", cfg.Path} {
+	for _, want := range []string{"bad", "good", "/etc/other.json", path} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not name %q", err, want)
 		}
 	}
-	err = CheckBlock(cfg, json.RawMessage(`{"config_hash": "bad"}`))
+	err = CheckBlock(hash, path, json.RawMessage(`{"config_hash": "bad"}`))
 	if err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Errorf("a block without a path is named unknown: %v", err)
 	}

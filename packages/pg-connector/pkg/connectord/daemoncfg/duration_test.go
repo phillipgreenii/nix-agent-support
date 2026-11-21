@@ -1,4 +1,4 @@
-package config
+package daemoncfg
 
 import (
 	"encoding/json"

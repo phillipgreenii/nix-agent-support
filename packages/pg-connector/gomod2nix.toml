@@ -59,6 +59,7 @@ cachePackages = [
   'go.opentelemetry.io/proto/otlp/metrics/v1',
   'go.opentelemetry.io/proto/otlp/resource/v1',
   'go.opentelemetry.io/proto/otlp/trace/v1',
+  'go.uber.org/goleak',
   'golang.org/x/net/http/httpguts',
   'golang.org/x/net/http2',
   'golang.org/x/net/http2/hpack',
@@ -264,6 +265,10 @@ cachePackages = [
   [mod.'go.opentelemetry.io/proto/otlp']
     version = 'v1.11.1'
     hash = 'sha256-M8SCpLO073LypQdj2INMAixdbTRvw0b5Hzw0lIJMc0M='
+
+  [mod.'go.uber.org/goleak']
+    version = 'v1.3.0'
+    hash = 'sha256-uuwtET8BZ4zjKgSV92DN47k/PM2zYdnWl+naP2CfO5M='
 
   [mod.'golang.org/x/net']
     version = 'v0.63.0'
