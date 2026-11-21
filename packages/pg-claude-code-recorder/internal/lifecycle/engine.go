@@ -57,8 +57,9 @@ type Engine struct {
 	inc   *liveInc
 
 	// reg is the registry state a model load extends instead of rereading; regMu
-	// guards it.
-	regMu sync.Mutex
+	// guards it. A load takes regMu BEFORE its read transaction opens, so a load
+	// queued behind another holds no snapshot while it waits.
+	regMu ctxMutex
 	reg   regCache
 }
 
@@ -244,6 +245,12 @@ func (e *Engine) loadCtx(ctx context.Context) (*model, error) {
 func (e *Engine) loadWith(ctx context.Context, liveOnly bool) (*model, error) {
 	// One read transaction: the registry, history, end reasons, stages and
 	// processes are read under one lock round trip and from one snapshot.
+	// The registry cache is taken first, outside the transaction: a wait on it
+	// (the holder may be in a slow read) must not pin a reader connection.
+	if err := e.regMu.Lock(ctx); err != nil {
+		return nil, err
+	}
+	defer e.regMu.Unlock()
 	var m *model
 	err := e.St.ReadTxCtx(ctx, func(rd *store.Reader) error {
 		var e2 error
@@ -253,6 +260,8 @@ func (e *Engine) loadWith(ctx context.Context, liveOnly bool) (*model, error) {
 	return m, err
 }
 
+// loadFrom builds the model over rd. The caller MUST hold e.regMu, taken before rd's
+// transaction opened.
 func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool) (*model, error) {
 	m := &model{
 		vers: map[pkey][]regRow{}, segs: map[string][]seg{}, deleted: map[pkey]int64{}, procs: map[pkey]store.Proc{},
@@ -267,8 +276,6 @@ func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool) (*model, error) {
 		return q
 	}
 	epoch := e.St.RollbackEpoch()
-	e.regMu.Lock()
-	defer e.regMu.Unlock()
 	if err := e.syncRegistry(db, epoch, ready, pick); err != nil {
 		return nil, err
 	}
@@ -1112,7 +1119,7 @@ const (
 )
 
 // syncRegistry brings e.reg up to the registry as db sees it. It runs under
-// e.regMu, inside the read transaction of the load. On error the cache is left
+// e.regMu, which the load took before opening its read transaction. On error the cache is left
 // invalid, so the next load rebuilds it.
 func (e *Engine) syncRegistry(db store.Querier, epoch uint64, ready bool, pick func(string) string) error {
 	c := &e.reg
