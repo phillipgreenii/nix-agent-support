@@ -221,3 +221,57 @@ func TestSelectSourceAboveThresholdReadsByTypeAndMatchesTheWalk(t *testing.T) {
 		t.Errorf("a type's page is not read in id order through its index:\n%s", p)
 	}
 }
+
+// A feed poll whose id range holds no more than rareSourceMax ids must walk that
+// range directly: neither the source-index probe nor the per-type reads may run,
+// because both traverse every index entry of the source to apply the id bounds.
+// The walk answers what the source-index path answers.
+func TestSelectNarrowRangeWalksTheIDRangeAndMatchesTheIndexPath(t *testing.T) {
+	st := skewedStore(t)
+	srcs := sources.All()
+	e := &Engine{
+		DB:           st.Read(),
+		Catalog:      sources.Catalog(srcs),
+		Storage:      sources.Storage(srcs),
+		TypedStorage: func() bool { return true },
+		SessionRef:   func() bool { return true },
+	}
+	var f Filter
+	if werr := Decode([]byte(`{"field":"source","eq":"big"}`), &f); werr != nil {
+		t.Fatal(werr)
+	}
+	setRareSourceMax(t, 100)
+	sel := Selection{Where: &f, AfterID: 5100, UpToID: 5150, Limit: 5}
+	if !narrowRange(sel) {
+		t.Fatal("a range of 50 ids is not narrow under a threshold of 100")
+	}
+	if narrowRange(Selection{AfterID: 0, UpToID: 1 << 40}) {
+		t.Fatal("a range of 1<<40 ids is narrow")
+	}
+	q, args, _, _, werr := e.selectQuery(sel)
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	p := plan(t, st, q, args)
+	if !strings.HasPrefix(p, "SEARCH r USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)") || strings.Contains(p, "INDEX records_") {
+		t.Errorf("the narrow range is not walked by id:\n%s", p)
+	}
+	got, werr := e.Select(st.Read(), sel)
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	idx := sel
+	idx.sourceIdx = true
+	want, werr := e.selectRows(st.Read(), idx)
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	if len(got) != 6 || len(want) != 6 {
+		t.Fatalf("rows: walk %d, index %d, want 6 each", len(got), len(want))
+	}
+	for i := range got {
+		if got[i].ID != want[i].ID {
+			t.Errorf("row %d: walk id %d, index id %d", i, got[i].ID, want[i].ID)
+		}
+	}
+}

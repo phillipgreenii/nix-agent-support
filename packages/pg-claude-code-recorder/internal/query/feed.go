@@ -137,7 +137,7 @@ func (e *Engine) selectQuery(sel Selection) (string, []any, []string, []colSpec,
 // statement walks the id range and stops at its limit instead of reading every
 // matching row of the table and sorting them.
 func (e *Engine) Select(tx store.Querier, sel Selection) ([]Selected, *wire.Error) {
-	if src, ok := pinnedSource(sel.Where); ok {
+	if src, ok := pinnedSource(sel.Where); ok && !narrowRange(sel) {
 		if e.rareSource(tx, src, sel) {
 			sel.sourceIdx = true
 		} else if types, ok := e.sourceTypes(tx, src); ok {
@@ -234,6 +234,16 @@ func (e *Engine) selectRows(tx store.Querier, sel Selection) ([]Selected, *wire.
 // rareSourceMax is the most records of a pinned source in the id range for
 // which the page is read through the source index and sorted by id.
 var rareSourceMax = 20000
+
+// narrowRange reports whether the selection's id range holds at most
+// rareSourceMax ids, so the id walk reads at most that many records whatever the
+// source. A caught-up feed cursor polls such a range every few seconds; the
+// source-index probe and the per-type reads both traverse the whole source in the
+// index to apply the id bounds (the index holds no id order), which on a large
+// source costs far more than walking the few ids of the range.
+func narrowRange(sel Selection) bool {
+	return sel.UpToID > sel.AfterID && sel.UpToID-sel.AfterID <= int64(rareSourceMax)
+}
 
 // pinnedSource returns the source a filter requires of every match: a source
 // equality leaf, or an all holding one.
