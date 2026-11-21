@@ -323,6 +323,9 @@ which the legacy deletion removes). Each is emitted with a value when healthy (`
 - `pg_desk_pr_open_anchors` — the number of PRs, hidden ones excluded, with at least one open anchor.
 - `pg_desk_pr_open_anchors_hidden` — the hidden PRs with at least one open anchor, counted apart; a
   hidden PR takes part in none of the other gauges.
+- `pg_desk_pr_open_anchors_hidden_finished` — how many of those hidden PRs the store shows as merged or
+  closed. The decider still runs the closure rule for a hidden PR in that state, so a value above `0`
+  means a finished PR's anchor was not closed.
 - `pg_desk_pr_stale_anchors` — how many of the open-anchor PRs the store shows as merged or closed.
 - `pg_desk_pr_stale_anchor_oldest_age_seconds` — the age of the oldest of those, from the PR row's last
   hydration (when the store learned it was closed), `0` when there is none.
@@ -508,11 +511,11 @@ recorded the way the composed command records it.
 One more Grafana rule of the same file follows the outcome rules' shape (`noDataState: OK`, query A the
 instant expression below, B reducing with `last`, C a `gt` threshold, the router-pause guard of
 `pg-desk-sync-stale` at the end of every expression) and has a firing, a healthy and an empty-input case
-under `grafana/alerting/rule-tests/`. Its uid is registered with the alert probe as an exempt rule.
+under `grafana/alerting/rule-tests/` (plus a hidden-but-still-open quiet case). Its uid is registered with the alert probe as an exempt rule.
 
-| uid                             | severity | signal                                                                                                      | threshold | for   | meaning                                                                                                                          |
-| ------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- | --------- | ----- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `pg-desk-pr-hidden-open-anchor` | `info`   | `pg_desk_pr_open_anchors_hidden`, the hidden PRs with an open anchor, counted from the store at scrape time | `> 0`     | `30m` | a hidden PR is skipped by every decider rule including closure, so its anchor stays open even after the PR merges (low severity) |
+| uid                             | severity | signal                                                                                                                                                   | threshold | for   | meaning                                                                                                                                                                                                      |
+| ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pg-desk-pr-hidden-open-anchor` | `info`   | `pg_desk_pr_open_anchors_hidden_finished`, the hidden PRs that are merged or closed and still have an open anchor, counted from the store at scrape time | `> 0`     | `30m` | the decider runs the closure rule for a hidden PR once it is merged or closed, so its anchor should have closed; a hidden PR that is still open keeps its anchor by design and is not counted (low severity) |
 
 The former `pg-desk-pr-lookup-ceiling` warning was retired with the decider's `work_items_ceiling`
 (pg2-eclw3j.9): with no ceiling there is nothing to approach, and `pg_desk_pr_lane_lookup_items` stays as a
@@ -537,7 +540,7 @@ no-watched-PRs rule read the connector daemon's metrics and live in the connecto
 
 - **INV-SERVE-3.** <!-- uuid: 7c3e5a91-2f4b-4d8e-9b06-1a5d7e2c4f38 --> The rule `pg-desk-focus-pending-beads-age` MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on
   `apply` (the lane in `off` or `plan` mode, or the gauge absent), and MUST fire as before once it does.
-- **INV-SERVE-4.** <!-- uuid: 8ab8ae5c-3ef1-41ef-be6d-fed60758d532 --> `pg_desk_pr_open_anchors`, `pg_desk_pr_open_anchors_hidden`, `pg_desk_pr_stale_anchors`, `pg_desk_pr_stale_anchor_oldest_age_seconds` and `pg_desk_pr_open_anchor_oldest_hydration_age_seconds` MUST be derived from the store's links and PR rows, MUST be emitted with a value (`0` when none) whenever the store read succeeds on a store at schema 2, and MUST have no series, never `0`, when the read fails or the store is not at schema 2. A hidden PR MUST be counted only in `pg_desk_pr_open_anchors_hidden`.
+- **INV-SERVE-4.** <!-- uuid: 8ab8ae5c-3ef1-41ef-be6d-fed60758d532 --> `pg_desk_pr_open_anchors`, `pg_desk_pr_open_anchors_hidden`, `pg_desk_pr_open_anchors_hidden_finished`, `pg_desk_pr_stale_anchors`, `pg_desk_pr_stale_anchor_oldest_age_seconds` and `pg_desk_pr_open_anchor_oldest_hydration_age_seconds` MUST be derived from the store's links and PR rows, MUST be emitted with a value (`0` when none) whenever the store read succeeds on a store at schema 2, and MUST have no series, never `0`, when the read fails or the store is not at schema 2. A hidden PR MUST be counted only in `pg_desk_pr_open_anchors_hidden` and, when the store shows it merged or closed, `pg_desk_pr_open_anchors_hidden_finished`.
 - **INV-SERVE-5.** <!-- uuid: 22ef8d46-9ab4-41fe-add0-fc0a25772a75 --> Every outcome rule of "PR lane outcome alerts" MUST read a metric a rule test can exercise, MUST NOT fire while the pg-router `router` resource is at `PAUSED`, and MUST have `noDataState: OK`. The residual rule MUST read `mode="apply"` series only, and the two stale-anchor rules MUST NOT fire while `pg_desk_pr_lane_mode` does not read `1` on `apply`.
 - **INV-SERVE-6.** <!-- uuid: 09f2a732-be1b-4cc1-aa2d-cda84cf764ba --> `pg-desk-pr-lane-hard-failure` MUST fire on any increase of `pg_desk_pr_lane_runs_total` for class `unauthenticated` or `decide_failed`, with no `for` hold, including the first event of a series that appears already above `0`.
 - **INV-SERVE-7.** <!-- uuid: 66d3ee48-e0c9-4da4-a2dc-f515dc67258a --> `pg-desk-sweep-bound-violated` and `pg-desk-watch-listing-degraded` MUST read the issue and thread series only; a `pr` series MUST NOT make either fire.

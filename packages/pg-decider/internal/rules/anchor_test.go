@@ -363,3 +363,45 @@ func TestAnchorBackfill(t *testing.T) {
 }
 
 func anchorStr(s string) *string { return &s }
+
+// A hidden PR that merged or closed still closes its anchor and open children
+// (the person-placed hidden annotation suppresses lane work only); a hidden PR
+// that is still open plans nothing, every rule skipped as hidden.
+func TestAnchorAllClosedRunsForAHiddenFinishedPR(t *testing.T) {
+	for _, tc := range []struct {
+		fixture string
+		want    []string
+	}{
+		{"closed_merged_open_anchor_two_children", []string{"close review-pr bd-2", "close fix-ci bd-3", "close anchor bd-1"}},
+		{"closed_closed_open_anchor_two_children", []string{"close review-pr bd-2", "close  bd-3", "close anchor bd-1"}},
+		{"closed_open_pr_open_anchor", []string{}},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			v := anchorLoadView(t, tc.fixture)
+			v.Annotations.Hidden.Value = true
+			res := decide.Decide(v, decide.EntityTypePR)
+			got := []string{}
+			for _, a := range res.Actions {
+				if a.Rule != anchorRuleClosed {
+					t.Fatalf("only all.closed may act for a hidden PR, got %+v", a)
+				}
+				tgt := "-"
+				if a.Target != nil {
+					tgt = *a.Target
+				}
+				got = append(got, string(a.Op)+" "+a.Kind+" "+tgt)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("actions = %v, want %v", got, tc.want)
+			}
+			for _, s := range res.Skipped {
+				if s.Rule == anchorRuleClosed && s.Reason == action.ReasonHidden && len(tc.want) > 0 {
+					t.Fatalf("all.closed was skipped as hidden for a finished PR")
+				}
+				if s.Rule != anchorRuleClosed && s.Reason != action.ReasonHidden {
+					t.Fatalf("rule %s skipped as %q, want hidden", s.Rule, s.Reason)
+				}
+			}
+		})
+	}
+}

@@ -55,6 +55,9 @@ func TestCountPRAnchors(t *testing.T) {
 	hide("o/r#6")
 	anchor("a8", AnchorIssueType, "open", pr(7, `{"pr_show":{"state":"closed"}}`, "2026-08-01T00:00:00Z"), "work", 1)
 	hide("o/r#7")
+	// A hidden PR whose row shows merged: counted hidden and hidden-finished.
+	anchor("a10", AnchorIssueType, "open", pr(13, `{"pr_show":{"state":"open","merged":true}}`, "2026-08-01T00:00:00Z"), "work", 1)
+	hide("o/r#13")
 	// Left out: a closed anchor, a child item (another type), an anchor whose
 	// link is not a "work" link, an inactive anchor, and facts that decode to
 	// nothing.
@@ -73,11 +76,13 @@ func TestCountPRAnchors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CountPRAnchors: %v", err)
 	}
-	// Open PRs (hidden excluded): #1, #2, #3, #4, #5, #99 = 6; hidden: #6, #7.
+	// Open PRs (hidden excluded): #1, #2, #3, #4, #5, #99 = 6; hidden: #6, #7, #13 (finished: #7, #13).
 	want := PRAnchors{
 		Open:       6,
-		OpenHidden: 2,
-		Stale:      2,
+		OpenHidden: 3,
+		// #7 is closed and #13 merged; #6 is still open.
+		OpenHiddenFinished: 2,
+		Stale:              2,
 		// The stale PRs were hydrated 3 h and 6 h before now: the oldest is 6 h.
 		StaleOldestAgeSeconds: 6 * 3600,
 		// Among the open ones: #3 never hydrated, so from first_seen_at 2026-09-01.

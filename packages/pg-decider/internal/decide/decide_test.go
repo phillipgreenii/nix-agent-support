@@ -456,3 +456,57 @@ func TestFocusOrdinalFollowsEveryPRRuleAndTheEntityTypeNamesAreExact(t *testing.
 		t.Fatalf("OrdinalFocusItem %d must follow OrdinalLandReady %d", OrdinalFocusItem, OrdinalLandReady)
 	}
 }
+
+// closureFake is a fake rule that opts in to running for a hidden PR that is
+// merged or closed.
+type closureFake struct{ fakeRule }
+
+func (closureFake) RunsWhenHiddenTerminal() bool { return true }
+
+func TestHiddenTerminalPRStillRunsClosureRuleOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*view.DeskView)
+		runs  bool
+	}{
+		{"merged flag", func(v *view.DeskView) { v.Snapshot.Merged = true }, true},
+		{"state merged", func(v *view.DeskView) { v.Snapshot.State = "merged" }, true},
+		{"state closed", func(v *view.DeskView) { v.Snapshot.State = "CLOSED" }, true},
+		{"state open", func(v *view.DeskView) { v.Snapshot.State = "open" }, false},
+		{"no state", func(*view.DeskView) {}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			et := t.Name()
+			closeCalls, workCalls := 0, 0
+			Register(et, 10, &closureFake{fakeRule{id: "r.close", result: emits(action.OpClose, "anchor"), calls: &closeCalls}})
+			Register(et, 20, &fakeRule{id: "r.work", kind: workitem.KindReviewPR, result: emits(action.OpCreate, "review-pr"), calls: &workCalls})
+			v := prView()
+			v.Annotations.Hidden.Value = true
+			tc.setup(v)
+			res := Decide(v, et)
+			if workCalls != 0 {
+				t.Fatalf("a hidden PR must never run lane work rules, got %d calls", workCalls)
+			}
+			if tc.runs {
+				if closeCalls != 1 || len(res.Actions) != 1 || res.Actions[0].Rule != "r.close" {
+					t.Fatalf("closure rule must run once and close, calls=%d actions=%+v", closeCalls, res.Actions)
+				}
+			} else if closeCalls != 0 || len(res.Actions) != 0 {
+				t.Fatalf("a hidden live PR must skip every rule, calls=%d actions=%+v", closeCalls, res.Actions)
+			}
+			var hiddenSkips []string
+			for _, s := range res.Skipped {
+				if s.Reason == action.ReasonHidden {
+					hiddenSkips = append(hiddenSkips, s.Rule)
+				}
+			}
+			want := []string{"r.close", "r.work"}
+			if tc.runs {
+				want = []string{"r.work"}
+			}
+			if !reflect.DeepEqual(hiddenSkips, want) {
+				t.Fatalf("hidden skips = %v, want %v", hiddenSkips, want)
+			}
+		})
+	}
+}

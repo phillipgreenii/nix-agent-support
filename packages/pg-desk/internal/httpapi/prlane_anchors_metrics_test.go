@@ -23,6 +23,7 @@ func TestMetricsExposeTheOpenAnchorFamiliesFromTheStoresLinks(t *testing.T) {
 		t, body,
 		`pg_desk_pr_open_anchors 0`,
 		`pg_desk_pr_open_anchors_hidden 0`,
+		`pg_desk_pr_open_anchors_hidden_finished 0`,
 		`pg_desk_pr_stale_anchors 0`,
 		`pg_desk_pr_stale_anchor_oldest_age_seconds 0`,
 		`pg_desk_pr_open_anchor_oldest_hydration_age_seconds 0`,
@@ -92,11 +93,11 @@ func TestMetricsOmitTheOpenAnchorFamiliesOnAnOldSchemaStore(t *testing.T) {
 }
 
 // TestMetricsCountAHiddenPRWithAnOpenAnchorApartFromTheOpenOnes: a PR with the
-// hidden annotation keeps its anchor open (the decider skips every rule for a
-// hidden PR, closure included), so a real scrape of a schema-2 store counts it
+// hidden annotation can have an open anchor (hidden suppresses lane work; the
+// closure rule still runs for a finished PR), so a real scrape of a schema-2 store counts it
 // in pg_desk_pr_open_anchors_hidden and leaves it out of pg_desk_pr_open_anchors
 // and the stale-anchor gauges, even when the PR is closed. The hidden-PR alert
-// (PR lane refactor, P8b-1) reads this gauge.
+// reads pg_desk_pr_open_anchors_hidden_finished, the closed one of them.
 func TestMetricsCountAHiddenPRWithAnOpenAnchorApartFromTheOpenOnes(t *testing.T) {
 	setClock(t, time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
 	s := store.OpenNewSchemaForTest(t)
@@ -135,6 +136,7 @@ func TestMetricsCountAHiddenPRWithAnOpenAnchorApartFromTheOpenOnes(t *testing.T)
 		t, body,
 		`pg_desk_pr_open_anchors 1`,
 		`pg_desk_pr_open_anchors_hidden 2`,
+		`pg_desk_pr_open_anchors_hidden_finished 1`,
 		`pg_desk_pr_stale_anchors 0`,
 	)
 }

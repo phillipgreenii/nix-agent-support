@@ -225,7 +225,7 @@ evaluation order, and the work-item kind each governs:
 
 A merged or closed PR is dead: only `all.closed`, `all.reopened`, `adoption` and `adoption.node-id`
 act on it (`INV-DECIDER-25` in [`plan-and-apply.md`](plan-and-apply.md)); every work-creating rule
-below skips it as `not matched`. A hidden PR runs no rule and a suppressed kind skips its rule (see
+below skips it as `not matched`. A hidden PR runs no rule, except that `all.closed` still closes the anchor of a hidden PR that is merged or closed, and a suppressed kind skips its rule (see
 "Precedence" in [`plan-and-apply.md`](plan-and-apply.md)).
 
 ### `review.head-advanced`

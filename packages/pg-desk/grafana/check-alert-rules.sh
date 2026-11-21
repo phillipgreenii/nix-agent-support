@@ -170,6 +170,8 @@ broken "the orphan-read-lag threshold raised from 1800 to 100000" \
   '(.groups[0].rules[] | select(.uid == "pg-desk-issue-orphan-read-lag") | .data[] | select(.refId == "C") | .model.conditions[0].evaluator.params[0]) = 100000'
 broken "the dead-man's role selector widened to every role" \
   "$(expr_path pg-desk-pr-hydrate-dead-man) |= sub(\"[{]role=.pr-change.[}]\"; \"\")"
+broken "the hidden-PR rule reading every hidden PR instead of the finished ones" \
+  "$(expr_path pg-desk-pr-hidden-open-anchor) |= sub(\"_hidden_finished\"; \"_hidden\")"
 broken "the hidden-PR rule's router pause guard removed" \
   "$(expr_path pg-desk-pr-hidden-open-anchor) |= sub(\" unless on[(][)] [(]pg_router_resource_level.*\$\"; \"\")"
 

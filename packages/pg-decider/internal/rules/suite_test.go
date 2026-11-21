@@ -204,15 +204,27 @@ func TestHiddenEntityYieldsZeroActions(t *testing.T) {
 				t.Fatal("fixture is not hidden")
 			}
 			res := suiteDecide(v)
-			if len(res.Actions) != 0 {
-				t.Fatalf("hidden entity produced actions: %+v", res.Actions)
+			// A hidden PR that merged or closed still runs the closure rule
+			// (all.closed): it may act, and is then not listed as skipped.
+			closureRuns := suiteIsTerminalPR(v)
+			for _, a := range res.Actions {
+				if !closureRuns || a.Rule != anchorRuleClosed {
+					t.Fatalf("hidden entity produced actions: %+v", res.Actions)
+				}
 			}
-			if len(res.Skipped) != len(ids) {
-				t.Fatalf("skipped %d rules, registry has %d", len(res.Skipped), len(ids))
+			var wantSkipped []string
+			for _, id := range ids {
+				if closureRuns && id == anchorRuleClosed {
+					continue
+				}
+				wantSkipped = append(wantSkipped, id)
 			}
-			for i, s := range res.Skipped {
-				if s.Rule != ids[i] || s.Reason != action.ReasonHidden {
-					t.Errorf("skipped[%d] = %+v, want rule %q reason %q", i, s, ids[i], action.ReasonHidden)
+			if len(res.Skipped) > len(ids) || len(res.Skipped) < len(wantSkipped) {
+				t.Fatalf("skipped %d rules, want at least %d of %d", len(res.Skipped), len(wantSkipped), len(ids))
+			}
+			for i, id := range wantSkipped {
+				if s := res.Skipped[i]; s.Rule != id || s.Reason != action.ReasonHidden {
+					t.Errorf("skipped[%d] = %+v, want rule %q reason %q", i, s, id, action.ReasonHidden)
 				}
 			}
 
@@ -228,14 +240,14 @@ func TestHiddenEntityYieldsZeroActions(t *testing.T) {
 			if err := json.Unmarshal(buf.Bytes(), &printed); err != nil {
 				t.Fatal(err)
 			}
-			if printed.Actions == nil || len(printed.Actions) != 0 {
+			if printed.Actions == nil || (!closureRuns && len(printed.Actions) != 0) || len(printed.Actions) != len(res.Actions) {
 				t.Errorf("plan actions = %v, want an empty list", printed.Actions)
 			}
 			listed := map[string]string{}
 			for _, s := range printed.Skipped {
 				listed[s.Rule] = s.Reason
 			}
-			for _, id := range ids {
+			for _, id := range wantSkipped {
 				if listed[id] != action.ReasonHidden {
 					t.Errorf("plan lists rule %q as %q, want %q", id, listed[id], action.ReasonHidden)
 				}
@@ -553,4 +565,13 @@ func suiteWantClosedWith(t *testing.T, v *view.DeskView, k workitem.Kind, reason
 	if items[0].Open() || items[0].Metadata["close_reason"] != reason {
 		t.Fatalf("%s item state=%q close_reason=%q, want closed/%s", k, items[0].State, items[0].Metadata["close_reason"], reason)
 	}
+}
+
+// suiteIsTerminalPR reports whether v is a PR the snapshot shows as merged or
+// closed, the one state in which a hidden PR still runs all.closed.
+func suiteIsTerminalPR(v *view.DeskView) bool {
+	if v.Type != decide.EntityTypePR {
+		return false
+	}
+	return v.Snapshot.Merged || strings.EqualFold(v.Snapshot.State, "merged") || strings.EqualFold(v.Snapshot.State, "closed")
 }

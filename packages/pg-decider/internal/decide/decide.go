@@ -2,6 +2,7 @@ package decide
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/config"
@@ -16,7 +17,10 @@ import (
 // Precedence is evaluated before any rule runs (design 7.3):
 //
 //  1. a hidden entity skips every registered rule (reason "hidden"); no rule
-//     is evaluated and no action is produced;
+//     is evaluated and no action is produced. The one exception is a hidden
+//     PR that is merged or closed: a rule implementing ClosureRule still
+//     evaluates, so the anchor of a finished PR closes (hidden suppresses
+//     lane work, not the closure of work that is already dead);
 //  2. a suppressed kind skips only the rules of that kind (reason
 //     "suppressed"); every other rule, including a rule tied to no kind,
 //     evaluates normally;
@@ -44,10 +48,19 @@ func DecideWith(v *view.DeskView, entityType string, cfg *config.Config) action.
 		if r := v.Annotations.Hidden.Reason; r != nil {
 			facts = map[string]any{"reason": *r}
 		}
+		terminal := hiddenTerminal(v)
+		var running []Rule
 		for _, r := range rules {
+			if cr, ok := r.(ClosureRule); ok && terminal && cr.RunsWhenHiddenTerminal() {
+				running = append(running, r)
+				continue
+			}
 			res.Skipped = append(res.Skipped, action.Skip{Rule: r.ID(), Reason: action.ReasonHidden, Facts: cloneFacts(facts)})
 		}
-		return res
+		if len(running) == 0 {
+			return res
+		}
+		rules = running
 	}
 
 	suppressed := map[workitem.Kind]bool{}
@@ -90,6 +103,17 @@ func DecideWith(v *view.DeskView, entityType string, cfg *config.Config) action.
 	}
 	res.Actions = anchorFirst(res.Actions)
 	return res
+}
+
+// hiddenTerminal reports whether v is a PR the snapshot shows as merged or
+// closed. Only a PR has a lifecycle the decider reads, so any other view type
+// is never terminal.
+func hiddenTerminal(v *view.DeskView) bool {
+	if v.Type != EntityTypePR {
+		return false
+	}
+	s := v.Snapshot
+	return s.Merged || strings.EqualFold(s.State, "merged") || strings.EqualFold(s.State, "closed")
 }
 
 // skipFor builds the Skip entry for a rule that produced no action. The

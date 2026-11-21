@@ -26,6 +26,11 @@ type PRAnchors struct {
 	// OpenHidden is the number of distinct hidden PRs that have at least one
 	// open anchor.
 	OpenHidden int
+	// OpenHiddenFinished is how many of the OpenHidden PRs the store shows as
+	// merged or closed. The decider still runs the closure rule for a hidden
+	// PR in that state, so a nonzero value means a finished PR's anchor was
+	// not closed.
+	OpenHiddenFinished int
 	// Stale is how many of the Open PRs the store shows as merged or closed
 	// although an anchor is still open.
 	Stale int
@@ -104,6 +109,9 @@ func (s *Store) CountPRAnchors(ctx context.Context, now time.Time) (PRAnchors, e
 	for _, p := range prs {
 		if p.hidden {
 			out.OpenHidden++
+			if p.present && p.closed {
+				out.OpenHiddenFinished++
+			}
 			continue
 		}
 		out.Open++

@@ -20,6 +20,11 @@ const (
 	// least one open anchor; they are counted apart and take no part in the
 	// other gauges.
 	MetricPROpenAnchorsHidden = "pg_desk_pr_open_anchors_hidden"
+	// MetricPROpenAnchorsHiddenFinished is how many of those hidden PRs the
+	// store shows as merged or closed. The decider closes the anchor of a
+	// finished PR even when it is hidden, so this staying above 0 means the
+	// closure did not happen.
+	MetricPROpenAnchorsHiddenFinished = "pg_desk_pr_open_anchors_hidden_finished"
 	// MetricPRStaleAnchors is how many PRs with an open anchor the store shows
 	// as merged or closed.
 	MetricPRStaleAnchors = "pg_desk_pr_stale_anchors"
@@ -36,7 +41,7 @@ const (
 
 // PRAnchorsSnapshot is the open-anchor view at one scrape.
 type PRAnchorsSnapshot struct {
-	Open, OpenHidden, Stale, StaleOldestAgeSeconds, OldestHydrationAgeSeconds int
+	Open, OpenHidden, OpenHiddenFinished, Stale, StaleOldestAgeSeconds, OldestHydrationAgeSeconds int
 }
 
 // PRAnchorsFunc supplies the open-anchor view at collect time. It MUST return
@@ -60,6 +65,11 @@ func RegisterPRAnchors(mp metric.MeterProvider, fn PRAnchorsFunc) error {
 	}
 	hidden, err := gauge(MetricPROpenAnchorsHidden,
 		"hidden PRs with at least one open anchor work item, counted apart from the open-anchor gauge")
+	if err != nil {
+		return err
+	}
+	hiddenFinished, err := gauge(MetricPROpenAnchorsHiddenFinished,
+		"hidden PRs with at least one open anchor work item that the store shows as merged or closed")
 	if err != nil {
 		return err
 	}
@@ -89,10 +99,11 @@ func RegisterPRAnchors(mp metric.MeterProvider, fn PRAnchorsFunc) error {
 		}
 		o.ObserveInt64(open, int64(snap.Open))
 		o.ObserveInt64(hidden, int64(snap.OpenHidden))
+		o.ObserveInt64(hiddenFinished, int64(snap.OpenHiddenFinished))
 		o.ObserveInt64(stale, int64(snap.Stale))
 		o.ObserveInt64(staleAge, int64(snap.StaleOldestAgeSeconds))
 		o.ObserveInt64(hydAge, int64(snap.OldestHydrationAgeSeconds))
 		return nil
-	}, open, hidden, stale, staleAge, hydAge)
+	}, open, hidden, hiddenFinished, stale, staleAge, hydAge)
 	return err
 }

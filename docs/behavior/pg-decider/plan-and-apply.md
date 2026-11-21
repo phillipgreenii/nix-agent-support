@@ -130,6 +130,9 @@ operator sets the rule's mode key to `apply` (see [`config.md`](config.md)).
 Two stops are evaluated before any rule runs:
 
 1. **hidden**: a hidden entity skips every rule; no rule is evaluated and no action is produced.
+   The one exception is a hidden PR the snapshot shows as merged or closed: the closure rule
+   `all.closed` is still evaluated for it, so the anchor of a finished PR closes even though the PR
+   is hidden. Hidden keeps suppressing every other rule, lane work included.
 2. **suppressed**: a suppressed kind skips only the rules of that kind; every other rule is
    evaluated normally. A rule tied to no kind is never suppressed.
 
@@ -485,8 +488,9 @@ change rate of the watched issues and not their number.
 - **INV-DECIDER-9.** <!-- uuid: 612fea48-b15b-4b09-8d37-40da82918dad --> `apply` MUST re-read the view on every run. `--from-item` MUST only identify
   the trigger and MUST NOT decide what is applied. The live read of a focus bead or of a review item (INV-DECIDER-8) MAY
   only abandon a planned write; it MUST NOT add, change or substitute one.
-- **INV-DECIDER-10.** <!-- uuid: 2af98d94-8a46-49fe-bdca-88b377e58e9c --> A hidden entity MUST skip every rule, and a suppressed kind MUST skip only the
-  rules of that kind. Both stops MUST be evaluated before any rule runs.
+- **INV-DECIDER-10.** <!-- uuid: 2af98d94-8a46-49fe-bdca-88b377e58e9c --> A hidden entity MUST skip every rule except `all.closed` for a hidden PR that is
+  merged or closed, and a suppressed kind MUST skip only the rules of that kind. Both stops MUST be
+  evaluated before any rule runs.
 - **INV-DECIDER-11.** <!-- uuid: 1357d784-c31f-438d-b275-7761bf12e4f9 --> A skipped rule MUST carry exactly one of the five reasons `hidden`,
   `suppressed`, `already handled`, `review-pending` and `not matched`.
 - **INV-DECIDER-12.** <!-- uuid: 9c2466e3-de47-4a24-ad29-1ca0622776ca --> A `create` that carries a `dedup_key` MUST look the key up in the tracker

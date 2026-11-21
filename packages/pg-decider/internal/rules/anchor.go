@@ -102,6 +102,10 @@ type anchorClosedRule struct{}
 func (anchorClosedRule) ID() string          { return anchorRuleClosed }
 func (anchorClosedRule) Kind() workitem.Kind { return "" }
 
+// RunsWhenHiddenTerminal lets all.closed close the anchor of a hidden PR that
+// merged or closed; hidden still suppresses every other rule.
+func (anchorClosedRule) RunsWhenHiddenTerminal() bool { return true }
+
 func (anchorClosedRule) Evaluate(in decide.Input) decide.Result {
 	v := in.View
 	st := anchorPRState(v.Snapshot)

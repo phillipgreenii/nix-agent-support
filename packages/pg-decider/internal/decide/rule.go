@@ -58,6 +58,15 @@ type Finalizer interface {
 	Finalize(in Input, produced []action.Action) []action.Action
 }
 
+// ClosureRule is optionally implemented by a rule that closes work for a PR
+// that is merged or closed. Such a rule with RunsWhenHiddenTerminal true
+// still evaluates for a hidden PR in that state, so hiding a PR never leaves
+// the anchor of a finished PR open forever; every other rule stays skipped
+// for a hidden PR.
+type ClosureRule interface {
+	RunsWhenHiddenTerminal() bool
+}
+
 // Curation ordinals: they mirror the row order of the PR rule table (design
 // 7.3), in steps of 10. Rule packets register with these constants.
 const (

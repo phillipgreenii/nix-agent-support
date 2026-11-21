@@ -1439,12 +1439,14 @@ groups:
       # the connector's alert file (pg-connector-github-alerts.yaml). None of these
       # uids is registered with the probe in this change (packet P8b-3 does that).
 
-      # Hidden PR with an open anchor. A hidden PR (the `hide` annotation) is skipped by
-      # every decider rule, closure included, so a hidden PR that merges keeps its anchor
-      # open for as long as it stays hidden. pg_desk_pr_open_anchors_hidden counts those
-      # PRs from the store at scrape time (it is emitted with a value, 0, when healthy,
-      # and has no series on a store that cannot answer). Low severity: it is a prompt to
-      # un-hide or close, not a failure of the lane.
+      # Hidden PR that is merged or closed and still has an open anchor. A hidden PR (the
+      # `hide` annotation) is skipped by every decider rule except the closure rule, which
+      # still runs once the PR merges or closes, so a finished hidden PR's anchor normally
+      # closes on its own. pg_desk_pr_open_anchors_hidden_finished counts the ones that did
+      # not, from the store at scrape time (it is emitted with a value, 0, when healthy,
+      # and has no series on a store that cannot answer). A hidden PR that is still open
+      # keeps its anchor by design and is not counted. Low severity: a prompt to look at
+      # why the closure did not run, not a failure of the lane.
       - uid: pg-desk-pr-hidden-open-anchor
         title: pg-desk has hidden PRs with an open anchor
         condition: C
@@ -1455,7 +1457,7 @@ groups:
           severity: info
         annotations:
           summary: "A hidden PR has an open anchor"
-          description: "pg_desk_pr_open_anchors_hidden has been above 0 for 30 minutes: at least one PR carrying the hidden annotation still has an open anchor. The decider skips a hidden PR for every rule including closure, so the anchor stays open even after the PR merges. Run `pg-desk pr unhide <id>` for a PR the lane should handle again so it can close the anchor, or close the anchor by hand if the PR is meant to stay hidden. Low severity; suppressed while a pg-router router pause is active."
+          description: "pg_desk_pr_open_anchors_hidden_finished has been above 0 for 30 minutes: at least one merged or closed PR carrying the hidden annotation still has an open anchor. The decider runs the closure rule for a hidden PR once it is merged or closed, so the anchor should have closed; check the pg-decider lane for a failure on that PR, or close the anchor by hand. A hidden PR that is still open is not counted. Low severity; suppressed while a pg-router router pause is active."
         data:
           - refId: A
             relativeTimeRange:
@@ -1466,7 +1468,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: 'max(pg_desk_pr_open_anchors_hidden) unless on() (pg_router_resource_level{resource="router"} == 1)'
+              expr: 'max(pg_desk_pr_open_anchors_hidden_finished) unless on() (pg_router_resource_level{resource="router"} == 1)'
           - refId: B
             datasourceUid: __expr__
             model:

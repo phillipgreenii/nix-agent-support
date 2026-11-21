@@ -22,7 +22,7 @@ func collectAnchors(t *testing.T, fn PRAnchorsFunc) metricdata.ResourceMetrics {
 }
 
 var anchorMetricNames = []string{
-	MetricPROpenAnchors, MetricPROpenAnchorsHidden, MetricPRStaleAnchors,
+	MetricPROpenAnchors, MetricPROpenAnchorsHidden, MetricPROpenAnchorsHiddenFinished, MetricPRStaleAnchors,
 	MetricPRStaleAnchorOldestAge, MetricPROpenAnchorHydrationAge,
 }
 
@@ -34,10 +34,10 @@ func TestPRAnchorGaugesAreEmittedWhenHealthyEvenAtZeroAndCarryTheValues(t *testi
 		}
 	}
 	rm = collectAnchors(t, func() (PRAnchorsSnapshot, bool, error) {
-		return PRAnchorsSnapshot{Open: 7, OpenHidden: 2, Stale: 3, StaleOldestAgeSeconds: 900, OldestHydrationAgeSeconds: 86400}, true, nil
+		return PRAnchorsSnapshot{Open: 7, OpenHidden: 2, OpenHiddenFinished: 1, Stale: 3, StaleOldestAgeSeconds: 900, OldestHydrationAgeSeconds: 86400}, true, nil
 	})
 	for name, want := range map[string]int64{
-		MetricPROpenAnchors: 7, MetricPROpenAnchorsHidden: 2, MetricPRStaleAnchors: 3,
+		MetricPROpenAnchors: 7, MetricPROpenAnchorsHidden: 2, MetricPROpenAnchorsHiddenFinished: 1, MetricPRStaleAnchors: 3,
 		MetricPRStaleAnchorOldestAge: 900, MetricPROpenAnchorHydrationAge: 86400,
 	} {
 		if got := points(rm, name)[""]; got != want {

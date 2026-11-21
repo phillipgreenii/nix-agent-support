@@ -3,7 +3,8 @@
 # next to this file: the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the
 # rule's `for: 30m` and labels (severity: info), plus a recording rule `wrapped:<uid with _>`.
 #
-# Time model: the gauge pg_desk_pr_open_anchors_hidden is unlabelled, emitted with a value (0) when
+# Time model: the gauge pg_desk_pr_open_anchors_hidden_finished (hidden PRs that are merged or closed
+# and still have an open anchor) is unlabelled, emitted with a value (0) when
 # healthy, one sample per 1m scrape. A count above 0 that holds for 30m fires: not at 20m, firing at 40m.
 rule_files:
   - rules.yml
@@ -11,10 +12,10 @@ rule_files:
 evaluation_interval: 1m
 
 tests:
-  - name: a hidden PR with an open anchor fires after 30m, not before, at info severity
+  - name: a finished hidden PR with an open anchor fires after 30m, not before, at info severity
     interval: 1m
     input_series:
-      - series: pg_desk_pr_open_anchors_hidden{job="pg-desk"}
+      - series: pg_desk_pr_open_anchors_hidden_finished{job="pg-desk"}
         values: "2x80"
     promql_expr_test:
       - expr: count(wrapped:pg_desk_pr_hidden_open_anchor)
@@ -35,7 +36,7 @@ tests:
   - name: a healthy gauge at 0 is quiet
     interval: 1m
     input_series:
-      - series: pg_desk_pr_open_anchors_hidden{job="pg-desk"}
+      - series: pg_desk_pr_open_anchors_hidden_finished{job="pg-desk"}
         values: "0x80"
     alert_rule_test:
       - eval_time: 60m
@@ -55,7 +56,7 @@ tests:
   - name: a hidden PR that is un-hidden before 30m never fires
     interval: 1m
     input_series:
-      - series: pg_desk_pr_open_anchors_hidden{job="pg-desk"}
+      - series: pg_desk_pr_open_anchors_hidden_finished{job="pg-desk"}
         values: "1x10 0x70"
     alert_rule_test:
       - eval_time: 60m
@@ -65,10 +66,22 @@ tests:
   - name: router pause suppresses it
     interval: 1m
     input_series:
-      - series: pg_desk_pr_open_anchors_hidden{job="pg-desk"}
+      - series: pg_desk_pr_open_anchors_hidden_finished{job="pg-desk"}
         values: "2x80"
       - series: pg_router_resource_level{resource="router",job="pg-router"}
         values: "1x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-desk-pr-hidden-open-anchor
+        exp_alerts: []
+
+  - name: hidden PRs that are still open (the all-hidden gauge above 0, the finished gauge at 0) are quiet
+    interval: 1m
+    input_series:
+      - series: pg_desk_pr_open_anchors_hidden{job="pg-desk"}
+        values: "3x80"
+      - series: pg_desk_pr_open_anchors_hidden_finished{job="pg-desk"}
+        values: "0x80"
     alert_rule_test:
       - eval_time: 60m
         alertname: pg-desk-pr-hidden-open-anchor

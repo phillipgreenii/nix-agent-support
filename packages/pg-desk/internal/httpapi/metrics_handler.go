@@ -209,7 +209,7 @@ func newMetricsRegistry(ctx context.Context, st *store.Store, cfg *config.Config
 			return metrics.PRAnchorsSnapshot{}, false, err
 		}
 		return metrics.PRAnchorsSnapshot{
-			Open: a.Open, OpenHidden: a.OpenHidden, Stale: a.Stale,
+			Open: a.Open, OpenHidden: a.OpenHidden, OpenHiddenFinished: a.OpenHiddenFinished, Stale: a.Stale,
 			StaleOldestAgeSeconds:     a.StaleOldestAgeSeconds,
 			OldestHydrationAgeSeconds: a.OldestHydrationAgeSeconds,
 		}, true, nil
