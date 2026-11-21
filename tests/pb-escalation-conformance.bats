@@ -15,6 +15,13 @@
 
 CONSUMERS=(
   pb/skills/drain-stuck/SKILL.md
+  pb/skills/drain-stuck/references/reclaim.md
+  pb/skills/drain-stuck/references/close-as-moot.md
+  pb/skills/drain-stuck/references/convert-to-dependency.md
+  pb/skills/drain-stuck/references/convert-landing-to-bead.md
+  pb/skills/drain-stuck/references/defer-on-event.md
+  pb/skills/drain-stuck/references/container-park.md
+  pb/skills/drain-stuck/references/escalate-precondition.md
   pb/skills/drain-one/SKILL.md
   pb/skills/drain-one/references/rules.md
   pb/skills/drain-one/references/land.md
@@ -85,6 +92,7 @@ mutate() {
 }
 
 stuck() { printf '%s\n' "$work/mp/pb/skills/drain-stuck/SKILL.md"; }
+stuck_ref() { printf '%s\n' "$work/mp/pb/skills/drain-stuck/references/$1.md"; }
 
 @test "every consumer file exists" {
   for f in "${CONSUMERS[@]}"; do
@@ -104,7 +112,8 @@ stuck() { printf '%s\n' "$work/mp/pb/skills/drain-stuck/SKILL.md"; }
   # the post-deploy gate fallback's verification child, pb-gate-lifecycle's verification
   # follow-up, the phase-plan-verifier's open-question bead, and unblock-human-beads'
   # worktree-review follow-up (the step, the rule and the flow diagram).
-  expected="pb/skills/drain-stuck/SKILL.md:2
+  expected="pb/skills/drain-stuck/references/close-as-moot.md:1
+pb/skills/drain-stuck/references/convert-to-dependency.md:1
 pb/skills/drain-one/references/post-deploy-gate.md:1
 pb/skills/pb-gate-lifecycle/SKILL.md:1
 pb/commands/unblock-human-beads.md:3
@@ -130,9 +139,11 @@ plan-decompose/agents/phase-plan-verifier.md:1"
 
 @test "finished-unlanded work exits by CONVERT-LANDING-TO-BEAD: blocks edge, no defer, never DEFER-ON-EVENT" {
   s="$(stuck)"
+  r="$(stuck_ref convert-landing-to-bead)"
   grep -q '^## CONVERT-LANDING-TO-BEAD' "$s"
-  grep -qF 'bd dep add <id> --blocked-by <landing-bead>' "$s"
-  sec="$(sed -n '/^## CONVERT-LANDING-TO-BEAD/,/^## DEFER-ON-EVENT/p' "$s")"
+  grep -q '^## CONVERT-LANDING-TO-BEAD' "$r"
+  grep -qF 'bd dep add <id> --blocked-by <landing-bead>' "$r"
+  sec="$(cat "$r")"
   [[ "$sec" == *"NOT a parent-child link"* ]]
   [[ "$sec" == *"patch-id --stable"* ]]
   [[ "$sec" == *'bd update <id> --remove-label human --status open --assignee "" --actor "ID"'* ]]
@@ -188,9 +199,9 @@ plan-decompose/agents/phase-plan-verifier.md:1"
 }
 
 @test "mutant: attention written by hand is caught even next to a planned-operator-work mention" {
-  mutate "$(stuck)" '--labels human,worktree-review' '--labels human,attention,worktree-review'
+  mutate "$(stuck_ref close-as-moot)" '--labels human,worktree-review' '--labels human,attention,worktree-review'
   run scan "$work/mp"
-  [[ "$output" == *"drain-stuck/SKILL.md"* ]]
+  [[ "$output" == *"drain-stuck/references/close-as-moot.md"* ]]
 }
 
 @test "mutant: a bead-grooming flag that writes human is caught" {

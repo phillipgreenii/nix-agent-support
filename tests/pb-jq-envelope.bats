@@ -153,10 +153,10 @@ mutant_dir() {
 
 @test "lint mutant: bare .data in the step 5 repeat-key probe is caught" {
   mutant_dir
-  mutate "$M/skills/drain-stuck/SKILL.md" "${PRELUDE}[0] | (.comments" "(.data[0].comments"
+  mutate "$M/skills/drain-stuck/references/escalate-precondition.md" "${PRELUDE}[0] | (.comments" "(.data[0].comments"
   run lint "$M"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"drain-stuck/SKILL.md"* ]]
+  [[ "$output" == *"drain-stuck/references/escalate-precondition.md"* ]]
 }
 
 @test "lint mutant: bare .data in the gate absence-proof recipe is caught" {
@@ -216,14 +216,14 @@ mutant_dir() {
 }
 
 @test "drain-stuck STUCK step 5 probe prints the prior PRECONDITION-KEY in both shapes" {
-  cmd="$(grab skills/drain-stuck/SKILL.md "PRECONDITION-KEY: .*'")"
+  cmd="$(grab skills/drain-stuck/references/escalate-precondition.md "PRECONDITION-KEY: .*'")"
   [[ "$cmd" == *"--include-comments"* ]]
   both_shapes "$cmd" id=tst-park
   [ "$output" = "PRECONDITION-KEY: nb-opens-gradle-root" ]
 }
 
 @test "drain-stuck STUCK step 5 probe finds nothing (rg exit 1) on a bead with no key, in both shapes" {
-  cmd="$(grab skills/drain-stuck/SKILL.md "PRECONDITION-KEY: .*'")"
+  cmd="$(grab skills/drain-stuck/references/escalate-precondition.md "PRECONDITION-KEY: .*'")"
   for shape in bare envelope; do
     BD_SHAPE=$shape runcmd "$cmd" id=tst-plain
     [ "$status" -eq 1 ]
@@ -232,7 +232,7 @@ mutant_dir() {
 }
 
 @test "step 5 mutant: dropping --include-comments blinds the probe (the test would notice)" {
-  cmd="$(grab skills/drain-stuck/SKILL.md "PRECONDITION-KEY: .*'")"
+  cmd="$(grab skills/drain-stuck/references/escalate-precondition.md "PRECONDITION-KEY: .*'")"
   cmd="${cmd/ --include-comments/}"
   [[ "$cmd" != *"--include-comments"* ]]
   for shape in bare envelope; do
