@@ -4,5 +4,5 @@
   "version": "1.3.0",
   "defaultEnabled": true,
   "requires": ["pb", "session-mode", "wtdone"],
-  "uses": ["beads", "integrate-branch-support"]
+  "uses": ["beads", "integrate-branch-support", "pg-git-lander", "pg-gwm"]
 }
