@@ -601,3 +601,81 @@ wtaudit_remove() {
   wtaudit_remove_json "$id" "$removed_wt" "$removed_br" 0 "$reason" "$msg"
   return 0
 }
+
+# wtaudit_glob_to_regex <glob>: the extended regex of a pg-gwm exception path,
+# with the same semantics pg-gwm's config applies: "*" matches within one path
+# element, "**" across elements, "?" one character, anything else literally.
+wtaudit_glob_to_regex() {
+  local glob="$1" out="^" c i
+  for ((i = 0; i < ${#glob}; i++)); do
+    c="${glob:i:1}"
+    case "$c" in
+    "*")
+      if [[ ${glob:i+1:1} == "*" ]]; then
+        out+=".*"
+        i=$((i + 1))
+      else
+        out+="[^/]*"
+      fi
+      ;;
+    "?") out+="[^/]" ;;
+    [a-zA-Z0-9_/-]) out+="$c" ;;
+    *) out+="\\$c" ;;
+    esac
+  done
+  printf '%s$\n' "$out"
+}
+
+# wtaudit_path_excepted <path> [regex...]: succeeds iff <path> matches one of
+# the exception regexes.
+wtaudit_path_excepted() {
+  local p="$1" re
+  shift
+  for re in "$@"; do
+    [[ $p =~ $re ]] && return 0
+  done
+  return 1
+}
+
+# _wtaudit_unmanaged_emit: one worktree record (path, branch, lock, first, have
+# and regexes are the caller's locals): print it unless it is the canonical
+# clone, pg-gwm managed, or excepted.
+_wtaudit_unmanaged_emit() {
+  [[ $have == true ]] || return 0
+  if [[ $first == true ]]; then
+    first=false
+    return 0
+  fi
+  if [[ -n $lock ]] && wtaudit_is_managed "$lock"; then return 0; fi
+  if [[ ${#regexes[@]} -gt 0 ]] && wtaudit_path_excepted "$path" "${regexes[@]}"; then return 0; fi
+  printf '%s%s%s%s%s\n' "$path" "$WTAUDIT_US" "$branch" "$WTAUDIT_US" "$lock"
+}
+
+# wtaudit_unmanaged_repo <repo> <exceptions-json>: print one line per linked
+# worktree of <repo> that is neither pg-gwm managed (locked with a reason
+# starting "pg-gwm") nor covered by an exception, as `path<US>branch<US>lock`;
+# the canonical clone (the first `git worktree list` entry) is never reported.
+# <exceptions-json> is the JSON array `pg-gwm list --exceptions --format=json`
+# prints (an object per exception with a `path` key).
+wtaudit_unmanaged_repo() {
+  local repo="$1" exceptions="$2"
+  local -a regexes=()
+  local glob line path="" branch="" lock="" first=true have=false
+  while IFS= read -r glob; do
+    [[ -n $glob ]] || continue
+    regexes+=("$(wtaudit_glob_to_regex "$glob")")
+  done < <(jq -r '.[].path' <<<"$exceptions")
+
+  while IFS= read -r line || [[ -n $line ]]; do
+    case "$line" in
+    "worktree "*)
+      _wtaudit_unmanaged_emit
+      path="${line#worktree }" branch="" lock="" have=true
+      ;;
+    "branch "*) branch="${line#branch refs/heads/}" ;;
+    locked) lock="locked" ;;
+    "locked "*) lock="${line#locked }" ;;
+    esac
+  done < <(git -C "$repo" worktree list --porcelain)
+  _wtaudit_unmanaged_emit
+}

@@ -39,7 +39,16 @@ wtaudit: Deterministic classifier and remover for worktrees and branches
 Usage:
   wtaudit scan   [--repo DIR]... [--json | --table]
   wtaudit remove --repo DIR --branch NAME --expect-tip SHA [--keep-branch]
+  wtaudit unmanaged --repo DIR... [--exceptions-file FILE] [--metrics-file FILE] [--json]
   wtaudit --help | --version
+
+unmanaged is a read-only audit: it reports every linked worktree of each repo
+that is neither locked by pg-gwm (lock reason starting "pg-gwm") nor covered by
+a standing exception (`pg-gwm list --exceptions --format=json`, executable
+PG_GWM_BIN, or the same JSON array from --exceptions-file). It exits 1 when any
+is reported, 0 when none, 2 usage, 3 unreadable repo, 4 exceptions unavailable.
+--metrics-file writes {count, checked_at} JSON atomically (the file pg-gwm
+serve turns into the pg_gwm_unmanaged_worktrees gauge).
 
 scan classifies every non-canonical worktree, coordinated-set member and
 dangling branch of each repo, offline, and prints JSON (schema_version 1) by
@@ -108,7 +117,7 @@ case "$1" in
   show_help
   exit 0
   ;;
-scan | remove)
+scan | remove | unmanaged)
   subcommand="$1"
   shift
   ;;
@@ -121,6 +130,8 @@ format="json"
 branch=""
 expect_tip=""
 keep_branch=false
+exceptions_file=""
+metrics_file=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -134,9 +145,21 @@ while [[ $# -gt 0 ]]; do
     shift 2
     ;;
   --json)
-    [[ $subcommand == scan ]] || usage_error "--json is only valid for scan"
+    [[ $subcommand == scan || $subcommand == unmanaged ]] || usage_error "--json is only valid for scan and unmanaged"
     format="json"
     shift
+    ;;
+  --exceptions-file)
+    [[ $subcommand == unmanaged ]] || usage_error "--exceptions-file is only valid for unmanaged"
+    [[ -n ${2:-} ]] || usage_error "--exceptions-file requires a value"
+    exceptions_file="$2"
+    shift 2
+    ;;
+  --metrics-file)
+    [[ $subcommand == unmanaged ]] || usage_error "--metrics-file is only valid for unmanaged"
+    [[ -n ${2:-} ]] || usage_error "--metrics-file requires a value"
+    metrics_file="$2"
+    shift 2
     ;;
   --table)
     [[ $subcommand == scan ]] || usage_error "--table is only valid for scan"
@@ -163,6 +186,56 @@ while [[ $# -gt 0 ]]; do
   *) usage_error "unknown argument: $1" ;;
   esac
 done
+
+if [[ $subcommand == unmanaged ]]; then
+  [[ ${#repos[@]} -gt 0 ]] || usage_error "unmanaged needs at least one --repo DIR"
+  total=0
+  report="[]"
+  for r in "${repos[@]}"; do
+    if ! wtaudit_repo_readable "$r"; then
+      echo "wtaudit: --repo is not a readable git repository: $r" >&2
+      exit 3
+    fi
+    top="$(wtaudit_repo_toplevel "$r")"
+    if [[ -n $exceptions_file ]]; then
+      exceptions="$(cat "$exceptions_file")" || {
+        echo "wtaudit: cannot read --exceptions-file: $exceptions_file" >&2
+        exit 4
+      }
+    else
+      # pg-gwm owns the exceptions list; PG_GWM_BIN overrides the executable.
+      if ! exceptions="$("${PG_GWM_BIN:-pg-gwm}" list --exceptions --format=json --repo "$top")"; then
+        echo "wtaudit: 'pg-gwm list --exceptions' failed for $top" >&2
+        exit 4
+      fi
+    fi
+    if ! jq -e 'type == "array"' <<<"$exceptions" >/dev/null 2>&1; then
+      echo "wtaudit: the exceptions list is not a JSON array" >&2
+      exit 4
+    fi
+    while IFS="$WTAUDIT_US" read -r p b l; do
+      [[ -n $p ]] || continue
+      total=$((total + 1))
+      report="$(jq -c --arg repo "$top" --arg path "$p" --arg branch "$b" --arg lock "$l" \
+        '. + [{repo: $repo, path: $path, branch: $branch, lock: $lock}]' <<<"$report")"
+      if [[ $format != json ]]; then
+        printf 'unmanaged worktree: %s (repo %s, branch %s)\n' "$p" "$top" "${b:-detached}"
+      fi
+    done < <(wtaudit_unmanaged_repo "$top" "$exceptions")
+  done
+  if [[ $format == json ]]; then
+    jq -cn --argjson unmanaged "$report" --argjson count "$total" \
+      '{schema_version: 1, count: $count, unmanaged: $unmanaged}'
+  fi
+  if [[ -n $metrics_file ]]; then
+    tmp="$metrics_file.tmp.$$"
+    jq -cn --argjson count "$total" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{count: $count, checked_at: $at}' >"$tmp"
+    mv -f "$tmp" "$metrics_file"
+  fi
+  [[ $total -eq 0 ]] || exit 1
+  exit 0
+fi
 
 if [[ $subcommand == scan ]]; then
   names=()

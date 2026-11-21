@@ -645,3 +645,55 @@ EOF
   [ "$status" -eq 10 ]
   [ -d "$FX/gwm-c" ]
 }
+
+# ---- unmanaged: read-only audit against the pg-gwm exceptions list ---------
+
+@test "unmanaged: reports only the stray worktree and exits 1" {
+  git -C "$REPO" worktree add -q -b managed "$FX/wts/managed" >/dev/null
+  git -C "$REPO" worktree lock --reason "pg-gwm w-abc" "$FX/wts/managed"
+  git -C "$REPO" worktree add -q -b excepted "$FX/wts/excepted" >/dev/null
+  git -C "$REPO" worktree add -q -b stray "$FX/wts/stray" >/dev/null
+  printf '[{"path":"%s/wts/exc*","reason":"r","owner":"o","review_by":"2099-01-01"}]' "$FX" >"$FX/exceptions.json"
+
+  run --separate-stderr "$WTAUDIT" unmanaged --repo "$REPO" --exceptions-file "$FX/exceptions.json" --json
+  [ "$status" -eq 1 ]
+  jq -e '.count == 1 and (.unmanaged | length) == 1' <<<"$output"
+  jq -e --arg p "$FX/wts/stray" '.unmanaged[0].path == $p and .unmanaged[0].branch == "stray"' <<<"$output"
+}
+
+@test "unmanaged: exits 0 and writes a zero metrics file when nothing is stray" {
+  git -C "$REPO" worktree add -q -b managed "$FX/wts/managed" >/dev/null
+  git -C "$REPO" worktree lock --reason "pg-gwm w-abc" "$FX/wts/managed"
+  printf '[]' >"$FX/exceptions.json"
+
+  run --separate-stderr "$WTAUDIT" unmanaged --repo "$REPO" --exceptions-file "$FX/exceptions.json" --metrics-file "$FX/m.json"
+  [ "$status" -eq 0 ]
+  jq -e '.count == 0 and (.checked_at | length) > 0' "$FX/m.json"
+}
+
+@test "unmanaged: the metrics file carries the stray count and the text form names the path" {
+  git -C "$REPO" worktree add -q -b stray "$FX/wts/stray" >/dev/null
+  printf '[]' >"$FX/exceptions.json"
+
+  run --separate-stderr "$WTAUDIT" unmanaged --repo "$REPO" --exceptions-file "$FX/exceptions.json" --metrics-file "$FX/m.json"
+  [ "$status" -eq 1 ]
+  [[ $output == *"$FX/wts/stray"* ]]
+  jq -e '.count == 1' "$FX/m.json"
+}
+
+@test "unmanaged: reads the exceptions from pg-gwm list --exceptions" {
+  git -C "$REPO" worktree add -q -b stray "$FX/wts/stray" >/dev/null
+  # a stand-in for the pg-gwm executable: only the list --exceptions answer is needed
+  printf '#!/usr/bin/env bash\n[[ "$1 $2 $3" == "list --exceptions --format=json" ]] || exit 9\nprintf '"'"'[{"path":"%s/wts/**"}]'"'"'\n' "$FX" >"$FX/bin/pg-gwm"
+  chmod +x "$FX/bin/pg-gwm"
+  PG_GWM_BIN="$FX/bin/pg-gwm" run --separate-stderr "$WTAUDIT" unmanaged --repo "$REPO"
+  [ "$status" -eq 0 ]
+}
+
+@test "unmanaged: a bad exceptions source exits 4 and an unreadable repo exits 3" {
+  printf 'not json' >"$FX/exceptions.json"
+  run --separate-stderr "$WTAUDIT" unmanaged --repo "$REPO" --exceptions-file "$FX/exceptions.json"
+  [ "$status" -eq 4 ]
+  run --separate-stderr "$WTAUDIT" unmanaged --repo "$FX/nope" --exceptions-file "$FX/exceptions.json"
+  [ "$status" -eq 3 ]
+}
