@@ -265,14 +265,14 @@ let
         && levels defaultC "ceta-asks-db" == [ 4 ];
     }
     {
-      name = "the pg-ccaudit and CETA items prune to 90 days and only delete on their own commands";
+      name = "the pg-ccaudit item prunes to 45 days, the CETA item to 90, and each only deletes on their own commands";
       ok =
         let
           ccaudit = lib.head (item defaultC "pg-ccaudit-index").variants;
           ceta = lib.head (item defaultC "ceta-asks-db").variants;
         in
-        ccaudit.dryRunCommand == "pg-ccaudit prune --days 90"
-        && ccaudit.removeCommand == "pg-ccaudit prune --days 90 --yes"
+        ccaudit.dryRunCommand == "pg-ccaudit prune --days 45"
+        && ccaudit.removeCommand == "pg-ccaudit prune --days 45 --yes"
         && has "archive --days 90 --dry-run" ceta.dryRunCommand
         && has "archive --days 90 --yes --fixtures-out" ceta.removeCommand;
     }
