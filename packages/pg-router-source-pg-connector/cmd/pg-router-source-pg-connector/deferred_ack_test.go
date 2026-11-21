@@ -204,3 +204,59 @@ func TestSettle_FailureAndBadToken(t *testing.T) {
 		t.Fatalf("bad token reached pg-connector: %v", fake.Calls())
 	}
 }
+
+// isChangesAck reports whether a pg-connector call is a changes-ack.
+func isChangesAck(args []string) bool {
+	return len(args) > 1 && args[1] == "changes-ack"
+}
+
+// hasArg reports whether args contains want as one element.
+func hasArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// An opted-in query passes --no-ack on every changes call, and a
+// changes-ack is sent only by settle and by the empty poll: a poll that
+// delivers events acknowledges nothing, so the cursor advances only when the
+// core reports settlement (or when nothing is owed behind it).
+func TestChanges_DeferredAck_PassesNoAck_CursorAdvancesOnlyOnSettle(t *testing.T) {
+	// A poll that delivers events: one changes call with --no-ack, no ack.
+	pinEmitTime(t)
+	fake := withFactory(t, "changes_body_env", "GO_HELPER_BODY="+daemonBody("9",
+		daemonRow("changed", "o/r#1", "v1", "3")))
+	if _, stderr, code := runCLI(t, deferredArgs()...); code != 0 {
+		t.Fatalf("poll exit = %d (stderr=%q)", code, stderr)
+	}
+	calls := fake.Calls()
+	if len(calls) != 1 || isChangesAck(calls[0].Args) || !hasArg(calls[0].Args, "--no-ack") {
+		t.Fatalf("delivering poll calls = %v, want exactly one changes call with --no-ack", calls)
+	}
+
+	// settle is a changes-ack sender, and only through the token it is given.
+	fake = withFactory(t, "changes_ok_empty")
+	if _, stderr, code := runCLI(t, "settle", "pr", "q", "--consumer", "c1", "--lane", "gh", "--through", "9"); code != 0 {
+		t.Fatalf("settle exit = %d (stderr=%q)", code, stderr)
+	}
+	calls = fake.Calls()
+	if len(calls) != 1 || !isChangesAck(calls[0].Args) {
+		t.Fatalf("settle calls = %v, want exactly one changes-ack", calls)
+	}
+
+	// The empty poll: changes with --no-ack, then its own changes-ack.
+	fake = withFactory(t, "changes_body_env", "GO_HELPER_BODY="+daemonBody("12"))
+	if _, stderr, code := runCLI(t, deferredArgs()...); code != 0 {
+		t.Fatalf("empty poll exit = %d (stderr=%q)", code, stderr)
+	}
+	calls = fake.Calls()
+	if len(calls) != 2 || isChangesAck(calls[0].Args) || !hasArg(calls[0].Args, "--no-ack") || !isChangesAck(calls[1].Args) {
+		t.Fatalf("empty poll calls = %v, want changes --no-ack then one changes-ack", calls)
+	}
+	if hasArg(calls[1].Args, "--no-ack") {
+		t.Fatalf("changes-ack argv %v carries --no-ack", calls[1].Args)
+	}
+}

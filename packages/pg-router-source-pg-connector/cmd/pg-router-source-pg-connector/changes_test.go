@@ -849,7 +849,7 @@ func TestSweep_OutputByteIdentical(t *testing.T) {
 // adapter would have to pass --no-ack and ack later itself to defer it; it does
 // neither, so an event that expires unaccepted is not re-emitted by a later
 // changes call (the next call polls from the already-advanced cursor).
-func TestChanges_NeverPassesNoAck_CursorAdvancesAtEmitSoExpiredEventsAreNotReplayed(t *testing.T) {
+func TestChanges_WithoutDeferredAck_NeverPassesNoAck_CursorAdvancesAtEmit(t *testing.T) {
 	fake := withFactory(t, "changes_ok_empty")
 	if _, stderr, code := runCLI(t, "changes", "pr", "q", "--consumer", "c1", "--retry-window", "1s"); code != 0 {
 		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
