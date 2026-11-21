@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
@@ -110,42 +112,6 @@ func (e listedEntity) item() ListedItem {
 	return it
 }
 
-// listAnswer is the fan-out answer of `issue list` the lookup reads: the
-// entities, the truncated flag and one row per queried backend.
-type listAnswer struct {
-	Entities  []listedEntity `json:"entities"`
-	Truncated bool           `json:"truncated"`
-	Sources   []struct {
-		Source string `json:"source"`
-		Status string `json:"status"`
-		Reason string `json:"reason"`
-	} `json:"sources"`
-	Result json.RawMessage `json:"result"`
-}
-
-// decodeListing decodes the answer the way decodeList does (the fan-out's own
-// shape, or the same members under a wire envelope's result) and also keeps the
-// truncated flag and the per-backend source rows.
-func decodeListing(stdout []byte) (listAnswer, error) {
-	var top listAnswer
-	if err := json.Unmarshal(stdout, &top); err != nil {
-		return listAnswer{}, err
-	}
-	if top.Entities != nil || len(top.Result) == 0 {
-		return top, nil
-	}
-	var inner listAnswer
-	if err := json.Unmarshal(top.Result, &inner); err == nil && inner.Entities != nil {
-		return inner, nil
-	}
-	var arr []listedEntity
-	if err := json.Unmarshal(top.Result, &arr); err != nil {
-		return listAnswer{}, err
-	}
-	top.Entities = arr
-	return top, nil
-}
-
 func intp(n int) *int { return &n }
 
 // prParamRepo and prParamNumber are the parameter names work_items_query_params
@@ -227,12 +193,12 @@ func ReadLookup(ctx context.Context, env Env, v *view.DeskView) (*Lookup, error)
 	if err != nil {
 		return nil, &LookupError{Reason: LookupReasonUnavailable, Err: fmt.Errorf("work-item lookup is unavailable: %w", err)}
 	}
-	ans, err := decodeListing(out)
-	if err != nil {
+	var ans client.ListOutcome[listedEntity]
+	if err := json.Unmarshal(out, &ans); err != nil {
 		return nil, &LookupError{Reason: LookupReasonUnavailable, Err: fmt.Errorf("work-item lookup: decode pg-connector %s stdout: %w", strings.Join(args, " "), err)}
 	}
 	for _, s := range ans.Sources {
-		if s.Status != "succeeded" {
+		if s.Status != client.SourceSucceeded {
 			return nil, &LookupError{
 				Reason: LookupReasonUnavailable,
 				Err:    fmt.Errorf("work-item lookup is unavailable: source %q of pg-connector %s is %s (%s)", s.Source, strings.Join(args, " "), s.Status, s.Reason),

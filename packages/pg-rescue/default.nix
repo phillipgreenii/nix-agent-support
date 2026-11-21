@@ -6,17 +6,26 @@
 mkGoApp {
   pname = "pg-rescue";
 
-  # Pattern A (phillipg-nix-repo-base ADR 0008): a single module rooted at
-  # this package dir, with go.mod and the committed gomod2nix.toml side by
-  # side. No local `replace`, so no modRoot and no parent-rooted fileset are
-  # needed (mirrors packages/pg-router-probe/default.nix).
+  # Pattern B (phillipg-nix-repo-base ADR 0008): go.mod replaces ../pg-connector
+  # for its published client package (the bead handler decodes pg-connector's
+  # answers with it), so the build sandbox holds this module and that one at
+  # their relative positions.
   #
   # pg-rescue wraps a command and, when it fails, walks a named chain of
-  # failure handlers. It has no compile-time dependency on any other package
-  # in this workspace: handlers are independent executables behind one
-  # contract, found on PATH at run time.
-  src = lib.cleanSource ./.;
-  modRoot = null;
+  # failure handlers. Handlers are independent executables behind one
+  # contract, found on PATH at run time; the bead handler still execs
+  # pg-connector from PATH, using the client package for its result types.
+  src = lib.fileset.toSource {
+    root = ./..;
+    fileset = lib.fileset.unions [
+      ./.
+      ../pg-connector
+    ];
+  };
+  modRoot = "pg-rescue";
+
+  # go.work is for the editor and go-work-vet only; a build resolves through go.mod.
+  env.GOWORK = "off";
 
   gomod2nixToml = ./gomod2nix.toml;
 

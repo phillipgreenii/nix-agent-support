@@ -12,14 +12,16 @@ mkGoApp {
   # Pattern B (phillipg-nix-repo-base ADR 0008): go.mod replaces ../pg-desk for
   # its published contract package (pkg/deskapi, standard library only), so the
   # build sandbox holds this module and that one package at their relative
-  # positions. The rest of pg-desk is not a compile-time dependency: the binary
-  # execs pg-desk and pg-connector as subprocesses.
+  # positions, plus pg-connector's published client package (go.mod replace
+  # ../pg-connector). The rest of pg-desk is not a compile-time dependency: the
+  # binary execs pg-desk and pg-connector as subprocesses.
   src = lib.fileset.toSource {
     root = ./..;
     fileset = lib.fileset.unions [
       ./.
       ../pg-desk/go.mod
       ../pg-desk/pkg/deskapi
+      ../pg-connector
     ];
   };
   modRoot = "pg-decider";

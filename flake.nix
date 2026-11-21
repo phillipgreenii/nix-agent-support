@@ -392,12 +392,12 @@
             inherit (goBuilders) mkGoApp;
           };
           beads-exporter-contract = final.callPackage ./packages/beads-exporter/contract.nix { };
-          # pg-rescue: Pattern A (ADR 0008), a Go module that wraps a command and,
+          # pg-rescue: Pattern B (ADR 0008), a Go module that wraps a command and,
           # on failure, walks a named chain of failure handlers (bead pg2-wgpem
           # is the first implementation bead: skeleton, CLI, config, check and
           # result). Handlers are independent executables found on PATH at run
-          # time, so it has no compile-time dependency on another package and
-          # needs no local `replace`/modRoot.
+          # time; its bead handler decodes pg-connector's answers with that
+          # package's published client (local replace of ../pg-connector).
           pg-rescue = final.callPackage ./packages/pg-rescue {
             inherit (goBuilders) mkGoApp;
           };
@@ -465,13 +465,12 @@
           claude-tool-tracker = final.callPackage ./packages/claude-tool-tracker {
             inherit (goBuilders) mkGoApp;
           };
-          # ccpool-probe: Pattern A (ADR 0008), same shape as
-          # pg-router-probe above — a standalone deterministic health
-          # probe over ccpool's own operational health from pg-router's
-          # point of view (docket pg2-93e5s, packet 2). It execs both
-          # `ccpool` and `pg-connector` as subprocesses (ambient $PATH)
-          # for every read/write, so it needs no local `replace`/modRoot
-          # either.
+          # ccpool-probe: Pattern B (ADR 0008) — a standalone deterministic
+          # health probe over ccpool's own operational health from
+          # pg-router's point of view (docket pg2-93e5s, packet 2). It execs
+          # both `ccpool` and `pg-connector` as subprocesses (ambient $PATH)
+          # for every read/write and decodes pg-connector's answers with its
+          # published client package (local replace of ../pg-connector).
           ccpool-probe = final.callPackage ./packages/ccpool-probe {
             inherit (goBuilders) mkGoApp;
           };
@@ -2232,8 +2231,6 @@
                 "pg-failsig"
                 "pg-connector"
                 "pg-gwm"
-                "ccpool-probe"
-                "pg-rescue"
                 "pg-task-focus"
                 "pg-keep-awake"
                 "pg-assistants"
@@ -2254,8 +2251,6 @@
                 "claude-extended-tool-approver"
                 # 75 `//go:build`-tagged files (contract/integration/smoke/hostile).
                 "pg-connector"
-                # pg2-04jgw: internal/integration is `integration`-tagged.
-                "pg-rescue"
                 # pg-keep-awake: internal/integration is `integration`-tagged.
                 "pg-keep-awake"
                 # pg-task-focus: the node and real-serve-process tests are `integration`-tagged.
@@ -2365,6 +2360,30 @@
                   };
                 })
                 (goLint {
+                  module = "ccpool-probe";
+                  modRoot = "ccpool-probe";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/ccpool-probe
+                      # the published client package (go.mod replace)
+                      ./packages/pg-connector
+                    ];
+                  };
+                })
+                (goLint {
+                  module = "pg-rescue";
+                  modRoot = "pg-rescue";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-rescue
+                      # the published client package (go.mod replace)
+                      ./packages/pg-connector
+                    ];
+                  };
+                })
+                (goLint {
                   module = "pg-decider";
                   modRoot = "pg-decider";
                   src = lib.fileset.toSource {
@@ -2374,6 +2393,8 @@
                       # the published pg-desk contract package (go.mod replace)
                       ./packages/pg-desk/go.mod
                       ./packages/pg-desk/pkg/deskapi
+                      # the published pg-connector client package (go.mod replace)
+                      ./packages/pg-connector
                     ];
                   };
                 })
@@ -2405,6 +2426,18 @@
               # src/modRoot as patternBGoLints
               # above so the tagged check lints the identical module tree.
               patternBTaggedGoLints = [
+                # pg-rescue: internal/integration is `integration`-tagged.
+                (goLintTagged {
+                  module = "pg-rescue";
+                  modRoot = "pg-rescue";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-rescue
+                      ./packages/pg-connector
+                    ];
+                  };
+                })
                 # pg-ccaudit: internal/query's old-SQL oracle is `integration`-tagged.
                 (goLintTagged {
                   module = "pg-ccaudit";
@@ -2517,13 +2550,17 @@
               routerMembers = import ./packages/pg-router/members.nix { inherit lib; };
               # pg-decider reads the pg-desk contract through its published package
               # (go.mod replace => ../pg-desk), so its build sandbox holds that
-              # module's go.mod and pkg/deskapi (golden files included) beside it.
+              # module's go.mod and pkg/deskapi (golden files included) beside it,
+              # and decodes pg-connector answers with that package's published
+              # client (go.mod replace => ../pg-connector).
               pgDeciderSrc = lib.fileset.toSource {
                 root = ./packages;
                 fileset = lib.fileset.unions [
                   ./packages/pg-decider
                   ./packages/pg-desk/go.mod
                   ./packages/pg-desk/pkg/deskapi
+                  # the published pg-connector client package (go.mod replace)
+                  ./packages/pg-connector
                 ];
               };
               memberGoTests =
@@ -8585,7 +8622,15 @@
               # README reserves that tag for a manual end-to-end run.
               pg-rescue-realbd-tests = mkBdContractCheck {
                 pname = "pg-rescue-realbd-tests";
-                src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
+                # matches default.nix: go.mod replaces ../pg-connector (published client).
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-rescue
+                    ./packages/pg-connector
+                  ];
+                };
+                modRoot = "pg-rescue";
                 gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
                 tags = "realbd";
                 runRegex = "^TestRealBDProjectBeadIsNotAnItem$";
@@ -10044,7 +10089,15 @@
               # re-exec the test binary itself.
               ccpool-probe-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "ccpool-probe-go-tests";
-                src = lib.cleanSource ./packages/ccpool-probe; # matches default.nix
+                # matches default.nix: go.mod replaces ../pg-connector (published client).
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/ccpool-probe
+                    ./packages/pg-connector
+                  ];
+                };
+                modRoot = "ccpool-probe";
                 gomod2nixToml = ./packages/ccpool-probe/gomod2nix.toml;
               };
 
@@ -10067,7 +10120,15 @@
               # the handler itself is a separate package, found on PATH.
               pg-rescue-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-rescue-go-tests";
-                src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
+                # matches default.nix: go.mod replaces ../pg-connector (published client).
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-rescue
+                    ./packages/pg-connector
+                  ];
+                };
+                modRoot = "pg-rescue";
                 gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
                 testDeps = [
                   pkgs.bash
@@ -21931,7 +21992,15 @@
             pg-rescue-integration-tests =
               (pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-rescue-integration-tests";
-                src = lib.cleanSource ./packages/pg-rescue; # matches default.nix
+                # matches default.nix: go.mod replaces ../pg-connector (published client).
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/pg-rescue
+                    ./packages/pg-connector
+                  ];
+                };
+                modRoot = "pg-rescue";
                 gomod2nixToml = ./packages/pg-rescue/gomod2nix.toml;
                 testDeps = [
                   pkgs.bash

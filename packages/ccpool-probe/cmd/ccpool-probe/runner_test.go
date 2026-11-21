@@ -9,10 +9,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 )
 
 // stubOnPath installs an executable #!/bin/sh stub named name running body,
@@ -41,15 +44,17 @@ func TestRunCcpoolThroughExecUsesTheRealPath(t *testing.T) {
 	}
 }
 
-// The pg-connector seam end to end with the real runner (nil connectorRunner).
-func TestRunPgConnectorThroughExecUsesTheRealPath(t *testing.T) {
-	stubOnPath(t, "pg-connector", `printf '%s' "$*"; echo err >&2; exit 4`)
-	res, err := runPgConnector(context.Background(), []string{"issue", "list"})
-	if err != nil {
-		t.Fatal(err)
+// The pg-connector seam end to end with the real runner (nil connectorRunner):
+// the argv crosses the seam and a nonzero exit forwards the child's own stderr.
+func TestCallConnectorThroughExecUsesTheRealPath(t *testing.T) {
+	stubOnPath(t, client.Binary, `printf '%s' "$*"; echo err >&2; exit 4`)
+	var msgs []string
+	_, err := callConnector(context.Background(), []string{"issue", "list"}, true, func(m string) { msgs = append(msgs, m) })
+	if !errors.Is(err, errConnectorFailed) {
+		t.Fatalf("callConnector: %v, want errConnectorFailed", err)
 	}
-	if res.exitCode != 4 || string(res.stdout) != "issue list" || string(res.stderr) != "err\n" {
-		t.Errorf("exit=%d stdout=%q stderr=%q", res.exitCode, res.stdout, res.stderr)
+	if len(msgs) != 1 || msgs[0] != "err\n" {
+		t.Errorf("warnings = %q, want the child's stderr %q", msgs, "err\n")
 	}
 }
 
@@ -59,7 +64,8 @@ func TestMissingBinaryIsAStartErrorOnBothSeams(t *testing.T) {
 	if _, err := runCcpool(context.Background(), "", []string{"list"}); err == nil || !strings.Contains(err.Error(), "ccpool: exec") {
 		t.Errorf("runCcpool: want a start error, got %v", err)
 	}
-	if _, err := runPgConnector(context.Background(), []string{"issue", "list"}); err == nil || !strings.Contains(err.Error(), "pg-connector: exec") {
-		t.Errorf("runPgConnector: want a start error, got %v", err)
+	var msgs []string
+	if _, err := callConnector(context.Background(), []string{"issue", "list"}, true, func(m string) { msgs = append(msgs, m) }); !errors.Is(err, errConnectorFailed) || len(msgs) != 1 || !strings.Contains(msgs[0], "exit -1") {
+		t.Errorf("callConnector: want a start-error warning and errConnectorFailed, got %v, %q", err, msgs)
 	}
 }

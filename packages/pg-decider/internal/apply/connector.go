@@ -8,44 +8,17 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+	"github.com/phillipgreenii/x/cmdrun"
+
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
 
-// connectorBinary is the ambient $PATH name that is exec'd; this module never
-// imports packages/pg-connector. The argv shapes mirror pg-desk's
-// internal/sync/connector.go (deterministic: sorted metadata and labels).
-const connectorBinary = "pg-connector"
-
 // beadsDirEnv is the variable every issue exec carries when a beads dir is
-// configured.
+// configured. The argv shapes mirror pg-desk's issue calls (deterministic:
+// sorted metadata and labels).
 const beadsDirEnv = "PG_CONNECTOR_ISSUE_BEADS_DIR"
-
-// wireEnvelope mirrors pkg/scriptout's response envelope.
-type wireEnvelope struct {
-	Result json.RawMessage `json:"result"`
-	Error  *struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-// connectorError is a failed pg-connector issue call.
-type connectorError struct {
-	args     []string
-	exitCode int
-	detail   string
-	// code is the wire error.code of the failure's JSON body, "" when the
-	// body carried none.
-	code string
-}
-
-func (e *connectorError) Error() string {
-	if e.exitCode == 4 {
-		return fmt.Sprintf("pg-connector %s: not_found", strings.Join(e.args, " "))
-	}
-	return fmt.Sprintf("pg-connector %s: exit %d: %s", strings.Join(e.args, " "), e.exitCode, e.detail)
-}
 
 // backendFlag pins the call to agent_tracker_backend when configured.
 func backendFlag(env Env) []string {
@@ -107,49 +80,63 @@ func sortedCopy(in []string) []string {
 	return out
 }
 
-// call runs pg-connector with args, carrying the beads-dir variable when
-// configured. It returns stdout on exit 0; every other outcome is an error
-// (exit 4 is not_found).
-func call(ctx context.Context, env Env, args []string) ([]byte, error) {
-	c := Call{Name: connectorBinary, Args: args}
+// seenCall is what the runner observed of the last child: its stderr and exit.
+type seenCall struct {
+	stderr []byte
+	exit   int
+}
+
+// connectorClient is the published pg-connector client running through env's
+// Runner and carrying the beads-dir variable when configured. seen records the
+// child's stderr and exit code.
+func connectorClient(env Env, seen *seenCall) client.Client {
+	run := env.runner()
+	c := client.Client{Run: func(ctx context.Context, call cmdrun.Call) cmdrun.Result {
+		res := run(ctx, call)
+		seen.stderr, seen.exit = res.Stderr, res.Code
+		return res
+	}}
 	if env.Config != nil && env.Config.BeadsDir != "" {
 		c.Env = []string{beadsDirEnv + "=" + env.Config.BeadsDir}
 	}
-	res := env.runner()(ctx, c)
-	if res.StartErr != nil {
-		return nil, fmt.Errorf("exec pg-connector %s: %w", strings.Join(args, " "), res.StartErr)
-	}
-	if res.Code != 0 {
-		detail := strings.TrimSpace(string(res.Stdout))
-		var w wireEnvelope
-		code := ""
-		if json.Unmarshal([]byte(res.Stdout), &w) == nil && w.Error != nil {
-			detail = w.Error.Code + ": " + w.Error.Message
-			code = w.Error.Code
-		}
-		if s := strings.TrimSpace(string(res.Stderr)); s != "" && detail == "" {
-			detail = s
-		}
-		return nil, &connectorError{args: args, exitCode: res.Code, detail: detail, code: code}
-	}
-	return []byte(res.Stdout), nil
+	return c
 }
 
-// resultID decodes a targeted call's {"result":{"id":...}} envelope.
-func resultID(stdout []byte, args []string) (string, error) {
-	var w wireEnvelope
-	if err := json.Unmarshal(stdout, &w); err != nil {
-		return "", fmt.Errorf("decode pg-connector %s stdout: %w", strings.Join(args, " "), err)
+// settle turns a client call's outcome into this package's contract: success
+// only on exit 0 (a degraded exit 5 is a failure here), and a failure whose
+// stdout said nothing carries the child's stderr as its message.
+func settle(args []string, raw []byte, err error, seen *seenCall) error {
+	if err == nil && seen.exit != 0 {
+		err = client.NewExitError(args, seen.exit, raw)
 	}
-	var res struct {
-		ID string `json:"id"`
+	var ce *client.Error
+	if errors.As(err, &ce) && ce.Message == "" {
+		ce.Message = strings.TrimSpace(string(seen.stderr))
 	}
-	if len(w.Result) > 0 {
-		if err := json.Unmarshal(w.Result, &res); err != nil {
-			return "", fmt.Errorf("decode pg-connector %s result: %w", strings.Join(args, " "), err)
-		}
+	return err
+}
+
+// call runs pg-connector with args, carrying the beads-dir variable when
+// configured. It returns stdout on exit 0; every other outcome is an error (a
+// *client.Error; exit 4 is not found).
+func call(ctx context.Context, env Env, args []string) ([]byte, error) {
+	var seen seenCall
+	raw, err := connectorClient(env, &seen).FanOutStdout(ctx, args...)
+	if err := settle(args, raw, err, &seen); err != nil {
+		return nil, err
 	}
-	return res.ID, nil
+	return raw, nil
+}
+
+// callResult runs a single-backend verb and returns its answer envelope's
+// result; exit 0 only.
+func callResult(ctx context.Context, env Env, args []string) (json.RawMessage, error) {
+	var seen seenCall
+	res, err := connectorClient(env, &seen).Targeted(ctx, args...)
+	if err := settle(args, res, err, &seen); err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 func createArgs(env Env, f action.Fields) []string {
@@ -175,14 +162,19 @@ func createArgs(env Env, f action.Fields) []string {
 // new work item's id. It does no dedup lookup; Run does that before create.
 func CreateIssue(ctx context.Context, env Env, f action.Fields) (string, error) {
 	args := createArgs(env, f)
-	out, err := call(ctx, env, args)
+	out, err := callResult(ctx, env, args)
 	if err != nil {
 		return "", err
 	}
-	id, err := resultID(out, args)
-	if err != nil {
-		return "", err
+	var created struct {
+		ID string `json:"id"`
 	}
+	if len(out) > 0 {
+		if err := json.Unmarshal(out, &created); err != nil {
+			return "", fmt.Errorf("decode pg-connector %s result: %w", strings.Join(args, " "), err)
+		}
+	}
+	id := created.ID
 	if id == "" {
 		return "", fmt.Errorf("pg-connector %s returned no id", strings.Join(args, " "))
 	}
@@ -256,41 +248,6 @@ type listEntity struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-// decodeList decodes `issue list --query work-beads` the way pg-desk's gather
-// does ({"entities":[...]} printed directly by the fan-out), and also accepts
-// the same members under a wire envelope's "result".
-func decodeList(stdout []byte) ([]listEntity, error) {
-	var top struct {
-		Entities []listEntity    `json:"entities"`
-		Result   json.RawMessage `json:"result"`
-	}
-	if err := json.Unmarshal(stdout, &top); err != nil {
-		return nil, err
-	}
-	if top.Entities != nil || len(top.Result) == 0 {
-		return top.Entities, nil
-	}
-	var inner struct {
-		Entities []listEntity `json:"entities"`
-	}
-	if err := json.Unmarshal(top.Result, &inner); err == nil && inner.Entities != nil {
-		return inner.Entities, nil
-	}
-	var arr []listEntity
-	if err := json.Unmarshal(top.Result, &arr); err != nil {
-		return nil, err
-	}
-	return arr, nil
-}
-
-// listTruncated reports whether a list answer says it was cut short.
-func listTruncated(stdout []byte) bool {
-	var top struct {
-		Truncated bool `json:"truncated"`
-	}
-	return json.Unmarshal(stdout, &top) == nil && top.Truncated
-}
-
 // lookupDedup lists the tracker's work beads and returns the id of one whose
 // dedup_key is the same identity as key. A failed or degraded list is an error:
 // creating without a trustworthy lookup could duplicate.
@@ -318,11 +275,12 @@ func lookupDedupIn(ctx context.Context, env Env, ref workitem.EntityRef, key, qu
 	if err != nil {
 		return "", false, fmt.Errorf("dedup lookup: %w", err)
 	}
-	ents, err := decodeList(out)
-	if err != nil {
+	var ans client.ListOutcome[listEntity]
+	if err := json.Unmarshal(out, &ans); err != nil {
 		return "", false, fmt.Errorf("dedup lookup: decode pg-connector %s stdout: %w", strings.Join(args, " "), err)
 	}
-	if failOnTruncated && listTruncated(out) {
+	ents := ans.Entities
+	if failOnTruncated && ans.Truncated {
 		return "", false, fmt.Errorf("dedup lookup: pg-connector %s was truncated, so the lookup cannot be trusted", strings.Join(args, " "))
 	}
 	for _, e := range ents {
@@ -359,6 +317,6 @@ func sameKey(ref workitem.EntityRef, a, b string) bool {
 // holds, a malformed field). A failure with any other code, or none, is not
 // permanent, so a retry stays possible.
 func permanentFailure(err error) bool {
-	var ce *connectorError
-	return errors.As(err, &ce) && ce.code == "invalid_argument"
+	var ce *client.Error
+	return errors.As(err, &ce) && ce.Code == "invalid_argument"
 }

@@ -81,16 +81,12 @@ func childrenArgs(env Env, id string) []string {
 // thing: a read that cannot be trusted, which fails closed.
 func liveShow(ctx context.Context, env Env, id string) (liveBead, error) {
 	args := showArgs(env, id)
-	out, err := call(ctx, env, args)
+	result, err := callResult(ctx, env, args)
 	if err != nil {
 		return liveBead{}, err
 	}
-	var w wireEnvelope
-	if err := json.Unmarshal(out, &w); err != nil {
-		return liveBead{}, fmt.Errorf("decode pg-connector %s stdout: %w", strings.Join(args, " "), err)
-	}
 	var live liveBead
-	if len(w.Result) == 0 || json.Unmarshal(w.Result, &live) != nil {
+	if len(result) == 0 || json.Unmarshal(result, &live) != nil {
 		return liveBead{}, fmt.Errorf("decode pg-connector %s result: not a work item", strings.Join(args, " "))
 	}
 	if live.ServedFrom != servedFromOrigin {
@@ -107,20 +103,16 @@ func liveShow(ctx context.Context, env Env, id string) (liveBead, error) {
 // failure (unknown_op included) means "unknown", never "no children".
 func liveChildren(ctx context.Context, env Env, id string) ([]string, error) {
 	args := childrenArgs(env, id)
-	out, err := call(ctx, env, args)
+	result, err := callResult(ctx, env, args)
 	if err != nil {
 		return nil, err
-	}
-	var w wireEnvelope
-	if err := json.Unmarshal(out, &w); err != nil {
-		return nil, fmt.Errorf("decode pg-connector %s stdout: %w", strings.Join(args, " "), err)
 	}
 	var res struct {
 		Children *[]struct {
 			ID string `json:"id"`
 		} `json:"children"`
 	}
-	if len(w.Result) == 0 || json.Unmarshal(w.Result, &res) != nil || res.Children == nil {
+	if len(result) == 0 || json.Unmarshal(result, &res) != nil || res.Children == nil {
 		return nil, fmt.Errorf("decode pg-connector %s result: no children member", strings.Join(args, " "))
 	}
 	ids := make([]string, 0, len(*res.Children))

@@ -133,7 +133,7 @@ func TestReadLookupUnavailableListingFailsClosed(t *testing.T) {
 func TestReadLookupToleratesNonStringMetadataAndTheEnvelopeShape(t *testing.T) {
 	d := newDouble(t, respRule{
 		Match:  "issue list",
-		Stdout: `{"result":{"entities":[{"id":"b1","title":"t","state":"open","metadata":{"pr_number":7,"dedup_key":"pr:acme/api#7:fix-ci:abc","flag":true}}]}}`,
+		Stdout: `{"entities":[{"id":"b1","title":"t","state":"open","metadata":{"pr_number":7,"dedup_key":"pr:acme/api#7:fix-ci:abc","flag":true}}]}`,
 	})
 	lk, err := ReadLookup(context.Background(), testEnv(d, lookupCfg()), lookupView())
 	if err != nil {

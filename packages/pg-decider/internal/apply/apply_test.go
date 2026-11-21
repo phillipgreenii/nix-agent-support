@@ -125,7 +125,7 @@ func TestCreateDedupMissesADifferentKindOrSuffixOrEntity(t *testing.T) {
 func TestCreateDecodesWireEnvelopeListOutput(t *testing.T) {
 	d := newDouble(t, respRule{
 		Match:  "issue list",
-		Stdout: `{"result":{"entities":[{"id":"wb-5","metadata":{"dedup_key":"pr:` + prID + `:review-pr"}}]}}`,
+		Stdout: `{"entities":[{"id":"wb-5","metadata":{"dedup_key":"pr:` + prID + `:review-pr"}}]}`,
 	})
 	r := run(t, d, nil, []action.Action{create("review-pr", "t", "pr:"+prID+":review-pr", nil)})
 	if !reflect.DeepEqual(outcomes(r), []Outcome{OutcomeDeduped}) || r.Events[0].WorkItemID != "wb-5" {

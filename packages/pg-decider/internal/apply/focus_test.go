@@ -243,7 +243,7 @@ func TestFocusApplyAbandonsWhenLiveClaimed(t *testing.T) {
 		{"live-not-from-origin", focusHoldAction("hold"), strings.Replace(focusLive("open", "", ""), `"origin"`, `"cache"`, 1), focusNoChildren, `"cache", not from the origin`},
 		{"live-marked-stale", focusHoldAction("hold"), strings.Replace(focusLive("open", "", ""), `"stale":false`, `"stale":true`, 1), focusNoChildren, "stale"},
 		{"live-no-served-from", focusHoldAction("hold"), `{"result":{"id":"bd-focus-1","state":"open"}}`, focusNoChildren, "not from the origin"},
-		{"live-undecodable", focusHoldAction("hold"), `not json`, focusNoChildren, "decode"},
+		{"live-undecodable", focusHoldAction("hold"), `not json`, focusNoChildren, "undecodable stdout"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

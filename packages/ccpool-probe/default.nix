@@ -6,21 +6,25 @@
 mkGoApp {
   pname = "ccpool-probe";
 
-  # Pattern A (phillipg-nix-repo-base ADR 0008): a single module rooted at
-  # this package dir, with go.mod and the committed gomod2nix.toml side by
-  # side. No local `replace`, so no modRoot and no parent-rooted fileset are
-  # needed (mirrors packages/pg-router-probe/default.nix, whose own
-  # subprocess-exec shape this package also mirrors).
+  # Pattern B (phillipg-nix-repo-base ADR 0008): go.mod replaces ../pg-connector
+  # for its published client package (decodes pg-connector's answers), so the
+  # build sandbox holds this module and that one at their relative positions.
   #
-  # This binary has no compile-time dependency on packages/ccpool or
-  # packages/pg-connector: it execs both `ccpool` and `pg-connector` as
-  # ambient-$PATH subprocesses for every read/write, rather than importing
-  # or vendoring either (this repo's own CLAUDE.md forbids a dependency on
-  # another custom flake within this repo too — every adapter in this repo
-  # execs its backing tools, it never links against them) [design:
+  # It still execs both `ccpool` and `pg-connector` as ambient-$PATH
+  # subprocesses for every read/write; pg-connector is a compile-time
+  # dependency only for the client package's result types [design:
   # "pg-router-probe and ccpool-probe" intro].
-  src = lib.cleanSource ./.;
-  modRoot = null;
+  src = lib.fileset.toSource {
+    root = ./..;
+    fileset = lib.fileset.unions [
+      ./.
+      ../pg-connector
+    ];
+  };
+  modRoot = "ccpool-probe";
+
+  # go.work is for the editor and go-work-vet only; a build resolves through go.mod.
+  env.GOWORK = "off";
 
   gomod2nixToml = ./gomod2nix.toml;
 

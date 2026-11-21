@@ -10,13 +10,15 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 const (
-	// connectorBinary is the ambient PATH name this handler execs; there is
-	// no compile-time dependency on packages/pg-connector.
-	connectorBinary = "pg-connector"
 	// defaultBackend is the backend instance name every call is pinned to
 	// unless --backend or a --backend-map entry overrides it (pg-connector can
 	// register the beads backend under several suffixed names).
@@ -87,52 +89,88 @@ type connector struct {
 	backend string // the pg-connector backend instance name every call passes as --backend
 }
 
-type connectorResult struct {
-	stdout, stderr []byte
-	exit           int
+// runner is the cmdrun.Runner the published client runs pg-connector through.
+// It keeps this handler's own process management: the child's complete
+// environment is c.env (never the parent's), it runs in its own process group,
+// and it is registered with c.child so the orphan watcher can kill it. A
+// timeout kills the whole group. seen receives the child's captured stderr and
+// exit code so a failure can name them and a caller can insist on exit 0.
+func (c *connector) runner(seen *seenCall) cmdrun.Runner {
+	return func(ctx context.Context, call cmdrun.Call) cmdrun.Result {
+		cmd := exec.CommandContext(ctx, call.Name, call.Args...)
+		cmd.Cancel = func() error { killGroup(cmd); return nil }
+		cmd.Env = c.env
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		if err := cmd.Start(); err != nil {
+			return cmdrun.Result{Code: -1, StartErr: fmt.Errorf("cannot run %s: %w", call.Name, err)}
+		}
+		c.child.set(cmd)
+		var timedOut atomic.Bool
+		if call.Timeout > 0 {
+			t := time.AfterFunc(call.Timeout, func() {
+				timedOut.Store(true)
+				killGroup(cmd)
+			})
+			defer t.Stop()
+		}
+		err := cmd.Wait()
+		c.child.clear()
+		res := cmdrun.Result{Stdout: out.Bytes(), Stderr: errb.Bytes()}
+		defer func() { seen.stderr, seen.exit = res.Stderr, res.Code }()
+		var ee *exec.ExitError
+		switch {
+		case err == nil:
+		case timedOut.Load():
+			res.Code, res.Signal, res.TimedOut, res.CtxErr = -1, "killed", true, context.DeadlineExceeded
+		case errors.As(err, &ee) && ee.ExitCode() >= 0:
+			res.Code = ee.ExitCode()
+		case errors.As(err, &ee):
+			res.Code, res.Signal = -1, ee.String()
+		default:
+			res.Code, res.StartErr = -1, fmt.Errorf("waiting for %s: %w", call.Name, err)
+		}
+		return res
+	}
 }
 
-// run execs pg-connector with args. The error is non-nil only when the child
-// could not be started or waited on; a non-zero exit is reported in the result.
-func (c *connector) run(args []string) (connectorResult, error) {
-	cmd := exec.CommandContext(context.Background(), connectorBinary, args...)
-	cmd.Env = c.env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Start(); err != nil {
-		return connectorResult{}, fmt.Errorf("cannot run %s: %w", connectorBinary, err)
-	}
-	c.child.set(cmd)
-	err := cmd.Wait()
-	c.child.clear()
-	res := connectorResult{stdout: stdout.Bytes(), stderr: stderr.Bytes()}
-	var ee *exec.ExitError
-	switch {
-	case err == nil:
-	case errors.As(err, &ee):
-		res.exit = ee.ExitCode()
-	default:
-		return connectorResult{}, fmt.Errorf("waiting for %s: %w", connectorBinary, err)
-	}
-	return res, nil
+// seenCall is what the runner observed of the last child: its stderr and exit.
+type seenCall struct {
+	stderr []byte
+	exit   int
 }
 
-// ok runs args and requires exit 0; anything else is an error carrying the
-// child's stderr.
-func (c *connector) ok(args []string) ([]byte, error) {
-	res, err := c.run(args)
-	if err != nil {
-		return nil, err
+// do runs f against a client wired to this connector's runner. A failed call
+// that ended with an exit code is reported with the child's stderr (the
+// client's own error carries only stdout); any other failure (the child
+// never started, a signal, a timeout) is returned as the client reported it.
+func (c *connector) do(verb string, f func(cl client.Client, seen *seenCall) error) error {
+	var seen seenCall
+	err := f(client.Client{Run: c.runner(&seen)}, &seen)
+	if err == nil {
+		return nil
 	}
-	if res.exit != 0 {
-		detail := strings.TrimSpace(string(res.stderr))
+	var ce *client.Error
+	if errors.As(err, &ce) && ce.ExitCode >= 0 {
+		detail := strings.TrimSpace(string(seen.stderr))
 		if detail == "" {
 			detail = "no error output"
 		}
-		return nil, fmt.Errorf("pg-connector %s exited %d: %s", args[1], res.exit, detail)
+		return fmt.Errorf("pg-connector %s exited %d: %s", verb, ce.ExitCode, detail)
 	}
-	return res.stdout, nil
+	return err
+}
+
+// targeted runs one single-backend verb (args after the verb are pinned) and
+// returns the answer envelope's result.
+func (c *connector) targeted(args []string) (json.RawMessage, error) {
+	var out json.RawMessage
+	err := c.do(args[1], func(cl client.Client, _ *seenCall) (err error) {
+		out, err = cl.Targeted(context.Background(), c.pinned(args...)...)
+		return err
+	})
+	return out, err
 }
 
 // pinned appends the flags every call carries.
@@ -147,19 +185,28 @@ type issue struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-// list runs the named query and returns its items.
+// list runs the named query and returns its items. Only exit 0 counts: a
+// degraded answer (pg-connector exit 5) is an error here, since dedup must not
+// read a partial list as "nothing filed".
 func (c *connector) list(query string) ([]issue, error) {
-	out, err := c.ok(c.pinned("issue", "list", "--query", query))
+	var out client.ListOutcome[issue]
+	err := c.do("list", func(cl client.Client, seen *seenCall) error {
+		raw, err := cl.FanOutStdout(context.Background(), c.pinned("issue", "list", "--query", query)...)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return fmt.Errorf("cannot decode the issue list response: %w", err)
+		}
+		if seen.exit != 0 {
+			return client.NewExitError([]string{"issue", "list"}, seen.exit, raw)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	var env struct {
-		Entities []issue `json:"entities"`
-	}
-	if err := json.Unmarshal(out, &env); err != nil {
-		return nil, fmt.Errorf("cannot decode the issue list response: %w", err)
-	}
-	return env.Entities, nil
+	return out.Entities, nil
 }
 
 // createSpec is everything `issue create` needs.
@@ -185,25 +232,23 @@ func (c *connector) create(s createSpec) (string, error) {
 	for k, v := range s.metadata {
 		args = append(args, "--metadata", csvPair(k, v))
 	}
-	out, err := c.ok(c.pinned(args...))
+	out, err := c.targeted(args)
 	if err != nil {
 		return "", err
 	}
-	var env struct {
-		Result issue `json:"result"`
-	}
-	if err := json.Unmarshal(out, &env); err != nil {
+	var created issue
+	if err := json.Unmarshal(out, &created); err != nil {
 		return "", fmt.Errorf("cannot decode the issue create response: %w", err)
 	}
-	if env.Result.ID == "" {
+	if created.ID == "" {
 		return "", errors.New("the issue create response carries no id")
 	}
-	return env.Result.ID, nil
+	return created.ID, nil
 }
 
 // comment adds body to item id.
 func (c *connector) comment(id, body string) error {
-	_, err := c.ok(c.pinned("issue", "comment", id, "--body", body))
+	_, err := c.targeted([]string{"issue", "comment", id, "--body", body})
 	return err
 }
 
@@ -213,7 +258,7 @@ func (c *connector) addLabels(id string, labels []string) error {
 	for _, l := range labels {
 		args = append(args, "--add-label", l)
 	}
-	_, err := c.ok(c.pinned(args...))
+	_, err := c.targeted(args)
 	return err
 }
 

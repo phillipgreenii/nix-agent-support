@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+
 	"github.com/phillipgreenii/pg-decider/internal/config"
 )
 
@@ -74,10 +76,10 @@ func TestCallMapsARealChildsOutcomeOntoTheConnectorContract(t *testing.T) {
 		wantErr      string // substring; "" means no error
 	}{
 		{name: "stdout captured on exit 0", script: `printf '{"result":{}}'`, wantOut: `{"result":{}}`},
-		{name: "enveloped error on stdout is the detail", script: `printf '{"error":{"code":"bad","message":"nope"}}'; exit 2`, wantErr: "pg-connector issue list: exit 2: bad: nope"},
+		{name: "enveloped error on stdout is the detail", script: `printf '{"error":{"code":"bad","message":"nope"}}'; exit 2`, wantErr: "pg-connector issue list: exit 2 (bad): nope"},
 		{name: "plain stdout is the detail", script: `printf 'plain words\n'; exit 5`, wantErr: "exit 5: plain words"},
 		{name: "stderr is the detail when stdout is empty", script: `printf 'from stderr' >&2; exit 6`, wantErr: "exit 6: from stderr"},
-		{name: "exit 4 is not_found", script: `printf 'x' >&2; exit 4`, wantErr: "pg-connector issue list: not_found"},
+		{name: "exit 4 is not found", script: `printf 'x' >&2; exit 4`, wantErr: "pg-connector issue list: exit 4: x"},
 		{
 			name:    "the beads dir variable reaches the child",
 			script:  `printf '%s' "$PG_CONNECTOR_ISSUE_BEADS_DIR"`,
@@ -114,9 +116,9 @@ func TestCallReportsAMissingConnectorAsAnExecError(t *testing.T) {
 		return ExecRunner(ctx, c)
 	}
 	_, err := call(context.Background(), Env{Runner: missing}, []string{"issue", "list"})
-	var ce *connectorError
-	if err == nil || errors.As(err, &ce) || !strings.Contains(err.Error(), "exec pg-connector issue list") {
-		t.Fatalf("want an exec error, not a connectorError: %v", err)
+	var ce *client.Error
+	if err == nil || !errors.As(err, &ce) || ce.ExitCode != -1 || ce.Cause == nil || !strings.Contains(err.Error(), "pg-connector issue list") {
+		t.Fatalf("want a start error (exit -1 with a cause) naming the call: %v", err)
 	}
 }
 

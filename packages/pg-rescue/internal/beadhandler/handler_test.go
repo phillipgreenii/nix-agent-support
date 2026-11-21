@@ -967,6 +967,22 @@ func TestUnreachableTrackerExits1WithNoFallback(t *testing.T) {
 	}
 }
 
+// A degraded dedup list (pg-connector exit 5) is a failure, never "nothing
+// filed": the handler must not create after it.
+func TestDegradedDedupListExits1AndFilesNothing(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	s.fake.Fail("list", 5, "backend degraded")
+	code, stdout, stderr := s.run("--dedup-query", "q")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "backend degraded") {
+		t.Errorf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	for _, c := range s.fake.Calls() {
+		if c.Verb() == "create" {
+			t.Errorf("filed after a degraded list: %v", s.fake.Calls())
+		}
+	}
+}
+
 func TestConnectorNotOnPathExits1(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	t.Setenv("PATH", t.TempDir())
