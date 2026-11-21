@@ -65,11 +65,10 @@ type Config struct {
 	TeamMembers    []string `yaml:"team_members,omitempty" json:"team_members,omitempty"`
 	WatchLabels    []string `yaml:"watch_labels,omitempty" json:"watch_labels,omitempty"`
 
-	// Repos is the configured repository list. Phase 9 supports exactly one
-	// entry (docs/behavior/pg-desk/README.md); a second entry is not
-	// rejected here (that validation belongs to the gather/interpret
-	// packets that actually resolve against "the one configured
-	// repository"), but nothing in this phase reads past Repos[0].
+	// Repos is the configured repository list: one or more entries, each a
+	// distinct remote (docs/behavior/pg-desk/config.md, "Repositories").
+	// Repos[0] is the primary repository: the one a verb that does not
+	// name a repository resolves against.
 	Repos []RepoConfig `yaml:"repos" json:"repos"`
 
 	// TicketPatterns is unconsumed until the cross-reference step (Phase 13).
@@ -876,8 +875,8 @@ func validateIssueURLTemplate(tmpl string) error {
 	return nil
 }
 
-// RepoConfig is a single configured repository. Phase 9 supports exactly
-// one (docs/behavior/pg-desk/README.md's "Scope" section).
+// RepoConfig is one configured repository; repos[] holds one or more
+// (docs/behavior/pg-desk/config.md, "Repositories").
 type RepoConfig struct {
 	Remote string `yaml:"remote" json:"remote"`
 	// BeadsDir names which beads workspace gather and sync target for this
@@ -1115,10 +1114,17 @@ func finalize(cfg *Config) error {
 	if len(cfg.Repos) == 0 {
 		return errors.New("repos: at least one repo is required")
 	}
+	seenRemote := map[string]int{}
 	for i := range cfg.Repos {
 		if strings.TrimSpace(cfg.Repos[i].Remote) == "" {
 			return fmt.Errorf("repos[%d]: remote is required", i)
 		}
+		cfg.Repos[i].Remote = strings.TrimSpace(cfg.Repos[i].Remote)
+		key := strings.ToLower(cfg.Repos[i].Remote)
+		if first, dup := seenRemote[key]; dup {
+			return fmt.Errorf("repos[%d]: remote %q duplicates repos[%d]", i, cfg.Repos[i].Remote, first)
+		}
+		seenRemote[key] = i
 		if cfg.Repos[i].BeadsDir != "" {
 			expanded, err := expandHome(cfg.Repos[i].BeadsDir)
 			if err != nil {
@@ -1303,3 +1309,26 @@ func validateFreshness(f FreshnessConfig) error {
 // ParseDuration parses a config duration: time.ParseDuration plus a day
 // component ("7d", "1d12h"). The result MUST be positive.
 func ParseDuration(v string) (time.Duration, error) { return parseDayDuration(v) }
+
+// PrimaryRepo returns the primary repository remote (Repos[0]), the one a
+// verb that does not name a repository resolves against. It is empty on a
+// nil Config or one with no repositories.
+func (c *Config) PrimaryRepo() string {
+	if c == nil || len(c.Repos) == 0 {
+		return ""
+	}
+	return c.Repos[0].Remote
+}
+
+// RepoRemotes returns every configured repository remote, in configuration
+// order (primary first). Safe on a nil Config.
+func (c *Config) RepoRemotes() []string {
+	if c == nil {
+		return nil
+	}
+	out := make([]string, 0, len(c.Repos))
+	for _, r := range c.Repos {
+		out = append(out, r.Remote)
+	}
+	return out
+}

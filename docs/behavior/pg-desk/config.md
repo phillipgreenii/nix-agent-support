@@ -113,6 +113,26 @@ re-emits it. The due-date attention rules raise for exactly the issues the deplo
 select, so an issue selected only by an unwatched query no longer gets due-date attention: a deployment
 that wants it MUST declare that query watched.
 
+## Repositories: `repos[]`
+
+`repos[]` lists the repositories pg-desk follows: one or more entries, each with a `remote`
+(`OWNER/REPO`) and an optional `beads_dir`. A configuration with one entry behaves exactly as before.
+
+- The first entry is the PRIMARY repository: a verb that does not name a repository resolves against it.
+- Each `remote` MUST be unique; the comparison is case-insensitive and ignores surrounding whitespace.
+  A duplicate is a load error naming the later entry (`repos[1]`) and the earlier one it repeats.
+- An empty list, or an entry with no `remote`, is a load error, as before.
+- The store keys every row by repository, so the repositories of one configuration share one store
+  without their rows mixing (see [`store-schema.md`](store-schema.md)).
+- A pull-request query is a search expression the deployment writes; to follow a second repository the
+  deployment adds its `repo:OWNER/REPO` qualifier to the queries it wants, or declares a query for it,
+  and the watched set (`watch.pr` queries) lists the same queries. pg-desk does not rewrite a query.
+- `pg-desk doctor` prints a `repos:` line (the count, the primary and the others) when more than one
+  repository is configured, and prints nothing extra for one.
+
+The first additional repository used by tests is `phillipgziprecruiter/pending-review-scratch`
+(fixtures only; no test reaches GitHub).
+
 ## Invariants
 
 - **INV-CONFIG-1.** <!-- uuid: c4514292-856c-4d28-ad15-21a9a1229732 --> Every focus key and `bead_id_pattern` MUST be optional: a configuration that sets
@@ -138,6 +158,10 @@ that wants it MUST declare that query watched.
 - **INV-CONFIG-10.** <!-- uuid: 804188fa-33bf-4700-adcf-fea704aa9448 --> `pr_lane.mode` MUST read as `off` when the key is missing, empty or not one of `off`, `plan` and `apply`,
   MUST NOT fail the load, and the home module MUST render it unconditionally from an enum option that
   defaults to `off`.
+- **INV-CONFIG-11.** <!-- uuid: 6f0b9e3a-2c41-4d7e-9a58-3b1d0c7e5f12 --> `repos[]` MUST accept one or more entries; a configuration with one entry MUST behave as it did
+  before multiple were supported; two entries whose remotes are equal ignoring case and surrounding
+  whitespace MUST fail the load with an error naming both entries; and `doctor` MUST list every repository
+  only when more than one is configured.
 
 ## Telemetry and logs
 

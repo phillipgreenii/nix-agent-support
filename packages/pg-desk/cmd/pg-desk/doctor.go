@@ -271,6 +271,11 @@ func runDoctor(cmd *cobra.Command) error {
 		failures = append(failures, "config")
 	} else {
 		fmt.Fprintln(w, "config: ok")
+		// A single-repo configuration prints nothing more, so its output is
+		// unchanged; several repositories are listed, primary first.
+		if remotes := cfg.RepoRemotes(); len(remotes) > 1 {
+			fmt.Fprintf(w, "repos: %d (primary %s; also %s)\n", len(remotes), remotes[0], strings.Join(remotes[1:], ", "))
+		}
 	}
 	// The live pr lane line: information, not a check (it never adds a
 	// failure). It reads the persisted lane state from a raw store handle of

@@ -1308,3 +1308,44 @@ func TestFreshnessRetiredSources(t *testing.T) {
 		t.Errorf("empty retired name err = %v", err)
 	}
 }
+
+func TestLoadFile_MultipleRepos(t *testing.T) {
+	p := writeYAML(t, t.TempDir(), `
+self_login: phillipgreenii
+repos:
+  - remote: ZR-Private/ziprecruiter
+  - remote: phillipgziprecruiter/pending-review-scratch
+`)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	want := []string{"ZR-Private/ziprecruiter", "phillipgziprecruiter/pending-review-scratch"}
+	got := cfg.RepoRemotes()
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("RepoRemotes = %v, want %v", got, want)
+	}
+	if cfg.PrimaryRepo() != want[0] {
+		t.Fatalf("PrimaryRepo = %q, want %q", cfg.PrimaryRepo(), want[0])
+	}
+}
+
+func TestLoadFile_DuplicateRepoRemoteFails(t *testing.T) {
+	p := writeYAML(t, t.TempDir(), `
+self_login: phillipgreenii
+repos:
+  - remote: Org/Repo
+  - remote: org/repo
+`)
+	_, err := LoadFile(p)
+	if err == nil || !strings.Contains(err.Error(), "repos[1]") || !strings.Contains(err.Error(), "duplicates repos[0]") {
+		t.Fatalf("expected a duplicate-remote error naming repos[1], got %v", err)
+	}
+}
+
+func TestConfig_PrimaryRepoNil(t *testing.T) {
+	var c *Config
+	if c.PrimaryRepo() != "" || c.RepoRemotes() != nil {
+		t.Fatal("nil Config must have no repos")
+	}
+}

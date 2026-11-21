@@ -48,8 +48,11 @@ qualifier every time:**
 - **Layered urgency.** The Jira half (priority and incident signals, read from a PR's own
   cross-referenced Jira issue) is implemented as of Phase 13 — see [`interpret.md`](interpret.md).
   The project-health half stays deferred.
-- **Multi-repository support.** `repos[]` supports exactly one repository; every command below
-  resolves against that one configured (or cwd-resolved) repository.
+- **Per-verb multi-repository resolution.** `repos[]` MAY hold several repositories (see
+  [`config.md`](config.md), "Repositories"), and the store, `doctor` and the PR queries accept them.
+  A verb that does not name a repository resolves against the primary repository (the first entry,
+  or the cwd-resolved one); naming a non-primary repository in every verb is a realization gap
+  tracked until the per-verb resolution lands.
 
 Each doc below restates only the exclusions that apply to its own command family, as a pointer
 back here — not the full list.

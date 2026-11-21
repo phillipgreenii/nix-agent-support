@@ -1168,3 +1168,27 @@ func TestDoctorFanOutIssueListExitCodes(t *testing.T) {
 		})
 	}
 }
+
+func TestDoctorListsEveryConfiguredRepoOnlyWhenMoreThanOne(t *testing.T) {
+	_, openFresh := openTestStore(t)
+	cfg := openTestConfig("o/r")
+	withOpenSeams(t, cfg, openFresh)
+	stubDoctorSeams(t, nil, nil, nil)
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if strings.Contains(stdout, "repos:") {
+		t.Errorf("single-repo doctor output must not gain a repos line: %s", stdout)
+	}
+
+	cfg.Repos = append(cfg.Repos, config.RepoConfig{Remote: "phillipgziprecruiter/pending-review-scratch"})
+	stdout, err = runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	want := "repos: 2 (primary o/r; also phillipgziprecruiter/pending-review-scratch)"
+	if !strings.Contains(stdout, want) {
+		t.Errorf("stdout missing %q: %s", want, stdout)
+	}
+}

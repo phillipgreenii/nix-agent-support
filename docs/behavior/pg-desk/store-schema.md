@@ -6,7 +6,8 @@ busy timeout, so `serve`, the CLI, and `run` can overlap safely. Every pipeline 
 per-`(type, id)` lock (the same per-entity locking discipline the retired PR tool uses today) so a
 cascaded re-run and a direct run for the same entity serialize rather than race — this will matter
 once `pr-pool` dispatches handlers in parallel. Rows are keyed by `repo`, so a second repository is
-additive to the schema even though Phase 9 supports exactly one (see "Out of scope" below).
+additive to the schema: a store MAY hold rows of several repositories, and no row of one repository is
+read or written under another's key (see [`config.md`](config.md), "Repositories").
 
 ## The schema version
 
@@ -503,6 +504,5 @@ its own — a store-open or creation failure is logged by whichever command trie
 
 The `xref` table is now populated (Phase 13, the Jira half only — see [`gather.md`](gather.md));
 the Slack half (permalink cross-references, `to_type="thread"` rows) is this docket's sibling
-packet. The `ledger` table is populated by sync (Phase 10). `repos[]` support for more than one
-repository is out of scope; the schema is additive-ready for it, but no packet exercises a second
-repository yet.
+packet. The `ledger` table is populated by sync (Phase 10). Several repositories in one store are in
+scope (see [`config.md`](config.md), "Repositories").
