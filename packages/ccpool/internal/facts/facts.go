@@ -90,6 +90,15 @@ var (
 	readBackoff = 500 * time.Millisecond
 	// readAttemptTimeout is one attempt's budget, the dial handshake included.
 	readAttemptTimeout = 30 * time.Second
+	// readTotalCap is the longest a single read may take in all, every attempt
+	// and pause included, even when the caller sets no deadline. It is the one
+	// place the total is set, and it stays under the ccpool janitor's 60 s
+	// per-call budget so a dead recorder cannot outlast the caller.
+	readTotalCap = 45 * time.Second
+	// originalsBudget is the total budget of OriginalsPresent: it runs under a
+	// per-row lock (Launch, reap), so a dead recorder must not hold the row for
+	// the full read cap.
+	originalsBudget = 5 * time.Second
 )
 
 // retryable reports whether a failed read is worth trying again: the recorder
@@ -135,33 +144,50 @@ const failureHint = "ccpool reads session facts (replies, state, resumability) f
 // attempts and what to do; each attempt has readAttemptTimeout. A cancelled
 // parent ctx stops the retries at once.
 func (r *Reader) call(parent context.Context, op string, fn func(context.Context, *client.Client) error) error {
+	return r.callWithin(parent, op, readTotalCap, fn)
+}
+
+// callWithin is call under a total budget (every attempt and pause included),
+// never longer than readTotalCap. A caller cancellation or earlier deadline ends
+// the retries and returns the raw error; the budget running out is the final
+// failure (it matches ErrDaemonOffline).
+func (r *Reader) callWithin(caller context.Context, op string, budget time.Duration, fn func(context.Context, *client.Client) error) error {
+	budget = min(budget, readTotalCap)
+	parent, stop := context.WithTimeout(caller, budget)
+	defer stop()
 	var err error
 	pause := readBackoff
+	made := 0
 	for attempt := 1; attempt <= readAttempts; attempt++ {
+		made = attempt
 		ctx, cancel := context.WithTimeout(parent, readAttemptTimeout)
 		err = r.once(ctx, fn)
 		cancel()
-		if err == nil || parent.Err() != nil || !retryable(err) {
+		if err == nil || caller.Err() != nil || !retryable(err) {
 			return err
 		}
-		if attempt == readAttempts {
+		if attempt == readAttempts || parent.Err() != nil {
 			break
 		}
 		slog.Warn("ccpool: recorder read failed; retrying", "op", op, "attempt", attempt, "of", readAttempts, "pause", pause, "err", err)
 		recordRetry(op)
 		select {
-		case <-parent.Done():
+		case <-caller.Done():
 			return err
+		case <-parent.Done():
 		case <-time.After(pause):
 		}
 		pause *= 2
 	}
+	if caller.Err() != nil {
+		return err
+	}
 	if !errors.Is(err, ErrDaemonOffline) {
 		err = fmt.Errorf("%w: %w", ErrDaemonOffline, err)
 	}
-	slog.Error("ccpool: recorder read failed after the last attempt", "op", op, "attempts", readAttempts, "err", err)
+	slog.Error("ccpool: recorder read failed after the last attempt", "op", op, "attempts", made, "budget", budget, "err", err)
 	recordFailure(op)
-	return fmt.Errorf("%s: the recorder did not answer after %d attempts: %w; %s", op, readAttempts, err, failureHint)
+	return fmt.Errorf("%s: the recorder did not answer after %d attempts: %w; %s", op, made, err, failureHint)
 }
 
 // SetRetryPolicy replaces the retry policy of every read and returns a function
@@ -464,7 +490,7 @@ func (r *Reader) OutputTokens(path string) (int64, error) {
 // the recorder has never seen is not resumable.
 func (r *Reader) OriginalsPresent(transcriptPath string) (bool, error) {
 	present := false
-	err := r.call(context.Background(), "conversation", func(ctx context.Context, c *client.Client) error {
+	err := r.callWithin(context.Background(), "conversation", originalsBudget, func(ctx context.Context, c *client.Client) error {
 		conv, cerr := c.Conversation(ctx, SessionID(transcriptPath))
 		if errors.Is(cerr, client.ErrNotFound) {
 			present = false

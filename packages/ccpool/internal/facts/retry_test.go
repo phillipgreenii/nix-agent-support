@@ -152,3 +152,70 @@ func TestRead_cancelledContextStopsRetries(t *testing.T) {
 		t.Fatalf("hellos = %d; retries ignored the cancelled context", hellos.Load())
 	}
 }
+
+// shortBudgets sets the total read cap and the OriginalsPresent budget for a
+// test and restores them after.
+func shortBudgets(t *testing.T, total, originals time.Duration) {
+	t.Helper()
+	a, b := readTotalCap, originalsBudget
+	readTotalCap, originalsBudget = total, originals
+	t.Cleanup(func() { readTotalCap, originalsBudget = a, b })
+}
+
+// TestRead_totalCapBoundsARecorderThatNeverAnswers: with no caller deadline, a
+// read against a recorder that never answers gives up inside the total cap even
+// though attempts and per-attempt budgets would allow far longer, and the error
+// is still the recorder-unavailable failure.
+func TestRead_totalCapBoundsARecorderThatNeverAnswers(t *testing.T) {
+	a, b, d := readAttempts, readBackoff, readAttemptTimeout
+	readAttempts, readBackoff, readAttemptTimeout = 50, 20*time.Millisecond, 10*time.Second
+	t.Cleanup(func() { readAttempts, readBackoff, readAttemptTimeout = a, b, d })
+	shortBudgets(t, 300*time.Millisecond, time.Second)
+	opts, hellos, _ := slowRecorder(t, -1)
+	start := time.Now()
+	_, err := NewWith(opts).OutputTokens("/p/s.jsonl")
+	took := time.Since(start)
+	if !errors.Is(err, ErrDaemonOffline) {
+		t.Fatalf("err = %v; want ErrDaemonOffline", err)
+	}
+	if took > 2*time.Second {
+		t.Fatalf("read took %s; the total cap is 300ms", took)
+	}
+	if hellos.Load() == 0 {
+		t.Fatal("the recorder was never tried")
+	}
+}
+
+// TestRead_slowThenOkSucceedsInsideTheCap: a recorder whose first hello is slow
+// is retried and the read succeeds inside the total cap.
+func TestRead_slowThenOkSucceedsInsideTheCap(t *testing.T) {
+	shortRetry(t, 4)
+	shortBudgets(t, 5*time.Second, 5*time.Second)
+	opts, hellos, queries := slowRecorder(t, 1)
+	if _, err := NewWith(opts).Mark(context.Background()); err != nil {
+		t.Fatalf("Mark: %v", err)
+	}
+	if hellos.Load() != 2 || queries.Load() != 1 {
+		t.Fatalf("hellos=%d queries=%d, want 2 and 1", hellos.Load(), queries.Load())
+	}
+}
+
+// TestOriginalsPresent_returnsWithinItsShortBudget: with the recorder down (never
+// answering), OriginalsPresent returns inside its own short budget, not the full
+// read cap, so a caller holding a row lock is released quickly.
+func TestOriginalsPresent_returnsWithinItsShortBudget(t *testing.T) {
+	a, b, d := readAttempts, readBackoff, readAttemptTimeout
+	readAttempts, readBackoff, readAttemptTimeout = 50, 20*time.Millisecond, 10*time.Second
+	t.Cleanup(func() { readAttempts, readBackoff, readAttemptTimeout = a, b, d })
+	shortBudgets(t, 30*time.Second, 300*time.Millisecond)
+	opts, _, _ := slowRecorder(t, -1)
+	start := time.Now()
+	ok, err := NewWith(opts).OriginalsPresent("/p/s.jsonl")
+	took := time.Since(start)
+	if ok || !errors.Is(err, ErrDaemonOffline) {
+		t.Fatalf("ok=%v err=%v; want false and ErrDaemonOffline", ok, err)
+	}
+	if took > 2*time.Second {
+		t.Fatalf("OriginalsPresent took %s; its budget is 300ms", took)
+	}
+}

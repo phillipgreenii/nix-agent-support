@@ -69,6 +69,14 @@ Rules this set's implementation MUST hold, following the behavior-docs method
     (operation, attempt, pause) and counted in `ccpool_recorder_retries_total{op}`. When the last
     try fails, ccpool MUST log one error line ("recorder read failed after the last attempt") and
     count `ccpool_recorder_read_failures_total{op}`.
+  - **Total cap and short budgets.** Every recorder read MUST also stop inside a TOTAL cap of 45 s
+    (every try and pause included), applied even when the caller sets no deadline and set at one
+    place, so a dead recorder never outlasts the janitor's 60 s per-call budget; a caller's own
+    earlier deadline or cancellation still ends the retries at once. The resumable check
+    (`OriginalsPresent`) runs under a per-row lock, so it MUST give up within 5 s, not the full
+    cap, and not hold the row past it. The pre-delivery feed position taken by `SendWithConfirm`
+    is best-effort: it MUST be tried for at most 5 s and a failure MUST NOT delay or block
+    delivery (the send reports the confirmation as unknown instead).
   - **Final error text.** The error reads `<op>: the recorder did not answer after N attempts:
 the recorder is not available: <cause>; ccpool reads session facts (replies, state,
 resumability) from the recorder and does not guess; check that the recorder daemon is running,
