@@ -128,6 +128,19 @@ metrics backend, …) define their own terms in their own behavior sets.
   **completion** (synchronous) or a deferred **ack** (asynchronous), keyed by the tracking id. The
   core retries delivery **only until acceptance** (`INV-FAIL-1`); after acceptance the handler owns
   persistence, resume, and retry.
+- **Cursor-feed source** — a source whose answer is the part of a change log after a per-consumer
+  cursor, so a change the source has acknowledged is never offered again. Told what the core has
+  settled through the settlement report (`INTF-SOURCE`, "Acknowledgement of a cursor-feed source").
+- **Lane** — an opaque string an event carries (`ack.lane`) that names one independent ordered feed
+  inside a query. The adapter sets it to the backend name, because each backend has its own cursor.
+  The core never parses it.
+- **Token** — an opaque string an event carries (`ack.token`) that names its position in its lane. The
+  adapter sets it to the position the backend is acknowledged with. The core never parses it and never
+  compares two tokens.
+- **Frontier** — for one lane of one query, the highest token such that every event of that lane up to
+  and including it, in the order the source emitted them, is settled (`INV-EVT-10`).
+- **Settlement report** — the core invoking the query's `settle` invocation with a lane and its
+  frontier token. Idempotent, and carries no event ids.
 
 ## Participants (the system actors)
 

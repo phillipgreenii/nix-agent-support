@@ -923,3 +923,16 @@ lock and reads nothing from these counters.
   scale size plus `unknown` and `none`. The per-role bound is therefore resources times levels times 2 for
   the dispatch counters and resources times 2 times about 6 for blocked seconds.
 - **No alert**, as for `DEC-OBS-12`: these exist to size a threshold change.
+
+### `DEC-OBS-15` — the settlement report is measured by failed reports, abandoned events and frontier age <!-- uuid: 68609220-04ea-4322-b031-6d11e91cabe2 -->
+
+**Decided** (the measurement side of `DEC-ACK-1` to `DEC-ACK-4`). Three metrics:
+
+- **`pg_router_source_settle_failures_total{query}`** (counter): a `settle` invocation that exited
+  non-zero or timed out. The report is retried at the next frontier evaluation.
+- **`pg_router_source_ack_abandoned_total{query,type}`** (counter): an event the hold limit abandoned
+  (`INV-EVT-10`'s one exception), also logged with its event id.
+- **`pg_router_source_frontier_age_seconds{query,lane}`** (gauge): the age of the oldest unsettled
+  event holding a lane's frontier, 0 when nothing holds it.
+- **Cardinality.** The same bound as `DEC-OBS-13`: `query` and `lane` are config- or source-bounded
+  names, `type` is an event type, and no event id, session or bead is ever a label.

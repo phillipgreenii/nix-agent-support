@@ -216,9 +216,11 @@ so a **narrow crash window** (accepted but not yet persisted) MAY redeliver. The
   delivered/accepted (`INV-EVT-3`) — so a source never has to track "did I already emit this". With
   the born-expired default that retention window is roughly one dispatch cycle, so a pull source's
   next-trigger re-emit is **not** deduped (`INV-EVT-3`);
-- a **pull source** re-derives current truth on its next **query trigger**; a **push-only source**'s
-  events are now **durable through their retention** (no longer lost on a core restart), lost only if
-  nothing accepts them before they expire.
+- a **pull source** re-derives current truth on its next **query trigger**, unless it is a
+  **cursor-feed source** (see "Acknowledgement of a cursor-feed source" under `INTF-SOURCE`), which is
+  told what the core has finished with and re-offers anything it was not told about; a **push-only
+  source**'s events are now **durable through their retention** (no longer lost on a core restart),
+  lost only if nothing accepts them before they expire.
 
 A callback bearing a **tracking id the core does not recognize** (never issued, or already expired and
 evicted) is **acknowledged and ignored** — a logged no-op, not an error, and it does not resurrect an
@@ -240,6 +242,11 @@ otherwise hold one tool's configuration inside its own, which is what `GOAL-MIN-
 the boundary principle in this set's [README](README.md) rules out. So **adding a source is
 configuration**: name the invocation, the event types it emits, and — for a pull source — its query
 trigger. The core gains nothing.
+
+A cursor-feed source adds one more opaque invocation, the query's `settle` command, which the core
+runs with a lane and a token and never interprets. "One invocation" therefore means: one invocation
+to pull, and, for a source that keeps a cursor, one to report; the core still learns nothing about
+what either does.
 
 **Pull mode.** The core invokes `query` on a **query trigger** — **periodic** (a tick, on that
 source's own configured period), **threshold** (queue-depth back-pressure), or **manual** (the
@@ -294,6 +301,12 @@ arrives at their values:
   **on the wire**, whether or not the originating event carried one. The core neither reads nor
   validates it, save for a single path a **binding** names for narrowing (below). Its **shape is
   not declared anywhere** — see `OQ-EVT-CATALOG`.
+- `ack` — **optional**, a source's handle for the acknowledgement report below: an object with exactly
+  two string fields, `lane` and `token`. The core never matches on it and never interprets either
+  string; it keeps both with the event, durably, for as long as the event counts toward its lane's
+  frontier. An event without `ack` takes no part in the settlement report. Events that enter by
+  `ingest-event`, by a push inject or by a redrive carry no `ack` and the core never synthesizes one,
+  so they never hold a lane.
 
 **Matching (what a binding may match).** A **binding** matches an event over its **fields**, and
 **matchability is the handler's alone** — a source declares nothing about which of its fields may be
@@ -324,7 +337,7 @@ for this run** is the other case: that event **is** accepted and enqueued, is of
 is dropped **unconsumed-expired** — counted by the unconsumed-expired metric, because run-scoping is
 not a config defect (`INV-DISP-3`).
 
-**The query-reply contract carries events or a deferral, and nothing else — so it stays as it is.**
+**The query-reply contract carries events or a deferral, and nothing else, except that an event MAY carry the optional `ack` handle (event shape, above) — so it stays as it is.** The reply itself is unchanged; `ack` is part of an event.
 A reply says either "here are events" or "later, on the callback"; it carries no view into how the
 source produced them and no per-run stream about the source itself. The source side therefore has
 **no twin** of the handler-side internals the boundary principle puts outside this contract: there is
@@ -347,6 +360,71 @@ sequenceDiagram
     Src->>Core: ingest-event { id, events: [Event] }
     Core-->>Src: { id, accepted } — a type no binding declares is rejected, never queued (INV-DISP-3)
 ```
+
+**Acknowledgement of a cursor-feed source.** A source whose answer is the part of a log after a
+per-consumer cursor cannot re-derive truth on its next trigger, so it MUST NOT advance that cursor
+until the core says the events it produced are settled. A `[[query]]` of such a source declares a
+**`settle`** invocation (a command, run exactly as the query's own command is, `strict_base_env`
+included) and MAY declare **`ack_hold_limit`** (a duration; see below). Both are absent for every
+other source, and a source that declares neither behaves as before. On a query that declares no
+`settle`, the core ignores an `ack` object on an event (no ledger, nothing held, nothing run).
+
+- **Lane and token.** Each event the source emits carries `ack.lane` and `ack.token` (event shape,
+  above). A lane is one independent ordered feed of the query. Within one lane the order of emission
+  is the order of tokens.
+- **Settled.** An event is settled when every handler that matches it has accepted it (`INV-EVT-1`),
+  or no handler matches it (nothing was owed, `INV-DISP-3`), or the hold limit abandoned it. An event
+  that expired while a matching handler never accepted it is NOT settled (`INV-EVT-4` retires it from
+  the queue, not from its lane).
+- **Ledger and restart.** The ledger of a lane is the emitted list of its latest successful poll. A
+  newer successful poll of the same lane replaces the list (the source's own cursor has by then moved
+  past what it no longer lists). A re-emitted event keeps the settlement already recorded for its id,
+  and takes the token of the newest poll, since the token is only used to build the report. The core
+  never compares tokens: the frontier is the token of the last event in list order whose predecessors
+  are all settled. What is persisted for a restart is the list (id, token, first-seen time) and the
+  settled ids; after a restart the core re-evaluates the frontier from them and from the durable
+  queue.
+- **At most one report in flight per lane.** The core runs at most one `settle` per lane at a time;
+  frontier advances during a run are coalesced into one follow-up report with the newest frontier.
+- **Refused events are unsettled.** An event the core refuses at ingest (`log_full`, `log_unwritable`,
+  an unknown type, a malformed event; `invariants.md`, `INV-DISP-3` and its neighbors) is never
+  enqueued, so no queue entry holds it. The ledger still lists it, as unsettled, and its hold clock
+  starts the first time the core sees its id on that lane. The frontier therefore neither passes it
+  (no loss) nor holds forever: `ack_hold_limit` abandons it visibly like any other.
+- **Report.** When the frontier of a lane advances, the core runs the `settle` invocation with
+  `--lane <lane> --through <token>` appended, where `<token>` is the token of the highest event such
+  that it and every earlier event of the lane are settled. The core MUST NOT report a token past an
+  unsettled event. The report is **idempotent** (the same frontier reported twice is harmless) and
+  carries no event ids.
+- **A failed report is not an error for the event.** A `settle` that exits non-zero or times out is
+  logged and counted (`pg_router_source_settle_failures_total`, labelled by query), and is retried at
+  the next frontier evaluation, which runs on every settlement and on every query trigger of that
+  query. Events are never re-enqueued by a failed report.
+- **Hold limit.** The core MUST NOT hold a lane's frontier behind an unsettled event for longer than
+  the query's `ack_hold_limit` (default 24 hours, and MUST NOT be shorter than the longest retry
+  window the query's source applies; the source's own window is opaque to the core, so config
+  validation checks only that the limit is greater than zero). Measured from the first moment the
+  core saw that event's id on that lane (ingested, or refused at ingest), past the limit the core
+  **abandons** the event: it counts `pg_router_source_ack_abandoned_total` (labelled by query and
+  event type), logs the event id, and treats the event as settled for the frontier. This is a bounded,
+  visible loss and the only one the design permits.
+- **Declared with a stable id.** A query that declares `settle` MUST have an item id that is stable
+  per change and distinct per change; config validation cannot check this (the id is the source's), so
+  the adapter refuses `--deferred-ack` without `--retry-window`.
+- **Fan-out re-open.** A duplicate hit (`INV-EVT-3`) on a retained lane event that is still unsettled
+  MUST re-open attempts, with a new `at` and `expiresAt` window, for the handlers that have not
+  accepted it, and MUST NOT re-run a handler that already accepted it. Without this, an event accepted
+  by one handler and expired without another is retained, its re-offer is dropped, the other handler
+  never gets it and the lane waits for the hold limit.
+- **Redelivery is expected.** While a lane's frontier is held, the source re-offers every event after
+  the last reported token on each poll. The core's de-duplication (`INV-EVT-3`) absorbs the re-offer of
+  an event it still holds. To make that absorption cover the hold, an accepted event's id is retained
+  until its lane's frontier has passed it (the lane retention of `INV-EVT-3`).
+- **Restart.** The lane ledger is durable. After a restart the core rebuilds each lane's frontier from
+  the durable queue and ledger and re-evaluates the report, so a crash between acceptance and report
+  loses nothing.
+- **Reset.** Resetting a consumer's cursor is an operator step; the adapter does not signal it to the
+  core.
 
 ## `INTF-HANDLER` — event handler <!-- uuid: 10939663-7a48-4d44-8c4a-9a2df8ae4654 -->
 

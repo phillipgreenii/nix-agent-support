@@ -45,6 +45,12 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
 
 ## Entries
 
+- [`DEC-ACK-1`](ack.md) — the settlement report is a second opaque `settle` command on the query,
+  and a query without one ignores any `ack` on an event.
+- [`DEC-ACK-2`](ack.md) — lane and token are opaque strings the source puts on each event.
+- [`DEC-ACK-3`](ack.md) — the core reports the frontier, not each event.
+- [`DEC-ACK-4`](ack.md) — a lane's frontier is held at most `ack_hold_limit` (default 24 hours);
+  past it the event is abandoned, counted and logged.
 - [`DEC-CLI-1`](cli.md) — the global option surface, and why the run-scoping selectors are flags
   rather than config.
 - [`DEC-CLI-2`](cli.md) — the operator subcommand surface, and why the two run modes are separate
@@ -94,6 +100,9 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   `requirement_blocked_seconds` (blocked time per role and unmet resource, with `sole` and
   `steps_below`) and `dispatch_at_level` and `dispatch_at_level_seconds` (outcome and run time by the
   graded levels a dispatch started at).
+- [`DEC-OBS-15`](observability.md) — the settlement report is measured by
+  `pg_router_source_settle_failures_total`, `pg_router_source_ack_abandoned_total` and
+  `pg_router_source_frontier_age_seconds`, with no event id, session or bead as a label.
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
   both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-RETRY-2`](retry.md) — a role MAY opt in to a bounded (hard cap 3), transient-class-only

@@ -125,7 +125,13 @@ flowchart TD
   `INV-EVT-4` are complete**, which has a consequence worth stating rather than discovering: with the
   born-expired default the dedup window **collapses to roughly one dispatch cycle**, so a pull query
   re-emitting on its next trigger will **not** be deduped. That is consistent with "re-emission, not
-  resurrection" and is a real change; an operator who wants a wider dedup window sets `expiresAt`.
+  resurrection" and is a real change; an operator who wants a wider dedup window sets `expiresAt`. **Lane retention.** An accepted event that
+  carries an `ack` lane (`INTF-SOURCE`, "Acknowledgement of a cursor-feed source") MUST keep its `id`
+  in the retained id set until its lane's frontier has passed it, or until the lane's hold limit
+  abandons the oldest unsettled event, whichever comes first, even when its own final attempts are
+  complete. The dedup window of such an event is therefore bounded by the hold limit, not by its own
+  retention. A duplicate hit on a retained event that is still unsettled re-opens attempts for the
+  handlers that have not accepted it (see the fan-out re-open rule of `INTF-SOURCE`).
 - **`INV-EVT-4`** <!-- uuid: 840afb74-2159-447f-985b-33b27dfc35da --> — **Retry is bounded, and the
   bound is evaluated at attempt time.** If the event is **already expired at the moment an attempt is
   made, that attempt is the last one for that handler**: accept or decline, the core does not offer
@@ -186,6 +192,14 @@ flowchart TD
   deterministic failure, a shutdown hand-back or a success, and **MUST NOT** enqueue one while shutting
   down. Only the last generation's terminal failure is counted and alerted. _(Recorded in
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-RETRY-2`.)_
+- **`INV-EVT-10`** <!-- uuid: 7ec4604c-764f-4fac-b0f8-b1e3fe8789bb --> — **A cursor-feed source's cursor
+  moves only on settlement.** For a source that declares a `settle` invocation, the core MUST report a
+  lane's frontier only for events that are settled and every earlier event of that lane settled, and
+  MUST NOT report any position on any other basis (not an expiry, not a drop of a retired event, not a
+  timeout of the report). The one exception is the hold limit, which abandons an event visibly and
+  counts it. Delivery is at-least-once end to end: a crash between acceptance and report, a failed
+  report, or a held frontier re-offers events, and `INV-EVT-2` and `INV-EVT-3` absorb them. _(Recorded
+  in `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-ACK-1`.)_
 
 ## Interfaces
 
