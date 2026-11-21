@@ -109,6 +109,11 @@ let
   # The rendered configuration. Only keys the loader knows are rendered (an
   # unknown key fails `config check`); null options are omitted; the
   # assistants are an array of tables ([[assistant]]), ordered by id.
+  # A Read allow rule for an absolute path glob. Claude's path syntax treats a
+  # leading `//` as an absolute filesystem path (a single `/` is relative to
+  # the project root), so `/Volumes/x/**` renders as `Read(//Volumes/x/**)`.
+  readRule = path: "Read(/${path})";
+
   renderAssistant =
     id:
     let
@@ -136,6 +141,9 @@ let
     }
     // lib.optionalAttrs (a.tick != null) { inherit (a) tick; }
     // lib.optionalAttrs (a.env != { }) { inherit (a) env; }
+    // lib.optionalAttrs (a.allowedReads != [ ]) {
+      allowed_tools = map readRule a.allowedReads;
+    }
     // lib.optionalAttrs (a.quota != null) {
       quota = {
         inherit (a.quota)
@@ -323,6 +331,26 @@ let
           description = ''
             Extra session environment, on top of the operator's own login-shell
             environment. Each value ${tmuxNote}
+          '';
+        };
+        allowedReads = lib.mkOption {
+          type = lib.types.listOf (lib.types.strMatching "/[^#]*");
+          default = [ ];
+          example = [
+            "/Users/example/assistants/inbox-keeper/**"
+            "/Users/example/work/CLAUDE.md"
+          ];
+          description = ''
+            Absolute paths or globs the session MAY Read with no permission
+            prompt. Each renders as an extra `--allowed-tools` rule
+            `Read(//<path>)` (rendered as `allowed_tools`) on the session's own
+            command line, so it applies to this assistant alone and no file the
+            operator or Claude rewrites can lose it. Nobody is attached to
+            answer a prompt, so a Read outside the operator's own allowed paths
+            (the global settings allow only some roots) stalls the session on a
+            declined prompt until someone attaches. Typically the assistant's
+            own directory (its notes) and the files its `AGENTS.md` names.
+            ${tmuxNote}
           '';
         };
         context = {

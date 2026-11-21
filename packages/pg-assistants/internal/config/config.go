@@ -123,6 +123,7 @@ type Assistant struct {
 	Enabled                              bool              // true when the key is absent
 	Tick                                 time.Duration     // resolved: own value or Config.Tick
 	Env                                  map[string]string // extra session environment
+	AllowedTools                         []string          // extra --allowed-tools rules, after ExitToolRule
 	Context                              Context
 	Quota                                *Quota       // nil: no quota
 	Problems                             []FieldError // non-empty: the daemon does not start this assistant
@@ -460,10 +461,43 @@ func readAssistant(label string, m map[string]any, globalTick time.Duration) Ass
 	t.boolean("enabled", &a.Enabled)
 	t.duration("tick", &a.Tick)
 	a.Env = readEnv(t)
+	a.AllowedTools = readAllowedTools(t)
 	readContext(t, &a)
 	readQuota(t, &a)
-	t.unknown("id", "name", "model", "effort", "cwd", "prompt", "enabled", "tick", "env", "context", "quota")
+	t.unknown("id", "name", "model", "effort", "cwd", "prompt", "enabled", "tick", "env", "allowed_tools", "context", "quota")
 	return a
+}
+
+// readAllowedTools reads allowed_tools: permission rules (`Read(//abs/**)`)
+// the session is started with, on top of ExitToolRule. Each reaches claude as
+// a --allowed-tools value, so it MUST be non-empty, MUST NOT start with "-"
+// (it would read as a flag) and MUST be tmux-passable.
+func readAllowedTools(t *table) []string {
+	v, ok := t.m["allowed_tools"]
+	if !ok {
+		return nil
+	}
+	list, isList := v.([]any)
+	if !isList {
+		t.problem("allowed_tools", "must be an array of strings, got "+describe(v))
+		return nil
+	}
+	var rules []string
+	for i, item := range list {
+		key := fmt.Sprintf("allowed_tools[%d]", i)
+		s, isString := item.(string)
+		switch {
+		case !isString:
+			t.problem(key, "must be a string, got "+describe(item))
+		case s == "":
+			t.problem(key, "must not be empty")
+		case strings.HasPrefix(s, "-"):
+			t.problem(key, fmt.Sprintf("%q must not start with \"-\"", s))
+		case t.tmuxPassable(key, s):
+			rules = append(rules, s)
+		}
+	}
+	return rules
 }
 
 func readEnv(t *table) map[string]string {

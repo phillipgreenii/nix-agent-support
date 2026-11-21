@@ -752,3 +752,34 @@ func TestQuotaTable(t *testing.T) {
 		})
 	}
 }
+
+func TestAssistantAllowedTools(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		cfg := load(t, pathsTOML+assistant("example-a"))
+		if got := cfg.Assistants[0].AllowedTools; got != nil {
+			t.Errorf("AllowedTools = %q, want nil", got)
+		}
+	})
+	t.Run("rules", func(t *testing.T) {
+		cfg := load(t, pathsTOML+assistant("example-a", `allowed_tools = ["Read(//example/a/**)", "Read(//example/b/**)"]`))
+		want := []string{"Read(//example/a/**)", "Read(//example/b/**)"}
+		if got := cfg.Assistants[0].AllowedTools; !slices.Equal(got, want) || len(cfg.Assistants[0].Problems) != 0 {
+			t.Errorf("AllowedTools = %q, Problems = %v; want %q and none", got, cfg.Assistants[0].Problems, want)
+		}
+	})
+	bad := []struct{ name, toml, field string }{
+		{"not an array", `allowed_tools = "Read(//x/**)"`, "assistant[example-a].allowed_tools"},
+		{"not a string", `allowed_tools = [1]`, "assistant[example-a].allowed_tools[0]"},
+		{"empty", `allowed_tools = [""]`, "assistant[example-a].allowed_tools[0]"},
+		{"a flag", `allowed_tools = ["--model"]`, "assistant[example-a].allowed_tools[0]"},
+		{"ending in backslash-semicolon", `allowed_tools = ["Read(//x/**)\\;"]`, "assistant[example-a].allowed_tools[0]"},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := load(t, pathsTOML+assistant("example-a", tc.toml))
+			if got := fields(cfg.Assistants[0].Problems); !slices.Contains(got, tc.field) {
+				t.Errorf("Problems = %v, want one for %s", cfg.Assistants[0].Problems, tc.field)
+			}
+		})
+	}
+}

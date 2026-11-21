@@ -6,7 +6,8 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-assistants/internal/config"
 )
 
-// ExitToolRule is the one permission a session is started with: nobody is
+// ExitToolRule is the permission every session is started with (an assistant's
+// own allowed_tools follow it): nobody is
 // attached to answer a prompt, and an assistant asks to stop by running this
 // exact command on its own. The rule only adds an allowance; every other
 // permission comes from the operator's own settings.
@@ -24,7 +25,7 @@ var blankedMarkers = []string{
 
 // LaunchArgv is an assistant's pane command:
 //
-//	<Shell> -l -i -c 'exec "$@"' <Shell> <Claude> --allowed-tools 'Bash(pg-assistants exit)'
+//	<Shell> -l -i -c 'exec "$@"' <Shell> <Claude> --allowed-tools 'Bash(pg-assistants exit)' [<AllowedTools>...]
 //	  --session-id <id> --name <Name> --model <Model> --effort <Effort> -- <Prompt>
 //
 // Claude runs under the operator's login shell, started as an interactive
@@ -39,13 +40,16 @@ func LaunchArgv(p config.Paths, a config.Assistant, sessionID string) []string {
 		p.Shell, "-l", "-i", "-c", `exec "$@"`, p.Shell,
 		p.Claude,
 		"--allowed-tools", ExitToolRule,
+	}
+	argv = append(argv, a.AllowedTools...)
+	return append(
+		argv,
 		"--session-id", sessionID,
 		"--name", a.Name,
 		"--model", a.Model,
 		"--effort", a.Effort,
 		"--", a.Prompt,
-	}
-	return argv
+	)
 }
 
 // LaunchEnv is an assistant's session environment, as K=V entries for tmux

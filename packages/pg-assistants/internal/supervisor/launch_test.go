@@ -156,3 +156,21 @@ func TestLaunchEnvExtrasSortedAndNeverOverride(t *testing.T) {
 		t.Errorf("fixed entries = %d, want 8: %q", len(fixed), fixed)
 	}
 }
+
+// An assistant's allowed_tools follow ExitToolRule as more --allowed-tools
+// values, still ahead of the next flag.
+func TestLaunchArgvAllowedTools(t *testing.T) {
+	a := exampleAssistant()
+	a.AllowedTools = []string{"Read(//example/a/**)", "Read(//example/b/**)"}
+	got := LaunchArgv(config.Paths{Shell: "/bin/zsh", Claude: "/c/claude"}, a, "u1")
+	want := []string{
+		"/bin/zsh", "-l", "-i", "-c", `exec "$@"`, "/bin/zsh",
+		"/c/claude", "--allowed-tools", "Bash(pg-assistants exit)",
+		"Read(//example/a/**)", "Read(//example/b/**)",
+		"--session-id", "u1", "--name", "Example A", "--model", "claude-sonnet-5-5",
+		"--effort", "medium", "--", "Resume your duties.",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("LaunchArgv =\n  %q\nwant\n  %q", got, want)
+	}
+}

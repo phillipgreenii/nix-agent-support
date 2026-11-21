@@ -221,6 +221,10 @@ let
     prompt = "Resume your duties per AGENTS.md.";
     tick = "30s";
     env.EXAMPLE = "value";
+    allowedReads = [
+      "/example/home/assistants/a/**"
+      "/example/work/CLAUDE.md"
+    ];
     context = {
       limit = 200000;
       window = 1000000;
@@ -600,6 +604,10 @@ let
         prompt = "Resume your duties per AGENTS.md.";
         tick = "30s";
         env.EXAMPLE = "value";
+        allowed_tools = [
+          "Read(//example/home/assistants/a/**)"
+          "Read(//example/work/CLAUDE.md)"
+        ];
         context = {
           limit = 200000;
           window = 1000000;

@@ -19415,6 +19415,8 @@
                       and (.assistant | length) == 2
                       and .assistant[0].id == "example-a" and .assistant[0].tick == "30s"
                       and .assistant[0].env.EXAMPLE == "value" and .assistant[0].context.window == 1000000
+                      and .assistant[0].allowed_tools == ["Read(//example/home/assistants/a/**)", "Read(//example/work/CLAUDE.md)"]
+                      and (.assistant[1] | has("allowed_tools") | not)
                       and .assistant[1].id == "example-b"
                       and (.assistant[1] | has("tick") or has("env") | not)
                       and (.assistant[1].context | has("window") | not)

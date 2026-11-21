@@ -229,6 +229,7 @@ cwd = "/abs/path"             # absolute; one assistant per directory
 prompt = "Resume your duties per AGENTS.md."   # first message; MUST NOT start with "-"
 tick = "30s"                  # optional override
 env = { EXAMPLE = "value" }   # optional extra session environment
+allowed_tools = ["Read(//abs/path/**)"]   # optional extra --allowed-tools rules, after Bash(pg-assistants exit)
 
 [assistant.context]
 limit = 200000                # tokens, > 0
@@ -303,6 +304,7 @@ is omitted. The module renders only the keys above (an unknown key fails the bui
 | (none)                                                               | `paths.state_dir`                            | `$XDG_STATE_HOME/pg-assistants`, expanded at evaluation                                       |
 | `claudeJson`                                                         | `paths.claude_json`                          | `$CLAUDE_CONFIG_DIR/.claude.json` when that session variable is set, else `~/.claude.json`    |
 | `assistants.<id>.{name,enabled,model,effort,cwd,prompt,tick,env}`    | `[[assistant]]` (`id` is the attribute name) | `name` the id, `enabled` true, `effort` `medium`, `tick` and `env` omitted                    |
+| `assistants.<id>.allowedReads` (absolute paths or globs)             | `allowed_tools` (each as `Read(//<path>)`)   | omitted                                                                                       |
 | `assistants.<id>.context.{limit,window,nudge,interrupt,kill}`        | `[assistant.context]`                        | `limit` required, `window` omitted, 0.80, 0.95, 1.00                                          |
 | `assistants.<id>.quota.{tokens,dollars,window,nudge,interrupt,kill}` | `[assistant.quota]`                          | omitted; `window` required with one of `tokens`/`dollars`, 0.80, 0.95, 1.00                   |
 | `pprof.enable`                                                       | (the agent's `PG_ASSISTANTS_PPROF_ADDR`)     | true: `<state dir>/pprof.sock`                                                                |

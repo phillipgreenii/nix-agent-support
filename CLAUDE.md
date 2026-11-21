@@ -342,6 +342,10 @@ it. Same stubbing rules as above (plus `home.activation` with `lib.hm.dag`); the
 `test-pg-assistants-hm-launchd` (`tests/pg-assistants-hm-launchd.nix`), which also rejects bad
 renderings with the real `config check`, runs the trust activation on a throwaway `.claude.json`
 and runs the entry under `env -i` through a fake login shell.
+`assistants.<id>.allowedReads` (absolute paths or globs) renders as `allowed_tools`
+(`Read(//<path>)` each), which the daemon appends to the session's `--allowed-tools`: nobody is
+attached to answer a Read prompt outside the operator's own allowed roots, so a declined prompt
+stalls the session.
 
 ### pg-repo-runner alerts and dashboard
 
