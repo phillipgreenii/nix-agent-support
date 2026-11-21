@@ -24,6 +24,16 @@ type rawItem struct {
 	// positive --retry-window (changes.go).
 	At        string `json:"at,omitempty"`
 	ExpiresAt string `json:"expiresAt,omitempty"`
+	// Ack is the settlement position of the item; set only by changes
+	// --deferred-ack.
+	Ack *ackRef `json:"ack,omitempty"`
+}
+
+// ackRef is an item's lane (the backend name) and token (a decimal
+// position the settle subcommand acknowledges through).
+type ackRef struct {
+	Lane  string `json:"lane"`
+	Token string `json:"token"`
 }
 
 // writeItems encodes items as one JSON array to stdout — every

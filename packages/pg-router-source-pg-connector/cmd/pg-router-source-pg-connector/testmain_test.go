@@ -141,6 +141,12 @@ func helperRun(behavior string, s helperSettings, c cmdrun.Call) reply {
 		// test can drive the extended wire of a backend that owns its
 		// changes and give each invocation (poll) its own canned answer.
 		return ok(s.get("GO_HELPER_BODY"))
+	case "changes_body_env_ack_fails":
+		// GO_HELPER_BODY answers changes; any changes-ack fails.
+		if len(childArgs) > 1 && childArgs[1] == "changes-ack" {
+			return reply{Code: 1, Stderr: "pg-connector: changes_ack refused\n"}
+		}
+		return ok(s.get("GO_HELPER_BODY"))
 	case "changes_ok_empty":
 		return ok(`{"sources":[],"changes":[]}`)
 	case "changes_degraded_with_reason":

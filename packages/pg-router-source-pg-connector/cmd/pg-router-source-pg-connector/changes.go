@@ -49,6 +49,9 @@ type changesSource struct {
 	Backend string `json:"backend"`
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
+	// NextSeq is the scanned position of a source that owns its changes
+	// (the position changes-ack acknowledges). Absent for any other row.
+	NextSeq json.RawMessage `json:"next_seq"`
 }
 
 // changesEntry is one row of the "changes" wire response's changes[]
@@ -146,6 +149,10 @@ type changeIdentity struct {
 	// head_sha nor version (see changeDigest), so a re-entry into the query is
 	// a new id; empty (omitted) for every other row.
 	EmittedAt string `json:"emitted_at,omitempty"`
+	// Seq is set instead of EmittedAt under --deferred-ack: the row's own
+	// seq, so a redelivered row is the same id and a re-entry (a new log
+	// row, a new seq) is a new id. Empty (omitted) otherwise.
+	Seq string `json:"seq,omitempty"`
 }
 
 // compactRaw returns raw as compact JSON, or nil when raw is empty or the
@@ -161,7 +168,7 @@ func compactRaw(raw json.RawMessage) json.RawMessage {
 	return buf.Bytes()
 }
 
-// changeDigest returns the first retryIDHexLen hex characters of the SHA-256
+// changeDigestSeq returns the first retryIDHexLen hex characters of the SHA-256
 // over the canonical JSON of c's changeIdentity.
 //
 // An "added" row of an entity that carries neither head_sha nor version (a
@@ -170,7 +177,10 @@ func compactRaw(raw json.RawMessage) json.RawMessage {
 // and the router would drop it as a duplicate (INV-EVT-3). Every other row,
 // "changed" included, is digested without it, so content-only changes of an
 // entity that stays in the query still coalesce.
-func changeDigest(c changesEntry, id entityIdentity, emittedAt string) (string, error) {
+//
+// changeDigestSeq is changeDigest with the --deferred-ack key: when seq is non-empty (--deferred-ack) it takes the place of emittedAt as
+// the last key.
+func changeDigestSeq(c changesEntry, id entityIdentity, emittedAt, seq string) (string, error) {
 	ident := changeIdentity{
 		Change:   c.Change,
 		Source:   c.Source,
@@ -179,7 +189,11 @@ func changeDigest(c changesEntry, id entityIdentity, emittedAt string) (string, 
 		Version:  compactRaw(id.Version),
 	}
 	if c.Change == "added" && ident.HeadSHA == nil && ident.Version == nil {
-		ident.EmittedAt = emittedAt
+		if seq != "" {
+			ident.Seq = seq
+		} else {
+			ident.EmittedAt = emittedAt
+		}
 	}
 	data, err := json.Marshal(ident)
 	if err != nil {
@@ -189,9 +203,16 @@ func changeDigest(c changesEntry, id entityIdentity, emittedAt string) (string, 
 	return hex.EncodeToString(sum[:])[:retryIDHexLen], nil
 }
 
+// changeDigest is changeDigestSeq without the seq key (a call without
+// --deferred-ack).
+func changeDigest(c changesEntry, id entityIdentity, emittedAt string) (string, error) {
+	return changeDigestSeq(c, id, emittedAt, "")
+}
+
 func newChangesCmd() *cobra.Command {
 	var consumer, beadsDir, backend string
 	var retryWindow time.Duration
+	var deferredAck bool
 	cmd := &cobra.Command{
 		Use:   "changes <type> [query]",
 		Short: "Report entities changed since a consumer's last call, as pg-router rawItems (query optional: an unscoped consumer)",
@@ -202,6 +223,8 @@ func newChangesCmd() *cobra.Command {
 	cmd.Flags().StringVar(&backend, "backend", "", "pin the fan-out to exactly this registered backend instance (passed through as pg-connector's own --backend); omitted means every registered backend of the type")
 	cmd.Flags().DurationVar(&retryWindow, "retry-window", 0,
 		"when > 0, give each item a per-change id <entity id>@<12 hex> plus at (emit time) and expiresAt (at + window), so pg-router retries a failed dispatch inside the window; 0 (default) keeps bare entity ids")
+	cmd.Flags().BoolVar(&deferredAck, "deferred-ack", false,
+		"opt in to deferred acknowledgement: pass --no-ack to pg-connector, print an ack {lane, token} on every item and use per-change ids; the cursor advances only through the settle subcommand (or a poll with no change). Requires --retry-window and a backend that owns its changes")
 	_ = cmd.MarkFlagRequired("consumer")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		entityType := args[0]
@@ -216,6 +239,10 @@ func newChangesCmd() *cobra.Command {
 			fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: --retry-window must not be negative")
 			return errUsage
 		}
+		if deferredAck && retryWindow <= 0 {
+			fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: --deferred-ack requires --retry-window > 0 (per-change item ids)")
+			return errUsage
+		}
 		changesArgs := []string{entityType, "changes"}
 		if query != "" {
 			changesArgs = append(changesArgs, "--query", query)
@@ -223,6 +250,9 @@ func newChangesCmd() *cobra.Command {
 		changesArgs = append(changesArgs, "--consumer", consumer)
 		if backend != "" {
 			changesArgs = append(changesArgs, "--backend", backend)
+		}
+		if deferredAck {
+			changesArgs = append(changesArgs, "--no-ack")
 		}
 		changesArgs = append(changesArgs, "--output", "json")
 		out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(), changesArgs, beadsDirEnv(beadsDir))
@@ -273,7 +303,26 @@ func newChangesCmd() *cobra.Command {
 		// reaches changeIdentity, so event ids and router dedup are unchanged.
 		emittedAt := now.Format(emittedAtLayout)
 
+		var lanes *laneSet
+		if deferredAck {
+			var err error
+			lanes, err = newLaneSet(cmd.ErrOrStderr(), wire.Sources)
+			if err != nil {
+				return err
+			}
+			if len(wire.Changes) == 0 {
+				// A quiet poll: nothing is unsettled behind the cursor, so
+				// the adapter acknowledges each succeeded source itself
+				// (INTF-WIRE-ACK-2). A failed acknowledgement exits
+				// non-zero without printing, and the next poll tries again.
+				if err := lanes.ackEmptyPoll(cmd.Context(), cmd.ErrOrStderr(), entityType, query, consumer); err != nil {
+					return err
+				}
+			}
+		}
+
 		items := make([]rawItem, 0, len(wire.Changes))
+		lastOfLane := make(map[string]int)
 		for _, c := range wire.Changes {
 			var id entityIdentity
 			if err := json.Unmarshal(c.Entity, &id); err != nil {
@@ -316,7 +365,11 @@ func newChangesCmd() *cobra.Command {
 				Metadata: metadata,
 			}
 			if retryWindow > 0 {
-				digest, err := changeDigest(c, id, emittedAt)
+				seqKey := ""
+				if deferredAck {
+					seqKey = changeSeqKey(c)
+				}
+				digest, err := changeDigestSeq(c, id, emittedAt, seqKey)
 				if err != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), err)
 					return errFailed
@@ -326,7 +379,24 @@ func newChangesCmd() *cobra.Command {
 				item.At = emitAt.Format(time.RFC3339)
 				item.ExpiresAt = emitAt.Add(retryWindow).Format(time.RFC3339)
 			}
+			if deferredAck {
+				if isAbsentRaw(c.Seq) {
+					fmt.Fprintf(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: change %q of backend %q carries no seq, which --deferred-ack needs\n", c.Change, c.Source)
+					return errFailed
+				}
+				if _, ok := lanes.nextSeq[c.Source]; !ok {
+					fmt.Fprintf(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: change of backend %q has no succeeded source row with a next_seq\n", c.Source)
+					return errFailed
+				}
+				item.Ack = &ackRef{Lane: c.Source, Token: string(compactRaw(c.Seq))}
+				lastOfLane[c.Source] = len(items)
+			}
 			items = append(items, item)
+		}
+		// The last item of each lane carries the source row's scanned
+		// next_seq: the position the umbrella acknowledges.
+		for lane, idx := range lastOfLane {
+			items[idx].Ack.Token = lanes.nextSeq[lane]
 		}
 		return writeItems(cmd.OutOrStdout(), items)
 	}
