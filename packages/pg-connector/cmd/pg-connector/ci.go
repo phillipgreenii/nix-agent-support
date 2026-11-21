@@ -43,6 +43,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/ci"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/spf13/cobra"
@@ -313,10 +314,18 @@ func newCiLogsCmd() *cobra.Command {
 		if err != nil {
 			return reportCiTargetedOutcome(cmd, nil, err, humanizeCiLogs)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "get_logs", map[string]string{"run_id": args[0], "repo": repo}, *backendFlag)
+		resp, dispatchErr := ci.Call(cmd.Context(), ciInvoker(reg, *backendFlag), ci.GetLogs, ci.GetLogsReq{RunID: args[0], Repo: repo})
 		return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanizeCiLogs)
 	}
 	return cmd
+}
+
+// ciInvoker adapts the umbrella's targeted dispatch for the ci capability
+// (optionally pinned to one backend) to the typed catalog's ci.Invoker.
+func ciInvoker(reg *Registry, pinned string) ci.Invoker {
+	return func(ctx context.Context, op string, args any) (*scriptout.Response, error) {
+		return DispatchTargeted(ctx, reg, "ci", op, args, pinned)
+	}
 }
 
 func newCiRerunFailedCmd() *cobra.Command {
@@ -334,7 +343,7 @@ func newCiRerunFailedCmd() *cobra.Command {
 		if err != nil {
 			return reportCiTargetedOutcome(cmd, nil, err, humanize)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "ci", "rerun_failed", map[string]string{"pr_id": args[0]}, *backendFlag)
+		resp, dispatchErr := ci.Call(cmd.Context(), ciInvoker(reg, *backendFlag), ci.RerunFailed, ci.RerunFailedReq{PRID: args[0]})
 		return reportCiTargetedOutcome(cmd, resp, dispatchErr, humanize)
 	}
 	return cmd

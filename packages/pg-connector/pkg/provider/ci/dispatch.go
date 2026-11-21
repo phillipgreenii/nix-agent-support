@@ -26,43 +26,15 @@ import (
 // sentinel translation of its own.
 func NewDispatchTable(p Provider) scriptout.DispatchTable {
 	table := scriptout.DispatchTable{
-		"list_runs": {
-			SchemaVersion: schema.CISchemaVersion,
-			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
-				var a struct {
-					PRID string `json:"pr_id"`
-				}
-				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode list_runs args: "+err.Error())
-				}
-				return p.ListRuns(ctx, a.PRID)
-			},
-		},
-		"get_logs": {
-			SchemaVersion: schema.CISchemaVersion,
-			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
-				var a struct {
-					RunID string `json:"run_id"`
-					Repo  string `json:"repo"`
-				}
-				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode get_logs args: "+err.Error())
-				}
-				return p.GetLogs(ctx, a.RunID, a.Repo)
-			},
-		},
-		"rerun_failed": {
-			SchemaVersion: schema.CISchemaVersion,
-			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
-				var a struct {
-					PRID string `json:"pr_id"`
-				}
-				if err := scriptout.Decode(args, &a); err != nil {
-					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode rerun_failed args: "+err.Error())
-				}
-				return nil, p.RerunFailed(ctx, a.PRID)
-			},
-		},
+		ListRuns.Name: Handle(ListRuns, func(ctx context.Context, r ListRunsReq) ([]schema.CIRun, error) {
+			return p.ListRuns(ctx, r.PRID)
+		}),
+		GetLogs.Name: Handle(GetLogs, func(ctx context.Context, r GetLogsReq) ([]byte, error) {
+			return p.GetLogs(ctx, r.RunID, r.Repo)
+		}),
+		RerunFailed.Name: Handle(RerunFailed, func(ctx context.Context, r RerunFailedReq) (*None, error) {
+			return nil, p.RerunFailed(ctx, r.PRID)
+		}),
 	}
 
 	// A provider not implementing AuthChecker is not treated as a

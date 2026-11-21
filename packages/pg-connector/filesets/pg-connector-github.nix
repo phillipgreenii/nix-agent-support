@@ -233,6 +233,7 @@
   "pkg/provider/activity/iface.go"
   "pkg/provider/ci/dispatch.go"
   "pkg/provider/ci/iface.go"
+  "pkg/provider/ci/ops.go"
   "pkg/provider/iface.go"
   "pkg/provider/pr/dispatch.go"
   "pkg/provider/pr/iface.go"
