@@ -89,7 +89,7 @@ func runOnce(t testing.TB, db *sql.DB, req Request) *Result {
 	runMu.Lock()
 	e := runCache[key]
 	if e == nil {
-		e = &runEntry{}
+		e = &runEntry{db: db}
 		runCache[key] = e
 	}
 	runMu.Unlock()
@@ -109,6 +109,11 @@ type runEntry struct {
 	once sync.Once
 	res  *Result
 	err  error
+	// db keeps the handle reachable for as long as its key is cached. The key
+	// embeds the handle's address, and a per-test database that was garbage
+	// collected could otherwise have its address reused by a later one, which
+	// would then be served the earlier database's cached rows.
+	db *sql.DB
 }
 
 func TestMain(m *testing.M) {
