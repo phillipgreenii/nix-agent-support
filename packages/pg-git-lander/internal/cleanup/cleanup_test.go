@@ -1,7 +1,10 @@
 package cleanup_test
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -641,5 +644,80 @@ func TestRenewalDuringCleanupDoesNotLoseTheLock(t *testing.T) {
 	cur = renew()
 	if r := g.c.Run(t.Context(), in); r.Stop != nil || r.BranchFate != outcome.BranchDeleted {
 		t.Fatalf("result %+v", r)
+	}
+}
+
+// TestPgGwmManagedSourceWorktreeIsKeptNotRefused runs the REAL pg-gwm against
+// the throwaway repository: pg-gwm locks a leased worktree, so a plain
+// `git worktree remove` of it is refused. The cleanup must instead detect the
+// lease, park the worktree on the placeholder branch, delete the landed
+// branch, report the worktree as kept (never remove-failed, no warning) and
+// leave the release to the lease owner, after which pg-gwm can release it.
+func TestPgGwmManagedSourceWorktreeIsKeptNotRefused(t *testing.T) {
+	if _, err := exec.LookPath("pg-gwm"); err != nil {
+		t.Skip("pg-gwm binary not on PATH: skipping the real-pg-gwm test")
+	}
+	f := newFx(t)
+	repo, err := filepath.EvalSymlinks(f.repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Replace the plain source worktree with a leased one on the work branch.
+	f.git(f.repo.Dir, "worktree", "remove", "--force", f.sw.Path)
+	f.git(f.repo.Dir, "config", "user.name", "cleanup test")
+	f.git(f.repo.Dir, "config", "user.email", "cleanup-test@example.invalid")
+	cfg := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cfg, "pg-gwm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	conf := fmt.Sprintf("[repos.%q]\nworktree-root = %q\nmin = 0\nmax = 2\n", repo, filepath.Join(t.TempDir(), "wt"))
+	if err := os.WriteFile(filepath.Join(cfg, "pg-gwm", "config.toml"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	gwm := func(args ...string) string {
+		t.Helper()
+		out, err := exec.CommandContext(t.Context(), "pg-gwm", append(args, "--repo", repo)...).Output()
+		if err != nil {
+			t.Fatalf("pg-gwm %v: %v", args, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	wt := gwm("lease", "--name", "drain/x", "--owner", "test", "--detach", f.target, "--print=path")
+	f.git(wt, "switch", workbranch.Name(opID))
+	f.sw = &worktrees.Chosen{
+		Path: wt, AdminName: filepath.Base(wt), Roles: []worktrees.Role{worktrees.Source, worktrees.Work},
+		Start: "feat", OnBranch: true,
+	}
+	if r := f.g.Run(t.Context(), f.repo.Dir, "worktree", "remove", wt); r.OK() {
+		t.Fatal("precondition: git must refuse to remove a pg-gwm leased worktree")
+	}
+
+	r := f.run(f.input())
+	if r.WorktreeFate.Fate != outcome.WorktreeKept || !strings.Contains(r.WorktreeFate.Reason, "drain/x") {
+		t.Fatalf("worktree fate = %+v, want kept naming the lease", r.WorktreeFate)
+	}
+	if len(r.Warnings) != 0 {
+		t.Fatalf("warnings = %+v, want none", r.Warnings)
+	}
+	if r.BranchFate != outcome.BranchDeleted || f.ref("feat") != "" {
+		t.Fatalf("branch fate %s, feat %q: want the landed branch deleted", r.BranchFate, f.ref("feat"))
+	}
+	if f.swBranch() != f.placeholder() && !strings.HasPrefix(f.swBranch(), cleanup.IdlePrefix) {
+		t.Fatalf("sw on %q, want a placeholder", f.swBranch())
+	}
+	f.wantWorkBranchGone()
+	// The lease owner can now release it cleanly.
+	gwm("release", "--name", "drain/x")
+}
+
+func TestUnmanagedWorktreeStillRemovedWhenPgGwmAnswersNo(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	f.c.Managed = func(context.Context, string, string) (string, bool) { return "", false }
+	r := f.run(f.input())
+	if r.WorktreeFate.Fate != outcome.WorktreeRemoved || f.swExists() {
+		t.Fatalf("fate = %+v, exists=%v", r.WorktreeFate, f.swExists())
 	}
 }

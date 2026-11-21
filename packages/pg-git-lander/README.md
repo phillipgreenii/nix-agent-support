@@ -52,6 +52,11 @@ from another path, pass `--source-worktree <path>` to confirm the removal, or pa
 worktree is never removed (`main-worktree-removal`). The SW is removed with plain `git worktree remove`, never forced;
 a failure is the warning `source-worktree-not-removed` and the outcome stays `landed`.
 
+A SW that a pg-gwm lease holds (`pg-gwm info --path` reports it managed; pg-gwm locks it, so removal could only be
+refused) is never removed: it is parked on the placeholder branch like `--keep-source-worktree`, its fate is `kept`
+with a reason naming the lease, there is no warning, and BRANCH is deleted as usual. The lease owner releases it
+afterwards (`pg-gwm release --name <lease>`, or `pb drain release`). Without pg-gwm the check reads false.
+
 ### The placeholder
 
 After `--keep-source-worktree` the worktree sits on `pg-git-lander/idle/<name>`. It is a parking branch based on

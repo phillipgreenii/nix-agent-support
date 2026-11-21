@@ -303,14 +303,14 @@ and the container's own priority, then:
    land nothing is lost by releasing (the branch is pushed, the worktree clean),
    and a lease held through the review would occupy one of the repo's few
    worktree slots; a later review-fix session runs `pb drain isolate` again and
-   re-leases the kept branch. The merged branch itself is not deleted by
-   release (pg-gwm keeps the released slot with it checked out), so a lingering
-   merged `drain/<id>` is expected, not a failure. `outcome=none` (no lease)
+   re-leases the kept branch. Release itself does not delete the branch
+   (the lander already deleted it after an ff-merge; a `pull-request` branch is
+   kept). `outcome=none` (no lease)
    means the legacy cleanup applies. A non-zero exit because the worktree holds
    unsaved work is not forced: save the work, or route to STUCK (whose RECLAIM
-   expires the lease). If the lander reports its own teardown refused because
-   the worktree is pg-gwm managed, that is expected: do not retry it or force
-   anything, and release with the command above.
+   expires the lease). The lander leaves a pg-gwm worktree parked on its
+   placeholder branch (worktree fate `kept`) and deletes the landed branch, so
+   release it with the command above.
 
    **CLEANUP in the legacy path** (`isolation=legacy`) is everything above this
    paragraph: the guarded `wtdone` retirement.

@@ -22,8 +22,10 @@ package drain
 // released worktree as a reusable slot that still has the branch checked out,
 // so `git branch -d` refuses it (observed against the real binary), and moving
 // the slot off the branch is pg-gwm's job, not pb's. A merged drain/<bead>
-// branch therefore lingers until its slot is reused or reaped; deleting such a
-// branch later is the integrate-branch FF-4 follow-up, not a pb step.
+// branch therefore lingers after a pull-request landing until its slot is
+// reused or reaped. After a ff-merge landing pg-git-lander parks a leased
+// worktree on its placeholder branch and deletes the landed branch before pb
+// releases the lease.
 
 import (
 	"context"

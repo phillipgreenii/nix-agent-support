@@ -80,6 +80,12 @@ type Result struct {
 // Cleaner performs the cleanup.
 type Cleaner struct {
 	Git *gitexec.Git
+	// Managed reports whether path is a worktree a pg-gwm lease holds, with
+	// the lease name; nil means GwmManaged over Git's Runner. pg-gwm locks
+	// such a worktree, so `git worktree remove` can only refuse: the cleanup
+	// parks it like --keep-source-worktree (fate kept, no warning) and leaves
+	// the release to the lease owner.
+	Managed func(ctx context.Context, repo, path string) (lease string, ok bool)
 }
 
 func branchRef(b string) string { return "refs/heads/" + b }
@@ -212,9 +218,20 @@ func (c *Cleaner) Run(ctx context.Context, in Input) Result {
 		}
 	}
 	if sw != nil {
+		lease, managed := "", false
+		if !in.KeepSourceWorktree && !gone(findPath(wts, sw.Path)) {
+			probe := c.Managed
+			if probe == nil {
+				probe = GwmManaged(c.Git.Runner)
+			}
+			lease, managed = probe(ctx, root, sw.Path)
+		}
 		switch {
 		case in.KeepSourceWorktree:
 			res.WorktreeFate = outcome.Fate{Fate: outcome.WorktreeKept}
+			swLeftOnBranch = in.KeepSourceBranch
+		case managed:
+			res.WorktreeFate = outcome.Fate{Fate: outcome.WorktreeKept, Reason: fmt.Sprintf(PgGwmKeptReason, lease)}
 			swLeftOnBranch = in.KeepSourceBranch
 		case gone(findPath(wts, sw.Path)):
 			res.WorktreeFate = outcome.Fate{Fate: outcome.WorktreeRemoved}
