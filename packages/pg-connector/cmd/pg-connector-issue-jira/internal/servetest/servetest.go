@@ -6,6 +6,11 @@
 // shim's call log, a socket caller, a runner of the client binary and readers
 // for the store and the logs.
 //
+// The process lifecycle, the socket client, the binary build and the readers are
+// the connector daemon kernel's shared harness (pkg/connectord/daemon/daemontest);
+// this package adds what is this daemon's own: the fixtures, the rendered config
+// and the fake pjira.
+//
 // The daemon is always started the same way: StartDaemon, work, StopDaemon
 // (SIGTERM, then the exit code). Everything the daemon needs comes from the
 // rendered config, as under its supervisor: the absolute pjira path and the one
@@ -16,29 +21,18 @@
 package servetest
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
-	"fmt"
-	gobuild "go/build"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 	"testing"
 	"time"
 
-	"github.com/gofrs/flock"
-	_ "modernc.org/sqlite" // read-only store inspection
-
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/daemon/daemontest"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -79,8 +73,11 @@ type Options struct {
 }
 
 // Daemon is one daemon under test. Its state directory, shim and config outlive
-// a stop, so Start after StopDaemon is a restart.
+// a stop, so Start after StopDaemon is a restart. The process handle (Stderr,
+// Exited, Wait, Term, Stop) is the kernel harness's daemontest.Proc.
 type Daemon struct {
+	daemontest.Proc
+
 	// StateDir is the daemon's state directory; Socket its socket path;
 	// ConfigPath the rendered config file.
 	StateDir   string
@@ -92,12 +89,6 @@ type Daemon struct {
 	t    *testing.T
 	opts Options
 	bin  string
-
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	done   chan struct{}
-	exit   int
-	stderr *safeBuffer
 }
 
 // Binary returns the path of the binary built for hooks (and clientBudget),
@@ -117,7 +108,7 @@ func Binary(t testing.TB, hooks, clientBudget string) string {
 	if clientBudget != "" {
 		flags = append(flags, "-X main.clientBudgetOverride="+clientBudget)
 	}
-	return build(t, strings.Join(flags, " "))
+	return builder.Build(t, strings.Join(flags, " "))
 }
 
 // NewDaemon prepares a daemon (state directory, shim, config) without starting
@@ -232,191 +223,40 @@ func (d *Daemon) StartNoWait(t *testing.T) {
 
 func (d *Daemon) start(t *testing.T, wait bool) {
 	t.Helper()
-	d.mu.Lock()
-	if d.cmd != nil {
-		select {
-		case <-d.done:
-		default:
-			d.mu.Unlock()
-			t.Fatal("servetest: the daemon is already running")
-		}
-	}
 	cmd := exec.CommandContext(context.Background(), d.bin, "--config", d.ConfigPath, "serve")
 	cmd.Dir = "/"
 	cmd.Env = []string{}
 	for k, v := range d.opts.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
-	buf := &safeBuffer{}
-	cmd.Stdout, cmd.Stderr = buf, buf
-	if err := cmd.Start(); err != nil {
-		d.mu.Unlock()
-		t.Fatalf("servetest: start the daemon: %v", err)
-	}
-	d.cmd, d.stderr, d.done, d.exit = cmd, buf, make(chan struct{}), -1
-	done := d.done
-	go func() {
-		err := cmd.Wait()
-		code := 0
-		var ee *exec.ExitError
-		switch {
-		case err == nil:
-		case errors.As(err, &ee):
-			code = ee.ExitCode()
-		default:
-			code = -2
-		}
-		d.mu.Lock()
-		d.exit = code
-		d.mu.Unlock()
-		close(done)
-	}()
-	d.mu.Unlock()
-	t.Cleanup(func() { d.kill() })
+	d.Proc.Start(t, cmd)
 	if wait {
 		d.WaitReady(t)
 	}
 }
 
-// kill ends a still-running daemon without ceremony (test cleanup).
-func (d *Daemon) kill() {
-	d.mu.Lock()
-	cmd, done := d.cmd, d.done
-	d.mu.Unlock()
-	if cmd == nil {
-		return
-	}
-	select {
-	case <-done:
-	default:
-		_ = cmd.Process.Kill()
-		<-done
-	}
-}
-
-// Stderr is what the daemon wrote to stdout and stderr so far.
-func (d *Daemon) Stderr() string {
-	d.mu.Lock()
-	b := d.stderr
-	d.mu.Unlock()
-	if b == nil {
-		return ""
-	}
-	return b.String()
-}
-
-// Exited reports whether the process ended, and its exit code.
-func (d *Daemon) Exited() (bool, int) {
-	d.mu.Lock()
-	done := d.done
-	d.mu.Unlock()
-	if done == nil {
-		return false, 0
-	}
-	select {
-	case <-done:
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		return true, d.exit
-	default:
-		return false, 0
-	}
-}
-
-// Wait waits for the process to end (up to timeout) and returns its exit code.
-func (d *Daemon) Wait(t *testing.T, timeout time.Duration) int {
-	t.Helper()
-	d.mu.Lock()
-	done := d.done
-	d.mu.Unlock()
-	if done == nil {
-		t.Fatal("servetest: the daemon was never started")
-	}
-	select {
-	case <-done:
-	case <-time.After(timeout):
-		t.Fatalf("servetest: the daemon did not exit within %s; output: %s", timeout, d.Stderr())
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.exit
-}
-
 // StopDaemon sends SIGTERM, waits for the drain and returns the exit code.
 func StopDaemon(t *testing.T, d *Daemon) int {
 	t.Helper()
-	d.Term(t)
-	return d.Wait(t, 30*time.Second)
-}
-
-// Term sends SIGTERM and returns at once; Wait collects the exit code. A test
-// uses it to stop the daemon while a request is still in flight.
-func (d *Daemon) Term(t *testing.T) {
-	t.Helper()
-	d.mu.Lock()
-	cmd, done := d.cmd, d.done
-	d.mu.Unlock()
-	if cmd == nil {
-		t.Fatal("servetest: the daemon was never started")
-	}
-	select {
-	case <-done:
-	default:
-		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-			t.Fatalf("servetest: SIGTERM: %v", err)
-		}
-	}
+	return d.Stop(t)
 }
 
 // Kill ends the daemon with SIGKILL (a crash) and returns once it is gone: the
-// process is reaped and its single-instance lock can be taken again. The second
-// matters on a loaded host: a pjira child forked just before the kill holds a
-// copy of the lock's descriptor until its exec closes it.
+// process is reaped and its single-instance lock can be taken again (see
+// daemontest.Proc.KillAndAwaitLock for why the second matters).
 func (d *Daemon) Kill(t *testing.T) {
 	t.Helper()
-	d.kill()
-	if !awaitLockFree(filepath.Join(d.StateDir, config.LockFileName), 30*time.Second) {
-		t.Fatalf("servetest: the killed daemon's lock is still held after 30s")
-	}
-}
-
-// awaitLockFree waits until the flock at path can be taken (or does not exist)
-// and reports whether that happened within max. It releases the lock again.
-func awaitLockFree(path string, max time.Duration) bool {
-	lk := flock.New(path)
-	deadline := time.Now().Add(max)
-	for {
-		locked, err := lk.TryLock()
-		if err == nil && locked {
-			_ = lk.Unlock()
-			return true
-		}
-		if err != nil && os.IsNotExist(err) {
-			return true
-		}
-		if !time.Now().Before(deadline) {
-			return false
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	d.KillAndAwaitLock(t, filepath.Join(d.StateDir, config.LockFileName))
 }
 
 // WaitReady waits until the daemon answers a status request (its gate is open;
 // status makes no origin call), failing if the process ends first.
 func (d *Daemon) WaitReady(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if ended, code := d.Exited(); ended {
-			t.Fatalf("servetest: the daemon exited (%d) before it was ready; output: %s", code, d.Stderr())
-		}
+	d.WaitUntilReady(t, func() bool {
 		resp, err := d.Call(scriptout.Request{Op: "status"}, 5*time.Second)
-		if err == nil && resp.Error == nil {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("servetest: the daemon never became ready; output: %s", d.Stderr())
+		return err == nil && resp.Error == nil
+	})
 }
 
 // Call sends one request with the client's deadline and returns the daemon's
@@ -427,25 +267,7 @@ func (d *Daemon) Call(req scriptout.Request, deadline time.Duration) (scriptout.
 
 // CallProtocol is Call with the socket protocol the frame claims.
 func (d *Daemon) CallProtocol(req scriptout.Request, deadline time.Duration, protocol int) (scriptout.Response, error) {
-	raw, err := json.Marshal(req)
-	if err != nil {
-		return scriptout.Response{}, err
-	}
-	reply, err := d.Raw(socket.RequestFrame{
-		SocketProtocol: protocol,
-		ClientBuild:    "servetest",
-		Instance:       RouterInstance,
-		DeadlineMS:     deadline.Milliseconds(),
-		Request:        raw,
-	})
-	if err != nil {
-		return scriptout.Response{}, err
-	}
-	var resp scriptout.Response
-	if err := json.Unmarshal(reply.Response, &resp); err != nil {
-		return scriptout.Response{}, fmt.Errorf("decode the response %q: %w", reply.Response, err)
-	}
-	return resp, nil
+	return daemontest.Call(d.Socket, RouterInstance, protocol, req, deadline)
 }
 
 // MustCall is Call that fails the test on a transport error.
@@ -470,35 +292,11 @@ func Op(op, args string) scriptout.Request {
 
 // Raw sends one frame as given and returns the reply frame.
 func (d *Daemon) Raw(frame socket.RequestFrame) (socket.ReplyFrame, error) {
-	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(context.Background(), "unix", d.Socket)
-	if err != nil {
-		return socket.ReplyFrame{}, err
-	}
-	defer func() { _ = conn.Close() }()
-	if err := socket.WriteFrame(conn, frame); err != nil {
-		return socket.ReplyFrame{}, err
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	raw, err := socket.ReadFrame(bufio.NewReader(conn), 64<<20)
-	if err != nil {
-		return socket.ReplyFrame{}, err
-	}
-	var reply socket.ReplyFrame
-	if err := json.Unmarshal(raw, &reply); err != nil {
-		return socket.ReplyFrame{}, fmt.Errorf("decode the reply frame %q: %w", raw, err)
-	}
-	return reply, nil
+	return daemontest.Raw(d.Socket, frame)
 }
 
 // ClientResult is one run of the client binary.
-type ClientResult struct {
-	// Stdout is the raw answer, Stderr what the process wrote to stderr and Exit
-	// its exit code. Resp is Stdout decoded (zero when it is not a response).
-	Stdout string
-	Stderr string
-	Exit   int
-	Resp   scriptout.Response
-}
+type ClientResult = daemontest.ClientResult
 
 // ClientEnv is the environment the client binary is run under: the caller's own
 // (a PATH and the fixtures a WRITE needs to reach the shim) and nothing else.
@@ -535,24 +333,7 @@ func (d *Daemon) Client(t testing.TB, request string) ClientResult {
 // stdin as given, and decodes its stdout as a response when it is one.
 func RunBinary(t testing.TB, bin, stdin string, env []string, args ...string) ClientResult {
 	t.Helper()
-	cmd := exec.CommandContext(context.Background(), bin, args...)
-	cmd.Dir = "/"
-	cmd.Env = append([]string{}, env...)
-	cmd.Stdin = strings.NewReader(stdin)
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
-	res := ClientResult{Stdout: out.String(), Stderr: errb.String()}
-	var ee *exec.ExitError
-	switch {
-	case err == nil:
-	case errors.As(err, &ee):
-		res.Exit = ee.ExitCode()
-	default:
-		t.Fatalf("servetest: run %s: %v", bin, err)
-	}
-	_ = json.Unmarshal([]byte(strings.TrimSpace(res.Stdout)), &res.Resp)
-	return res
+	return daemontest.RunBinary(t, bin, stdin, env, args...)
 }
 
 // Bin is the daemon binary this daemon was built with (the client binary too).
@@ -562,25 +343,14 @@ func (d *Daemon) Bin() string { return d.bin }
 // (the store is a WAL database); the handle is closed at the end of the test.
 func (d *Daemon) OpenStore(t testing.TB) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+d.StorePath()+"?mode=ro&_pragma=busy_timeout(5000)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return daemontest.OpenStoreRO(t, d.StorePath())
 }
 
 // WritableStore opens the store file read-write with plain SQL, for a test that
 // edits it while the daemon is stopped.
 func (d *Daemon) WritableStore(t testing.TB) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+d.StorePath()+"?_pragma=busy_timeout(5000)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return daemontest.OpenStoreRW(t, d.StorePath())
 }
 
 // StorePath is the store file's path.
@@ -589,19 +359,19 @@ func (d *Daemon) StorePath() string { return filepath.Join(d.StateDir, config.St
 // EventLog returns the rows of events.jsonl.
 func (d *Daemon) EventLog(t testing.TB) []map[string]any {
 	t.Helper()
-	return readJSONL(t, filepath.Join(d.StateDir, config.EventLogFileName))
+	return daemontest.ReadJSONL(t, filepath.Join(d.StateDir, config.EventLogFileName))
 }
 
 // DaemonLog returns the lines of daemon.log.jsonl.
 func (d *Daemon) DaemonLog(t testing.TB) []map[string]any {
 	t.Helper()
-	return readJSONL(t, filepath.Join(d.StateDir, config.DaemonLogFileName))
+	return daemontest.ReadJSONL(t, filepath.Join(d.StateDir, config.DaemonLogFileName))
 }
 
 // ClientLog returns the lines of client.log.jsonl.
 func (d *Daemon) ClientLog(t testing.TB) []map[string]any {
 	t.Helper()
-	return readJSONL(t, filepath.Join(d.StateDir, config.ClientLogFileName))
+	return daemontest.ReadJSONL(t, filepath.Join(d.StateDir, config.ClientLogFileName))
 }
 
 // HasChange reports whether the daemon log has a line for the named change.
@@ -614,135 +384,27 @@ func HasChange(lines []map[string]any, change string) bool {
 	return false
 }
 
-func readJSONL(t testing.TB, path string) []map[string]any {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rows []map[string]any
-	for _, line := range bytes.Split(raw, []byte("\n")) {
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-		var row map[string]any
-		if err := json.Unmarshal(line, &row); err != nil {
-			t.Fatalf("%s: line %q is not JSON: %v", path, line, err)
-		}
-		rows = append(rows, row)
-	}
-	return rows
-}
-
 // ---- building the binary ------------------------------------------------------
-
-var (
-	buildMu   sync.Mutex
-	buildRoot string
-	builds    = map[string]string{}
-)
 
 // binaryImportPath is the import path of the daemon's main package.
 const binaryImportPath = "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira"
 
+var builder = &daemontest.Builder{ImportPath: binaryImportPath, BinName: "pg-connector-issue-jira", DirPrefix: "pcjsrv"}
+
 // RemoveBuilds deletes the built binaries; a package's TestMain calls it after
 // the run.
-func RemoveBuilds() {
-	buildMu.Lock()
-	defer buildMu.Unlock()
-	if buildRoot != "" {
-		_ = os.RemoveAll(buildRoot)
-		buildRoot = ""
-		builds = map[string]string{}
-	}
-}
-
-func build(t testing.TB, ldflags string) string {
-	t.Helper()
-	buildMu.Lock()
-	defer buildMu.Unlock()
-	if bin, ok := builds[ldflags]; ok {
-		return bin
-	}
-	goBin, err := exec.LookPath("go")
-	if err != nil {
-		cand := filepath.Join(gobuild.Default.GOROOT, "bin", "go")
-		if _, serr := os.Stat(cand); serr != nil {
-			t.Skipf("servetest: no go toolchain to build the real binary: %v", err)
-		}
-		goBin = cand
-	}
-	if buildRoot == "" {
-		root, err := os.MkdirTemp("", "pcjsrv")
-		if err != nil {
-			t.Fatal(err)
-		}
-		buildRoot = root
-	}
-	bin := filepath.Join(buildRoot, strconv.Itoa(len(builds)), "pg-connector-issue-jira")
-	args := []string{"build", "-o", bin}
-	if ldflags != "" {
-		args = append(args, "-ldflags", ldflags)
-	}
-	// Build by import path from the inherited working directory (the directory
-	// of the package under test, inside this module), never from a directory
-	// derived from this file's compiled-in path, which -trimpath rewrites.
-	args = append(args, binaryImportPath)
-	cmd := exec.CommandContext(context.Background(), goBin, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("servetest: go build: %v\n%s", err, out)
-	}
-	builds[ldflags] = bin
-	return bin
-}
+func RemoveBuilds() { builder.Remove() }
 
 // shortDir returns a fresh directory with a short absolute path (a unix socket
 // path is capped near 104 bytes, and t.TempDir can exceed that).
 func shortDir(t testing.TB) string {
 	t.Helper()
-	d, err := os.MkdirTemp("/tmp", "pcj")
-	if err != nil {
-		d, err = os.MkdirTemp("", "pcj")
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(d) })
-	return d
+	return daemontest.ShortDir(t, "pcj")
 }
 
 // ShortDir is shortDir for a test that needs a scratch directory of its own.
 func ShortDir(t testing.TB) string { return shortDir(t) }
 
-// safeBuffer is a bytes.Buffer safe for a test to read while the child writes.
-type safeBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *safeBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *safeBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
-
-// DaemonPath is the PATH the shim's own script (and a client's pjira) gets: the
-// minimal system dirs followed by the test process's own PATH. The tail matters
-// in the nix build sandbox, where /usr/bin and /bin hold nothing but env and sh,
-// while the coreutils the script needs (tr, cat, sleep, ...) live only on the
-// build's PATH.
-func DaemonPath() string {
-	if p := os.Getenv("PATH"); p != "" {
-		return "/usr/bin:/bin:" + p
-	}
-	return "/usr/bin:/bin"
-}
+// DaemonPath is the PATH the shim's own script (and a client's pjira) gets: see
+// daemontest.DaemonPath.
+func DaemonPath() string { return daemontest.DaemonPath() }
