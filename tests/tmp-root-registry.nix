@@ -254,6 +254,11 @@ in
         ];
       }).xdg.configFile."pg-disk-reclaimer/registry.json".source;
     regBuild = buildOnly.xdg.configFile."pg-disk-reclaimer/registry.json".source;
+    # the default grower items (growerEntries on), for the treefmt-eval-cache case
+    regGrowers =
+      (evalWith {
+        phillipgreenii.programs.pg-disk-reclaimer.growerEntries.enable = lib.mkForce true;
+      }).xdg.configFile."pg-disk-reclaimer/registry.json".source;
     regClaude = claudeOnly.xdg.configFile."pg-disk-reclaimer/registry.json".source;
   };
 }

@@ -193,6 +193,33 @@ let
         }
       ];
     }
+    {
+      id = "treefmt-eval-cache";
+      description = "~/.cache/treefmt/eval-cache: treefmt evaluation-cache databases not modified for 30 days";
+      path = "~/.cache/treefmt/eval-cache";
+      displayCommand = "du -sh ~/.cache/treefmt/eval-cache";
+      displayTimeoutSeconds = 300;
+      sizeKind = "upper_bound";
+      sizeMethod = "du-whole-root";
+      # treefmt 2.6.0 `--help` documents --clear-cache as "reset the evaluation
+      # cache" and --no-cache; no size cap was found (read from the help text,
+      # not the source). treefmt keeps one <64-hex>.db per tree root, so every
+      # worktree adds a file and nothing prunes them.
+      sizeBasis = "du -sk over the whole eval-cache directory, including .db files modified within 30 days that the variant keeps, so a reclaim frees at most this much.";
+      variants = [
+        {
+          # Level 2 (caches): a removed database is re-created by the next treefmt
+          # run in that tree, which is slower once and has no correctness effect.
+          # Modification time, not access time, because access time is unreliable
+          # on this setup (on the audit date 1431 files were over 30 days by atime
+          # but 1467 by mtime).
+          aggressiveness = 2;
+          variantDescription = "delete treefmt eval-cache .db files not modified for 30 days";
+          dryRunCommand = "find ~/.cache/treefmt/eval-cache -type f -name '*.db' -mtime +30 2>/dev/null | wc -l";
+          removeCommand = "find ~/.cache/treefmt/eval-cache -type f -name '*.db' -mtime +30 -delete 2>/dev/null; true";
+        }
+      ];
+    }
   ];
 
   # The CLI's schema validator rejects a present-but-null displayTimeoutSeconds,

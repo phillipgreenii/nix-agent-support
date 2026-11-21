@@ -14209,6 +14209,7 @@
                       REG_BOTH = r.artifacts.regBoth;
                       REG_BUILD = r.artifacts.regBuild;
                       REG_CLAUDE = r.artifacts.regClaude;
+                      REG_GROWERS = r.artifacts.regGrowers;
                     }
                     // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
                       # A Linux sandbox has a working ps (procps): a sweep case that

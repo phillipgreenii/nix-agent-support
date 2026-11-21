@@ -97,6 +97,44 @@ populate() {
   [ "$(jq -r '[.[].id] | join(",")' "$REG_CLAUDE")" = "claude-code-tmp" ]
 }
 
+# treefmt-eval-cache: the registry's own dry-run and remove commands, run with HOME
+# pointed at a throwaway directory (the registry spells the path ~/.cache/treefmt/...).
+@test "treefmt-eval-cache: listed at level 2; dry run counts the 2 old .db files; remove keeps the 5-day .db and the non-.db file" {
+  if [ -z "${REG_GROWERS:-}" ]; then
+    skip "REG_GROWERS not provided; run checks.<system>.test-tmp-root-registry"
+  fi
+  # validate also checks that each item's commands exist on PATH, and the other grower
+  # items name tools (pg-ccaudit, ...) the sandbox lacks, so validate only this item
+  local only="$BATS_TEST_TMPDIR/treefmt-only.json"
+  jq '[.[] | select(.id == "treefmt-eval-cache")]' "$REG_GROWERS" >"$only"
+  [ "$(jq 'length' "$only")" = "1" ]
+  run env HOME="$VOL" pg-disk-reclaimer validate "$only"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[] | select(.id == "treefmt-eval-cache") | [.variants[].aggressiveness] | join(",")' "$REG_GROWERS")" = "2" ]
+  local dry rm_cmd d
+  dry="$(jq -r '.[] | select(.id == "treefmt-eval-cache") | .variants[0].dryRunCommand' "$REG_GROWERS")"
+  rm_cmd="$(jq -r '.[] | select(.id == "treefmt-eval-cache") | .variants[0].removeCommand' "$REG_GROWERS")"
+  d="$VOL/.cache/treefmt/eval-cache"
+  mkdir -p "$d"
+  : >"$d/new5.db"
+  : >"$d/old31.db"
+  : >"$d/old60.db"
+  : >"$d/notes.txt"
+  age "$d/new5.db" $((5 * 24 * 60))
+  age "$d/old31.db" $((31 * 24 * 60))
+  age "$d/old60.db" $((60 * 24 * 60))
+  age "$d/notes.txt" $((60 * 24 * 60))
+  run env HOME="$VOL" bash -c "$dry"
+  [ "$status" -eq 0 ]
+  [ "$(tr -d '[:space:]' <<<"$output")" = "2" ]
+  run env HOME="$VOL" bash -c "$rm_cmd"
+  [ "$status" -eq 0 ]
+  [ ! -e "$d/old31.db" ]
+  [ ! -e "$d/old60.db" ]
+  [ -f "$d/new5.db" ]
+  [ -f "$d/notes.txt" ]
+}
+
 @test "level selection: --aggressiveness 1 picks the level-1 variants of both items" {
   need_ps
   use "$REG_BOTH"

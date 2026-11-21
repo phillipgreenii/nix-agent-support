@@ -237,6 +237,7 @@ let
           "claude-projects"
           "pg2-scratch-caches"
           "library-caches"
+          "treefmt-eval-cache"
           "pg-ccaudit-index"
           "ceta-asks-db"
         ]
@@ -260,6 +261,7 @@ let
         levels defaultC "claude-projects" == [ 4 ]
         && levels defaultC "pg2-scratch-caches" == [ 2 ]
         && levels defaultC "library-caches" == [ 2 ]
+        && levels defaultC "treefmt-eval-cache" == [ 2 ]
         && levels recorderOnC "pg-claude-code-recorder-store" == [ 3 ]
         && levels defaultC "pg-ccaudit-index" == [ 4 ]
         && levels defaultC "ceta-asks-db" == [ 4 ];
@@ -304,6 +306,7 @@ let
         "claude-projects"
         "pg2-scratch-caches"
         "library-caches"
+        "treefmt-eval-cache"
       ];
     }
   ];
