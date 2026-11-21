@@ -15,7 +15,7 @@ var metricToken = regexp.MustCompile(`pg_gwm_[a-z_]+`)
 func exportedNames() map[string]bool {
 	free, floor, preserved, age := uint64(1), uint64(1), 1, 1.0
 	out := Render(Snapshot{
-		ReaperLastSuccessAge: &age, ConfigValid: true,
+		ReaperLastSuccessAge: &age, ConfigValid: true, Unmanaged: &preserved,
 		Repos: []Repo{{
 			Label: "r-abcdef", HaveState: true, FreeBytes: &free, FloorBytes: &floor, Preserved: &preserved,
 			LastReapAge: &age, Worktrees: map[string]int{}, Counters: &state.RepoCounters{},

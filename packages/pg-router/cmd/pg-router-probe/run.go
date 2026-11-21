@@ -172,7 +172,7 @@ import (
 // crash-share, removal-stuck, settle-tick-slow, field-type-mismatch, cpu-high, wal-large, loop-stalled, request-slow, schema-rebuild-required and blocked-no-space. Registered the same way, with no escalation label.
 // TestRegisteredRuleUIDsMatchRecorderRuleFile compares the file's uids with this list.
 //
-// pg-gwm-exporter-down, pg-gwm-broken-persisting and pg-gwm-max-reached-rate are the rules of
+// pg-gwm-exporter-down, pg-gwm-broken-persisting, pg-gwm-max-reached-rate and pg-gwm-unmanaged-worktrees are the rules of
 // pg-gwm's alert file (packages/pg-gwm/grafana/alerting/alerts.yaml) and pg-gwm-reaper-stale
 // the one rule of alerts-reaper.yaml beside it. Registered the same way, with no escalation
 // label. TestRegisteredRuleUIDsMatchGwmRuleFile compares the two files' uids with this list.
@@ -245,6 +245,7 @@ var registeredRuleUIDs = []string{
 	"pg-gwm-exporter-down",
 	"pg-gwm-broken-persisting",
 	"pg-gwm-max-reached-rate",
+	"pg-gwm-unmanaged-worktrees",
 	"pg-gwm-reaper-stale",
 	"pa-monitor-scan-stale",
 }

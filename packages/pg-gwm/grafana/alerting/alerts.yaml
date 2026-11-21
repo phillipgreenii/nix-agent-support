@@ -152,3 +152,42 @@ groups:
                 - evaluator:
                     type: gt
                     params: [5]
+      - uid: pg-gwm-unmanaged-worktrees
+        title: pg-gwm unmanaged worktrees exist
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The weekly audit found worktrees that are neither pg-gwm-managed nor excepted"
+          description: "pg_gwm_unmanaged_worktrees is above 0: the last weekly wtaudit unmanaged run found worktrees of a configured repository that are not locked by pg-gwm and not covered by a standing exception. Run: wtaudit unmanaged --repo <repo> to list them, then move each into pg-gwm or add an entry to the repository's exceptions in the pg-gwm config (pg-gwm list --exceptions shows the current list). The audit log is under ~/.local/state/pg-gwm-unmanaged-audit/."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_gwm_unmanaged_worktrees)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

@@ -26,6 +26,10 @@ func RegistryPath() string { return filepath.Join(UserDir(), "registry.json") }
 func CountersPath() string { return filepath.Join(UserDir(), "counters.json") }
 func ReaperPath() string   { return filepath.Join(UserDir(), "reaper.json") }
 
+// UnmanagedPath is the count file the weekly unmanaged-worktree audit (wtaudit
+// unmanaged --metrics-file) writes: {"count": N, "checked_at": RFC 3339}.
+func UnmanagedPath() string { return filepath.Join(UserDir(), "unmanaged-worktrees.json") }
+
 const userLockWait = 5 * time.Second
 
 // RegistryEntry is one known repository.

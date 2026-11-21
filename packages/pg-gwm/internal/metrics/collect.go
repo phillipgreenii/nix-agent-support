@@ -2,6 +2,8 @@ package metrics
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,7 +30,9 @@ type Collector struct {
 	RegistryPath string
 	CountersPath string
 	ReaperPath   string
-	Git          gitrun.Git
+	// UnmanagedPath is the audit count file; empty or missing omits the gauge.
+	UnmanagedPath string
+	Git           gitrun.Git
 	// GitBudget bounds all git work of one Collect; zero means only the
 	// per-call gitTimeout. When it ends, git-derived values of the remaining
 	// repositories are omitted and the file-derived ones are still served.
@@ -91,6 +95,7 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 	}
 	sort.Strings(order)
 
+	snap.Unmanaged = readUnmanaged(c.UnmanagedPath)
 	rec, rerr := state.ReadReaperRecord(c.ReaperPath)
 	if rerr == nil && rec.LastSuccess != nil {
 		a := now.Sub(*rec.LastSuccess).Seconds()
@@ -156,6 +161,25 @@ func (c Collector) Collect(ctx context.Context) Snapshot {
 		snap.Repos = append(snap.Repos, r)
 	}
 	return snap
+}
+
+// readUnmanaged reads the audit count file; nil when it is absent, unreadable
+// or holds no non-negative count.
+func readUnmanaged(path string) *int {
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var rec struct {
+		Count *int `json:"count"`
+	}
+	if json.Unmarshal(b, &rec) != nil || rec.Count == nil || *rec.Count < 0 {
+		return nil
+	}
+	return rec.Count
 }
 
 // abandoned holds the repositories whose preserved-branch git call outlived a

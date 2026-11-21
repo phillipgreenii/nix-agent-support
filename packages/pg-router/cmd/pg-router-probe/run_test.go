@@ -395,6 +395,7 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-gwm-exporter-down",
 		"pg-gwm-broken-persisting",
 		"pg-gwm-max-reached-rate",
+		"pg-gwm-unmanaged-worktrees",
 		"pg-gwm-reaper-stale",
 		"pa-monitor-scan-stale",
 	}
@@ -1101,8 +1102,8 @@ func TestRegisteredRuleUIDsMatchGwmRuleFile(t *testing.T) {
 			registered = append(registered, uid)
 		}
 	}
-	if len(registered) != 4 {
-		t.Fatalf("registered pg-gwm uids = %d, want 4: %v", len(registered), registered)
+	if len(registered) != 5 {
+		t.Fatalf("registered pg-gwm uids = %d, want 5: %v", len(registered), registered)
 	}
 	for _, uid := range registered {
 		if len(uid) > 40 {

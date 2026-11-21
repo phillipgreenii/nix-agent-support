@@ -29,13 +29,14 @@ func gitBudget(r *http.Request) time.Duration {
 // time, so a scrape always sees the current files.
 func (a *app) collector(budget time.Duration) metrics.Collector {
 	return metrics.Collector{
-		GitBudget:    budget,
-		Version:      Version,
-		ConfigPath:   config.DefaultPath(),
-		RegistryPath: state.RegistryPath(),
-		CountersPath: state.CountersPath(),
-		ReaperPath:   state.ReaperPath(),
-		Git:          a.git,
+		GitBudget:     budget,
+		Version:       Version,
+		ConfigPath:    config.DefaultPath(),
+		RegistryPath:  state.RegistryPath(),
+		CountersPath:  state.CountersPath(),
+		ReaperPath:    state.ReaperPath(),
+		UnmanagedPath: state.UnmanagedPath(),
+		Git:           a.git,
 	}
 }
 

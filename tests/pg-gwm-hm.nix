@@ -155,8 +155,34 @@ let
       ok = has "reap --all-repos --deadline 10m --format=json" (agent defaultC).script;
     }
     {
+      name = "the unmanaged audit runs weekly (Monday 09:00 by default), audits every configured repository and writes the exporter's count file";
+      ok =
+        let
+          a = (agents defaultC).pg-gwm-unmanaged-audit;
+        in
+        a.label == "com.phillipg.pg-gwm-unmanaged-audit"
+        && a.keepAlive == false
+        &&
+          a.serviceConfig.StartCalendarInterval == {
+            Weekday = 1;
+            Hour = 9;
+            Minute = 0;
+          }
+        && has "unmanaged --repo /x" a.script
+        && has "--metrics-file /example/home/.local/state/pg-gwm/unmanaged-worktrees.json" a.script
+        && lib.hasSuffix "/audit.log" a.serviceConfig.StandardOutPath;
+    }
+    {
+      name = "the unmanaged audit can be switched off without touching the reaper";
+      ok =
+        let
+          c = evalWith { cfg.phillipgreenii.programs.pg-gwm.unmanagedAudit.enable = false; };
+        in
+        !((agents c) ? pg-gwm-unmanaged-audit) && (agents c) ? pg-gwm-reaper;
+    }
+    {
       name = "a disabled reaper produces no entry";
-      ok = agents offC == { };
+      ok = !((agents offC) ? pg-gwm-reaper);
     }
     {
       name = "a disabled module produces no entry, no package and no config file";

@@ -33,6 +33,10 @@ let
       '';
 
   reaperLogDir = "${config.xdg.stateHome}/pg-gwm-reaper";
+  auditLogDir = "${config.xdg.stateHome}/pg-gwm-unmanaged-audit";
+  # The count file `pg-gwm serve` reads for pg_gwm_unmanaged_worktrees
+  # (state.UnmanagedPath: $XDG_STATE_HOME/pg-gwm/unmanaged-worktrees.json).
+  auditCountFile = "${config.xdg.stateHome}/pg-gwm/unmanaged-worktrees.json";
 in
 {
   options.phillipgreenii.programs.pg-gwm = {
@@ -84,6 +88,38 @@ in
         default = 600;
         description = "How often launchd runs the reaper (StartInterval). One machine runs one reaper, so this is not a per-repository setting.";
       };
+    };
+  };
+
+  options.phillipgreenii.programs.pg-gwm.unmanagedAudit = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Run `wtaudit unmanaged` weekly over every repository in `repos`
+        (launchd user agent `com.phillipg.pg-gwm-unmanaged-audit`, darwin only,
+        same registry requirement as the reaper). It reports each worktree that
+        is neither locked by pg-gwm nor covered by the repository's exceptions
+        list, appends the report to
+        `$XDG_STATE_HOME/pg-gwm-unmanaged-audit/audit.log`, and writes the count
+        the exporter serves as `pg_gwm_unmanaged_worktrees`.
+      '';
+    };
+    package = lib.mkPackageOption pkgs "wtaudit" { };
+    weekday = lib.mkOption {
+      type = lib.types.ints.between 0 7;
+      default = 1;
+      description = "Day of the week the audit runs (launchd Weekday: 0 or 7 is Sunday, 1 Monday).";
+    };
+    hour = lib.mkOption {
+      type = lib.types.ints.between 0 23;
+      default = 9;
+      description = "Hour of the day the audit runs.";
+    };
+    minute = lib.mkOption {
+      type = lib.types.ints.between 0 59;
+      default = 0;
+      description = "Minute of the hour the audit runs.";
     };
   };
 
@@ -140,6 +176,50 @@ in
                 XDG_CONFIG_HOME = config.xdg.configHome;
                 XDG_STATE_HOME = config.xdg.stateHome;
                 # So git and the repository's hooks resolve under launchd's bare PATH.
+                PATH = lib.concatStringsSep ":" [
+                  "${config.home.profileDirectory}/bin"
+                  "/etc/profiles/per-user/${config.home.username}/bin"
+                  "/run/current-system/sw/bin"
+                  "/nix/var/nix/profiles/default/bin"
+                  "/usr/bin"
+                  "/bin"
+                ];
+              };
+            };
+          };
+    })
+
+    # The weekly read-only audit of worktrees outside pg-gwm. It exits 1 when it
+    # finds any, which launchd merely records; the finding reaches an operator
+    # through pg_gwm_unmanaged_worktrees and its alert rule.
+    (lib.optionalAttrs hasLaunchdRegistry {
+      phillipgreenii.programs.launchdServices.userAgents.pg-gwm-unmanaged-audit =
+        lib.mkIf (cfg.enable && cfg.unmanagedAudit.enable && isDarwin)
+          {
+            label = "com.phillipg.pg-gwm-unmanaged-audit";
+            script = ''
+              ${lib.getExe' cfg.unmanagedAudit.package "wtaudit"} unmanaged ${
+                lib.concatMapStringsSep " " (r: "--repo ${lib.escapeShellArg r}") (lib.attrNames cfg.repos)
+              } --metrics-file ${lib.escapeShellArg auditCountFile}
+            '';
+            runAtLoad = false;
+            keepAlive = false;
+            healthCheck = false;
+            serviceConfig = {
+              StartCalendarInterval = {
+                Weekday = cfg.unmanagedAudit.weekday;
+                Hour = cfg.unmanagedAudit.hour;
+                Minute = cfg.unmanagedAudit.minute;
+              };
+              Nice = 10;
+              ProcessType = "Background";
+              StandardOutPath = "${auditLogDir}/audit.log";
+              StandardErrorPath = "${auditLogDir}/launchd-stderr.log";
+              EnvironmentVariables = {
+                HOME = config.home.homeDirectory;
+                XDG_CONFIG_HOME = config.xdg.configHome;
+                XDG_STATE_HOME = config.xdg.stateHome;
+                PG_GWM_BIN = "${cfg.package}/bin/pg-gwm";
                 PATH = lib.concatStringsSep ":" [
                   "${config.home.profileDirectory}/bin"
                   "/etc/profiles/per-user/${config.home.username}/bin"

@@ -38,6 +38,7 @@ rows='[
   ["pg-gwm-exporter-down", "10m", 1, "", "lt", "Alerting", "critical"],
   ["pg-gwm-broken-persisting", "1h", 0, "2", "gt", "OK", "warning"],
   ["pg-gwm-max-reached-rate", "0m", 5, "8", "gt", "OK", "warning"],
+  ["pg-gwm-unmanaged-worktrees", "0m", 0, "", "gt", "OK", "warning"],
   ["pg-gwm-reaper-stale", "0m", 1800, "10", "gt", "Alerting", "warning"]
 ]'
 rule_uids="$(printf '%s' "$rows" | jq -c '[.[][0]]')"
@@ -49,8 +50,8 @@ fail() {
 
 main_json="$(yq -o=json -I=0 '.' "$alerts")"
 reaper_json="$(yq -o=json -I=0 '.' "$reaper_alerts")"
-[ "$(printf '%s' "$main_json" | jq -c '[.groups[].rules[].uid]')" = '["pg-gwm-exporter-down","pg-gwm-broken-persisting","pg-gwm-max-reached-rate"]' ] ||
-  fail "alerts.yaml must hold exactly the exporter-down, broken-persisting and max-reached-rate rules"
+[ "$(printf '%s' "$main_json" | jq -c '[.groups[].rules[].uid]')" = '["pg-gwm-exporter-down","pg-gwm-broken-persisting","pg-gwm-max-reached-rate","pg-gwm-unmanaged-worktrees"]' ] ||
+  fail "alerts.yaml must hold exactly the exporter-down, broken-persisting, max-reached-rate and unmanaged-worktrees rules"
 [ "$(printf '%s' "$reaper_json" | jq -c '[.groups[].rules[].uid]')" = '["pg-gwm-reaper-stale"]' ] ||
   fail "alerts-reaper.yaml must hold exactly the reaper-stale rule"
 alerts_json="$(jq -cn --argjson a "$main_json" --argjson b "$reaper_json" '$a + {groups: ($a.groups + $b.groups)}')"

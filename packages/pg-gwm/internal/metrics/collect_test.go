@@ -131,6 +131,27 @@ func TestLastReapAge(t *testing.T) {
 		fmt.Sprintf("pg_gwm_last_reap_age_seconds{repo=%q} 1200", f.rp.Label))
 }
 
+func TestUnmanagedWorktreesGauge(t *testing.T) {
+	f := newFixture(t)
+	f.c.UnmanagedPath = state.UnmanagedPath()
+	if out := f.scrape(); strings.Contains(out, "unmanaged_worktrees") {
+		t.Fatalf("gauge exported without an audit count file:\n%s", out)
+	}
+	if err := os.MkdirAll(state.UserDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.c.UnmanagedPath, []byte(`{"count":3,"checked_at":"2026-11-21T00:00:00Z"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want(t, f.scrape(), "pg_gwm_unmanaged_worktrees 3")
+	if err := os.WriteFile(f.c.UnmanagedPath, []byte(`garbage`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := f.scrape(); strings.Contains(out, "unmanaged_worktrees") {
+		t.Fatalf("gauge exported from an unreadable count file:\n%s", out)
+	}
+}
+
 func TestPreservedCountFromRefs(t *testing.T) {
 	f := newFixture(t)
 	for _, b := range []string{"pg-gwm/dirty-reaped-1", "pg-gwm/dirty-reaped-2", "pg-gwm/other", "feature"} {

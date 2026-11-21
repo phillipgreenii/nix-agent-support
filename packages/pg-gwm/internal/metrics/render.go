@@ -58,6 +58,9 @@ type Snapshot struct {
 	// ReaperLastSuccessAge is nil when the reaper never succeeded.
 	ReaperLastSuccessAge *float64
 	ConfigValid          bool
+	// Unmanaged is the last audit count of worktrees that are neither
+	// pg-gwm-managed nor excepted; nil when no audit has written a count.
+	Unmanaged *int
 }
 
 func num(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
@@ -101,6 +104,11 @@ func Render(s Snapshot) string {
 	if s.ReaperLastSuccessAge != nil {
 		w.head("reaper_last_success_age_seconds", "Seconds since the last successful reaper run.", "gauge")
 		w.line("reaper_last_success_age_seconds", "", num(*s.ReaperLastSuccessAge))
+	}
+
+	if s.Unmanaged != nil {
+		w.head("unmanaged_worktrees", "Worktrees the last weekly audit found neither pg-gwm-managed nor excepted.", "gauge")
+		w.line("unmanaged_worktrees", "", strconv.Itoa(*s.Unmanaged))
 	}
 
 	gaugeRepo := func(name, help string, emit func(r Repo) (string, bool)) {
