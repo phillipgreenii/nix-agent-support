@@ -1438,6 +1438,14 @@ func (PathAccessPolicy) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, boo
 		return Finding{}, false
 	}
 	if e.Dynamic {
+		// A relative path whose base directory was lost to a preceding runtime
+		// `cd` still names the same credential store whatever that directory is:
+		// a well-known secret NAME stays Forbidden, so an unknown working
+		// directory never relaxes a Reject to an Abstain (the joint verdict of
+		// `cd "$p"` then `tail .env` is no looser than `tail .env` alone).
+		if e.Detail == "working directory unknown" && secretpath.Classify(e.Path) == secretpath.WellKnownSecret {
+			return Finding{Verdict: Forbidden, Reason: "path names a well-known secret; the unknown working directory does not change that"}, true
+		}
 		return Finding{Verdict: Unknown, Reason: "path is a runtime expansion"}, true
 	}
 	if ctx.PathEval == nil {

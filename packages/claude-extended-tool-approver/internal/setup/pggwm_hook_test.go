@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggwmworktree"
 )
 
 // TestLiveHook_PgGwm drives the engine the live PreToolUse hook builds
@@ -50,11 +51,16 @@ func TestLiveHook_PgGwm(t *testing.T) {
 	}
 }
 
-// Raw worktree creation stays denied (the deny rule precedes the read-only
-// approval, and nothing here approves it).
+// Raw worktree creation in a pg-gwm-listed repository stays denied (the deny
+// rule precedes the read-only approval, and nothing here approves it). The repo
+// is a real listed checkout, so the verdict does not depend on whether the
+// target path happens to fall under a temp root (a nix build's $TMPDIR makes a
+// bare t.TempDir() sibling look like a permitted temp location).
 func TestLiveHook_PgGwmRawWorktreeNotApproved(t *testing.T) {
 	withXDGConfig(t, "")
-	cwd := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv(pggwmworktree.ExceptionEnv, "")
+	cwd, _, _ := pgGwmRepo(t, true)
 	ti, _ := json.Marshal(map[string]string{"command": "git worktree add ../x"})
 	in := &hookio.HookInput{
 		SessionID: "s", CWD: cwd, ToolName: "Bash", ToolInput: ti,
