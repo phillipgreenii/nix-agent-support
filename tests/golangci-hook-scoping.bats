@@ -36,7 +36,9 @@ setup() {
 
 run_hook() {
   cd "$repo" || return 1
-  PG_GOLANGCI_BASE_REV="${BASE_OVERRIDE:-$base}" run "$HOOK" "$@"
+  # HOOK is a command line ("env GOWORK=off <script>"), so it must word-split.
+  # shellcheck disable=SC2086
+  PG_GOLANGCI_BASE_REV="${BASE_OVERRIDE:-$base}" run $HOOK "$@"
 }
 
 @test "blocks on a new finding in the touched module" {
