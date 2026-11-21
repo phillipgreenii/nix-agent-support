@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/daemon/jsonlsink"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
@@ -46,7 +48,7 @@ type StructuredLog struct {
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 
-	out sink
+	out jsonlsink.Sink
 }
 
 var _ connectord.Logger = (*StructuredLog)(nil)
@@ -54,7 +56,7 @@ var _ connectord.Logger = (*StructuredLog)(nil)
 // NewStructuredLog returns the structured log inside stateDir, rotating at
 // DaemonMaxBytes.
 func NewStructuredLog(stateDir, version string) *StructuredLog {
-	return &StructuredLog{Path: DaemonLogPath(stateDir), MaxBytes: DaemonMaxBytes, Version: version, out: sink{ctx: context.Background()}}
+	return &StructuredLog{Path: DaemonLogPath(stateDir), MaxBytes: DaemonMaxBytes, Version: version, out: jsonlsink.Sink{Service: ServiceName, Ctx: context.Background()}}
 }
 
 func (l *StructuredLog) now() time.Time {
@@ -72,7 +74,7 @@ func (l *StructuredLog) Log(change string, kv ...any) {
 }
 
 func (l *StructuredLog) write(level, change, msg string, kv []any) {
-	l.out.emit(l.Path, l.MaxBytes, stateLine{
+	l.out.Emit(l.Path, l.MaxBytes, stateLine{
 		header: newHeader(l.now(), level, msg, l.Version),
 		Change: change,
 		fields: kv,

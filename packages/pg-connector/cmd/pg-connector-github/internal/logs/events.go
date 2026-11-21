@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/daemon/jsonlsink"
+
 	evlog "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/eventlog"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
@@ -133,12 +135,12 @@ type EventLog struct {
 	// Now is the clock; nil uses time.Now.
 	Now func() time.Time
 
-	out sink
+	out jsonlsink.Sink
 }
 
 // NewEventLog returns the event log inside stateDir, rotating at DaemonMaxBytes.
 func NewEventLog(stateDir, version string) *EventLog {
-	return &EventLog{Path: EventLogPath(stateDir), MaxBytes: DaemonMaxBytes, Version: version, out: sink{ctx: context.Background()}}
+	return &EventLog{Path: EventLogPath(stateDir), MaxBytes: DaemonMaxBytes, Version: version, out: jsonlsink.Sink{Service: ServiceName, Ctx: context.Background()}}
 }
 
 func (l *EventLog) now() time.Time {
@@ -158,7 +160,7 @@ func (l *EventLog) Middleware() router.Middleware {
 			resp := next(ctx, c)
 			row := newRequestRow(ServiceName, l.Version, c.Request.Op, c.Instance, start, l.now(), resp.Error)
 			row.applyAnnotations(router.AnnotationsFrom(ctx))
-			l.out.emit(l.Path, l.MaxBytes, row)
+			l.out.Emit(l.Path, l.MaxBytes, row)
 			return resp
 		}
 	}
@@ -170,5 +172,5 @@ func (l *EventLog) OnSpend(ev governor.SpendEvent) {
 	if ev.At.IsZero() {
 		ev.At = l.now()
 	}
-	l.out.emit(l.Path, l.MaxBytes, newOriginRow(l.Version, ev))
+	l.out.Emit(l.Path, l.MaxBytes, newOriginRow(l.Version, ev))
 }

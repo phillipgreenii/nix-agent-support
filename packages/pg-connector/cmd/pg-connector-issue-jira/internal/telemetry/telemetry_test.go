@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/daemon/otelsetup"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
@@ -725,11 +727,11 @@ func (e *fakeSpanExporter) Shutdown(context.Context) error                      
 // them and the global providers afterwards.
 func stubExporters(t *testing.T, m func(string) (sdkmetric.Exporter, error), s func(string) (sdktrace.SpanExporter, error)) {
 	t.Helper()
-	om, os := newMetricExporter, newSpanExporter
-	newMetricExporter = func(_ context.Context, ep string) (sdkmetric.Exporter, error) { return m(ep) }
-	newSpanExporter = func(_ context.Context, ep string) (sdktrace.SpanExporter, error) { return s(ep) }
+	om, os := otelsetup.NewMetricExporter, otelsetup.NewSpanExporter
+	otelsetup.NewMetricExporter = func(_ context.Context, ep string) (sdkmetric.Exporter, error) { return m(ep) }
+	otelsetup.NewSpanExporter = func(_ context.Context, ep string) (sdktrace.SpanExporter, error) { return s(ep) }
 	t.Cleanup(func() {
-		newMetricExporter, newSpanExporter = om, os
+		otelsetup.NewMetricExporter, otelsetup.NewSpanExporter = om, os
 		otel.SetMeterProvider(metricnoop.NewMeterProvider())
 		otel.SetTracerProvider(tracenoop.NewTracerProvider())
 	})
@@ -814,11 +816,11 @@ func TestSetupExporterFailuresAreErrorsAndLeaveNothingInstalled(t *testing.T) {
 
 func TestRealExportersConstructWithoutDialing(t *testing.T) {
 	ctx := context.Background()
-	me, err := newMetricExporter(ctx, "http://127.0.0.1:1")
+	me, err := otelsetup.NewMetricExporter(ctx, "http://127.0.0.1:1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	se, err := newSpanExporter(ctx, "http://127.0.0.1:1")
+	se, err := otelsetup.NewSpanExporter(ctx, "http://127.0.0.1:1")
 	if err != nil {
 		t.Fatal(err)
 	}

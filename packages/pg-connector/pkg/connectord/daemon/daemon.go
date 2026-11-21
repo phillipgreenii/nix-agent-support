@@ -9,6 +9,9 @@
 //     assemble the daemon, register its drain hooks in the order they must run,
 //     serve the socket while startup runs concurrently, and only then report a
 //     refusal;
+//   - the opt-in pprof endpoint (Spec.PprofEnv), the status skeleton
+//     (RunStatus), the JSONL log writer (jsonlsink) and the base telemetry
+//     setup (otelsetup);
 //   - the startup race: a shutdown signal that arrives while startup is still
 //     running ends the serve cleanly (the drain answers it) instead of reporting
 //     the startup failure the signal itself caused.
@@ -77,6 +80,11 @@ type Spec struct {
 	// Args are the arguments after the serve word (only --shutdown-deadline).
 	// Run parses them; Serve ignores them.
 	Args []string
+	// PprofEnv names the environment variable that opts the serve mode into the
+	// opt-in pprof endpoint (see StartPprof). Run reads the process environment
+	// and starts it; Serve (the injected-context seam) never does. Empty means
+	// the daemon has no endpoint.
+	PprofEnv string
 	// Stderr receives the reason a serve refused to start; nil discards it.
 	Stderr io.Writer
 	// WrapContext, when set, wraps the daemon's context before the daemon uses

@@ -1,4 +1,4 @@
-package logs
+package jsonlsink
 
 import (
 	"bytes"
@@ -11,16 +11,18 @@ import (
 	"github.com/phillipgreenii/x/jsonllogger"
 )
 
-// sink is one daemon log file written through x/jsonllogger: a RotatingFile
+// Sink is one daemon log file written through x/jsonllogger: a RotatingFile
 // (reopens after an external rename or delete, caps the size by renaming to
-// <file>.1) under the shared slog JSONL handler. Build it with a ctx (the log constructors do); the
+// <file>.1) under the shared slog JSONL handler. Set Ctx (the log constructors do); the
 // file is opened on the first write, so the Path and MaxBytes fields of the
 // owning log can be set after construction, and a directory that cannot be
 // written yet is retried on the next row. Writing is strictly best effort: a
 // failure drops the row and never reaches the caller.
-type sink struct {
-	mu sync.Mutex
-	h  slog.Handler
+type Sink struct {
+	// Service is the service_name stamped on every row (the Loki label).
+	Service string
+	mu      sync.Mutex
+	h       slog.Handler
 	// path and max are what h was opened with; a change reopens.
 	path string
 	max  int64
@@ -28,12 +30,12 @@ type sink struct {
 	// ctx is the context every row is handled under. A row is written
 	// fire-and-forget, so it is the detached background context the owning
 	// log constructor sets, never a request context that could cancel it.
-	ctx context.Context
+	Ctx context.Context
 }
 
 // handler returns the open handler for path, opening (or reopening after the
 // owner changed path or max) when needed. The caller holds s.mu.
-func (s *sink) handler(path string, max int64) slog.Handler {
+func (s *Sink) handler(path string, max int64) slog.Handler {
 	if s.h != nil && s.path == path && s.max == max {
 		return s.h
 	}
@@ -46,15 +48,15 @@ func (s *sink) handler(path string, max int64) slog.Handler {
 		return nil
 	}
 	s.f, s.path, s.max = f, path, max
-	s.h = jsonllogger.NewHandler(f, jsonllogger.WithService(ServiceName))
+	s.h = jsonllogger.NewHandler(f, jsonllogger.WithService(s.Service))
 	return s.h
 }
 
-// emit appends v as one JSONL line to path, rotating past max. v is a typed row
+// Emit appends v as one JSONL line to path, rotating past max. v is a typed row
 // whose JSON form starts with time, level and msg (every row type of this
 // package does); the three become the record's time, level and message, and
 // every other field becomes a slog attribute in the row's own order.
-func (s *sink) emit(path string, max int64, v any) {
+func (s *Sink) Emit(path string, max int64, v any) {
 	rec, ok := rowRecord(v)
 	if !ok {
 		return
@@ -65,7 +67,7 @@ func (s *sink) emit(path string, max int64, v any) {
 	if h == nil {
 		return
 	}
-	_ = h.Handle(s.ctx, rec)
+	_ = h.Handle(s.Ctx, rec)
 }
 
 // rowRecord maps a typed row to a slog record. The row's own "time" (an

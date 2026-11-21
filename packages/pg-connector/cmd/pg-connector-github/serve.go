@@ -38,13 +38,12 @@ func runServe(cfg *config.Config, args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pg-connector-github serve: %v\n", err)
 		return exitServe
 	}
-	// Opt-in profiling endpoint (see pprof.go): the serve mode only. It reports
-	// on stderr and a rejected value never stops the daemon. runServe is the
-	// real-process entry, so it reads the process environment directly;
-	// serveWith (the injected-context seam used by tests) does not start it.
-	defer startPprofFromEnv(os.Getenv, stderr)()
 	spec := serveSpec(cfg, stderr, hooks, nil)
 	spec.Args = args
+	// Opt-in profiling endpoint (see pprof.go): the kernel starts it for the serve
+	// mode only, from the process environment; serveWith (the injected-context
+	// seam used by tests) never does.
+	spec.PprofEnv = pprofEnv
 	return daemon.Run(context.Background(), spec)
 }
 

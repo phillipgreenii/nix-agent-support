@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/daemon"
+
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
@@ -124,7 +126,7 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if mode == modeStatus {
 		modeArgs = rest[1:]
 		// A bad argument is a usage error before the config is read.
-		if _, err := parseStatusArgs(modeArgs); err != nil {
+		if _, err := daemon.ParseStatusArgs(modeArgs); err != nil {
 			fmt.Fprintf(stderr, "pg-connector-issue-jira status: %v\n\n%s", err, usage)
 			return exitUsage
 		}
