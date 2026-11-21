@@ -1,6 +1,6 @@
 # pg-gwm owns managed worktrees and replaces pg-checkout-pool; the ccpool handler stops creating and sweeping its own
 
-**Status**: Accepted (design ruled by the operator 2026-11-14; the handler's worktree sweep, leftover reclaim and process probe were removed after the handler moved onto pg-gwm; amends 0084 and 0117)
+**Status**: Accepted (design ruled by the operator 2026-11-14; the handler's worktree sweep, leftover reclaim and process probe were removed after the handler moved onto pg-gwm; amends 0084 and 0117; adoption scope widened to ZR monorepo worktrees 2026-11-19)
 **Date**: 2026-11-14
 **Deciders**: Phillip Green II
 
@@ -93,6 +93,35 @@ maximum), Scheduled Reaper, Single Owner of a resource's lifecycle, Template Met
   with the package in one change.
 - One open question (whether `renew` may remove an expiry) is recorded in the behavior set and blocks
   only its own clause; a cost measurement on the large monorepo sets one default.
+
+## Amendment 2026-11-19: adoption scope and standing exceptions
+
+Until this amendment the decision covered only the ccpool handler. Operator ruling, Phillip, 2026-11-19:
+"pg-gwm MUST be the norm for ZR monorepo worktrees; any exception MUST be called out explicitly".
+
+1. **Default.** pg-gwm MUST be the default way to obtain a worktree of the ZR monorepo, for people, tools
+   and agents alike, not only for the ccpool handler.
+2. **Exceptions are explicit.** A worktree that lives outside pg-gwm MUST be declared as a standing
+   exception in the repository's `exceptions` config key (`[[repos."<key>".exceptions]]`). Each entry MUST
+   carry a `path` (absolute path or glob), a `reason`, an `owner` and a `review-by` date. An undeclared
+   worktree is not an exception. A one-off exception for a single command MUST carry a non-empty reason
+   that is logged.
+3. **Reviewed.** `pg-gwm config check` MUST report an incomplete entry as an error and an entry whose
+   `review-by` date has passed as a warning, so an exception cannot lapse unnoticed. An owner SHOULD
+   either renew the date with a fresh reason or retire the exception.
+4. **One list.** The `zr-stale-worktrees` reclaimer and the deny hook that refuses raw worktree creation
+   MUST read this same list; neither MAY keep its own. The key's contract is in
+   `docs/behavior/pg-gwm/README.md` ("Standing exceptions").
+
+```mermaid
+flowchart LR
+  C["exceptions key in the pg-gwm config"] --> K["pg-gwm config check: error or expiry warning"]
+  C --> D["deny hook: allow listed paths"]
+  C --> Z["zr-stale-worktrees reclaimer: skip listed paths"]
+  C --> L["pg-gwm list --exceptions"]
+```
+
+Design patterns: Single Source of Truth, Allowlist with expiry (reviewed exceptions).
 
 ## Related
 
