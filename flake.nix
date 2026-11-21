@@ -2355,6 +2355,8 @@
                       # the folded handlers member's local-replace modules
                       ./packages/pg-claude-code-recorder
                       ./packages/pg-sqlite
+                      # the source-pg-connector member imports pg-connector's client.
+                      ./packages/pg-connector
                       ./packages/pg-failsig
                       # the pg-desk source adapter imports the published pg-desk contract package
                       ./packages/pg-desk/go.mod
@@ -2476,6 +2478,8 @@
                       ./packages/claude-transcript
                       ./packages/pg-claude-code-recorder
                       ./packages/pg-sqlite
+                      # the source-pg-connector member imports pg-connector's client.
+                      ./packages/pg-connector
                       ./packages/pg-failsig
                       # the pg-desk source adapter imports the published pg-desk contract package
                       ./packages/pg-desk/go.mod
@@ -10816,6 +10820,7 @@
                     fileset = lib.fileset.unions [
                       (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
+                      ./packages/pg-connector
                       ./packages/claude-transcript
                     ];
                   };
@@ -10883,6 +10888,7 @@
                     fileset = lib.fileset.unions [
                       (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
+                      ./packages/pg-connector
                       ./packages/claude-transcript
                     ];
                   };
@@ -22198,6 +22204,7 @@
                   fileset = lib.fileset.unions [
                     (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                     ./packages/ccpool
+                    ./packages/pg-connector
                     ./packages/claude-transcript
                   ];
                 };

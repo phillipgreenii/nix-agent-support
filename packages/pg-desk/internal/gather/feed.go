@@ -223,7 +223,7 @@ func (g *Gatherer) ListFeed(ctx context.Context, entityType, query, consumer, ba
 		}
 	}
 	for _, f := range freshness {
-		out.Freshness = append(out.Freshness, FeedFreshness{Query: f.Query, LastSuccessAt: f.LastSuccessAt, LastError: f.LastError})
+		out.Freshness = append(out.Freshness, FeedFreshness(f))
 	}
 	return out, nil
 }

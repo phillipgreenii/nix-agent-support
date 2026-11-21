@@ -83,14 +83,6 @@ func (r *Resolver) ResolvePR(ctx context.Context, beadID string) (repo, entityID
 	return repo, repo + "#" + strconv.Itoa(prNumber), nil
 }
 
-// pgConnectorBinary/runner mirror internal/gather and
-// internal/sync's own identical constants/vars, one more layer (this
-// package's own `issue show` call) — never a compile-time import of
-// packages/pg-connector (D10). See those packages' doc comments for why
-// each exec-capable package keeps its own private copy rather than a
-// shared one.
-const pgConnectorBinary = "pg-connector"
-
 // runner is the exec seam (a cmdrun.Runner; production is connector.Run).
 // Tests swap it for an in-process double.
 var runner cmdrun.Runner = connector.Run
