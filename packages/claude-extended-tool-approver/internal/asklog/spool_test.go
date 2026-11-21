@@ -156,18 +156,25 @@ func TestRunWithinCtx_BudgetMissedWriteNeverCommits(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	writeReturned := make(chan struct{})
 	err = RunWithinCtx(100*time.Millisecond, func(ctx context.Context) error {
+		defer close(writeReturned)
 		return RecordPreToolDecisionCtx(ctx, s, spoolInputFor("tu1"), hookio.RuleResult{Decision: hookio.Approve})
 	})
 	if !errors.Is(err, ErrBudgetExceeded) {
 		t.Fatalf("err = %v, want ErrBudgetExceeded", err)
 	}
+	// RunWithinCtx waits (up to ctxGrace) for the cancelled write to stop, so
+	// the write has already returned: it can no longer take the lock, however
+	// long the test waits. Assert that directly instead of sleeping.
+	select {
+	case <-writeReturned:
+	default:
+		t.Fatal("budget-missed write was still running after RunWithinCtx returned, so it could commit once the lock is released")
+	}
 	if _, err := conn.ExecContext(t.Context(), `ROLLBACK`); err != nil {
 		t.Fatal(err)
 	}
-	// The write's own busy timeout (3 s) has not elapsed; were it still
-	// waiting it would take the lock now. Give it the chance, then count.
-	time.Sleep(500 * time.Millisecond)
 	if n := spoolCountRows(t, s, `tool_use_id = ?`, "tu1"); n != 0 {
 		t.Fatalf("budget-missed write committed %d row(s) after the lock was released", n)
 	}
