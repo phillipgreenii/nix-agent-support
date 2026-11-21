@@ -330,21 +330,20 @@
           pg-ccaudit = final.callPackage ./packages/pg-ccaudit {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-router-source-pg-connector: Pattern A (ADR 0008), same shape as
-          # pg-ccaudit above — a standalone adapter binary (docket pg2-2j5ac.30
+          # pg-router-source-pg-connector: Pattern B (ADR 0008), a member of the router
+          # module (packages/pg-router, see members.json) — the adapter binary (docket pg2-2j5ac.30
           # Phase 8) exposing pg-connector's changes/list verbs as pg-router
           # command-query rawItem sources. It execs pg-connector as a
           # subprocess (ambient $PATH) and has no compile-time dependency on
-          # packages/pg-connector, so it needs no local `replace`/modRoot
-          # either.
+          # packages/pg-connector.
           pg-router-source-pg-connector = final.callPackage ./packages/pg-router-source-pg-connector {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-router-source-pg-desk: Pattern A (ADR 0008), same shape as
-          # pg-router-source-pg-connector above — the adapter binary exposing
+          # pg-router-source-pg-desk: Pattern B (ADR 0008), a member of the router
+          # module like pg-router-source-pg-connector above — the adapter binary exposing
           # pg-desk's changes envelope as pg-router command-query items. It
           # has no compile-time dependency on packages/pg-desk (it execs
-          # pg-desk as a subprocess), so no local `replace`/modRoot; the built
+          # pg-desk as a subprocess); the built
           # wrapper carries pg-desk on PATH (docket pg2-2j5ac.52.16).
           pg-router-source-pg-desk = final.callPackage ./packages/pg-router-source-pg-desk {
             inherit (goBuilders) mkGoApp;
@@ -2232,8 +2231,6 @@
                 "claude-transcript"
                 "pg-failsig"
                 "pg-connector"
-                "pg-router-source-pg-connector"
-                "pg-router-source-pg-desk"
                 "pg-decider"
                 "pg-gwm"
                 "ccpool-probe"
@@ -7950,22 +7947,14 @@
               # suite against a reentrant test-helper-process wire double for
               # pg-connector (testmain_test.go, mirroring
               # packages/pg-connector's own pkg/scriptout/exec_test.go
-              # pattern). No testDeps: the suite execs no real subprocess —
-              # execCmdFactory is swapped to re-exec the test binary itself.
-              pg-router-source-pg-connector-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-router-source-pg-connector-go-tests";
-                src = lib.cleanSource ./packages/pg-router-source-pg-connector; # matches default.nix
-                gomod2nixToml = ./packages/pg-router-source-pg-connector/gomod2nix.toml;
-              };
+              # pattern). No testDeps: the suite execs no real subprocess; it runs over
+              # the member subtree of the router module.
+              pg-router-source-pg-connector-go-tests = memberGoTests "source-connector" [ ] "";
 
               # pg-router-source-pg-desk (docket pg2-2j5ac.52.16) — whole-module
-              # Go test gate for the adapter binary. Pattern A: flat src at the
-              # module dir, no local replace.
-              pg-router-source-pg-desk-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-router-source-pg-desk-go-tests";
-                src = lib.cleanSource ./packages/pg-router-source-pg-desk; # matches default.nix
-                gomod2nixToml = ./packages/pg-router-source-pg-desk/gomod2nix.toml;
-              };
+              # Go test gate for the adapter binary, over the member subtree of the
+              # router module.
+              pg-router-source-pg-desk-go-tests = memberGoTests "source-desk" [ ] "";
 
               # pg-decider (docket pg2-2j5ac.52.18) — whole-module Go test
               # gate. Pattern A: flat src at the module dir, no local replace.

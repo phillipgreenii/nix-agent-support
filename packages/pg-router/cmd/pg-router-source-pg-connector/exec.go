@@ -65,6 +65,7 @@ type pgConnectorResult struct {
 // denied, context already canceled, ...) — there is then no exit code to
 // classify and no child stderr to trust.
 func runPgConnector(ctx context.Context, args []string, extraEnv []string) (pgConnectorResult, error) {
+	//cmdrun:unbounded the caller supplies the context deadline; the router bounds this adapter run
 	r := runConnector(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: extraEnv})
 	if r.StartErr != nil {
 		return pgConnectorResult{}, fmt.Errorf("pg-connector: exec %v: %w", args, r.StartErr)

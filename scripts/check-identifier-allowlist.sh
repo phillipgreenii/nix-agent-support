@@ -60,7 +60,7 @@ MODULES=(
   "pg-connector|packages/pg-connector|testdata|60|pkg/scriptout/conformance/testdata/golden/response-success.json pkg/scriptout/conformance/testdata/golden/error.json|"
   "pg-decider|packages/pg-decider|testdata|200|testdata/pr_view_minimal.json|"
   "pg-desk|packages/pg-desk|testdata|70|internal/config/testdata/config.example.yaml|internal/focus/testdata/=25"
-  "pg-router-source-pg-desk|packages/pg-router-source-pg-desk|testdata|5|cmd/pg-router-source-pg-desk/testdata/envelope_degraded.json|"
+  "pg-router-source-pg-desk|packages/pg-router/cmd/pg-router-source-pg-desk|testdata|5|testdata/envelope_degraded.json|"
   "work-report|packages/work-report|wide|50||kind:go=40 kind:testdata=5 kind:docs=4 docs/behavior/=4"
 )
 

@@ -91,9 +91,9 @@ build_fixture() {
   fill packages/pg-desk/internal/focus/testdata 30 g json
   fill packages/pg-desk/cmd/pg-desk/testdata 45 f json
   # pg-router-source-pg-desk.
-  mkdir -p "$ROOT/packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata"
-  fill packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata 6 f json
-  printf '{"ok": true}\n' >"$ROOT/packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata/envelope_degraded.json"
+  mkdir -p "$ROOT/packages/pg-router/cmd/pg-router-source-pg-desk/testdata"
+  fill packages/pg-router/cmd/pg-router-source-pg-desk/testdata 6 f json
+  printf '{"ok": true}\n' >"$ROOT/packages/pg-router/cmd/pg-router-source-pg-desk/testdata/envelope_degraded.json"
   # work-report: .go files, testdata files, docs files and docs/behavior files.
   fill packages/work-report/internal/x 45 f go
   fill packages/work-report/internal/x/testdata 6 t json
@@ -303,7 +303,7 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
   plant packages/pg-connector/pkg/scriptout/conformance/testdata/golden/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-decider/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-desk/internal/config/testdata/p.json '{"login": "zzfakehandle"}'
-  plant packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata/p.json '{"login": "zzfakehandle"}'
+  plant packages/pg-router/cmd/pg-router-source-pg-desk/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/work-report/internal/x/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-claude-code-recorder/internal/platform/testdata/p.json '{"login": "zzfakehandle"}'
   plant packages/pg-claude-control/internal/x/testdata/p.json '{"login": "zzfakehandle"}'
@@ -311,9 +311,11 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
   run_guard
   [ "$status" -eq 1 ]
   local m
-  for m in pg-assistants pg-claude-code-recorder pg-claude-control pg-connector pg-decider pg-desk pg-router-source-pg-desk work-report; do
+  for m in pg-assistants pg-claude-code-recorder pg-claude-control pg-connector pg-decider pg-desk work-report; do
     [[ $output == *"check-identifier-allowlist: $m: packages/$m/"* ]]
   done
+  # The desk adapter is a member of the router module, so its tree is under it.
+  [[ $output == *"check-identifier-allowlist: pg-router-source-pg-desk: packages/pg-router/cmd/pg-router-source-pg-desk/"* ]]
 }
 
 @test "an untracked planted file is not scanned (hooks only see git-known files)" {
@@ -370,7 +372,7 @@ DESK=packages/pg-desk/cmd/pg-desk/testdata
 }
 
 @test "canary: a module scanned below its minimum file count fails" {
-  local d=packages/pg-router-source-pg-desk/cmd/pg-router-source-pg-desk/testdata
+  local d=packages/pg-router/cmd/pg-router-source-pg-desk/testdata
   git -C "$ROOT" rm -q "$d/f1.json" "$d/f2.json" "$d/f3.json"
   run_guard
   [ "$status" -eq 1 ]

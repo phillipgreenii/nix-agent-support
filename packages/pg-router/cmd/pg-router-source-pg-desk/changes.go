@@ -39,21 +39,16 @@ type entityGroup struct {
 	seen    map[string]bool
 }
 
-// itemsFromEnvelope maps a decoded envelope to pg-router items: ONE item per
+// itemsWithLowest maps a decoded envelope to pg-router items: ONE item per
 // distinct entity id, in the order of each entity's first record. The item
 // carries emit "<type>.changed", id "<entity_id>@<seq>" (seq = the maximum seq
 // among the poll's records for the entity) and the coalesced kinds (no
 // duplicates, order of first appearance). Title, version and origin come from
 // the maximum-seq record (the latest state of the entity). The result is
 // always non-nil.
-func itemsFromEnvelope(env envelope) ([]rawItem, error) {
-	items, _, err := itemsWithLowest(env)
-	return items, err
-}
-
-// itemsWithLowest is itemsFromEnvelope plus, per item, the lowest record
-// sequence of its entity in the poll (the input of the deferred-ack token
-// rule).
+//
+// It also returns, per item, the lowest record sequence of its entity in the
+// poll (the input of the deferred-ack token rule).
 func itemsWithLowest(env envelope) ([]rawItem, []int64, error) {
 	degraded := make([]string, 0, len(env.Sources))
 	for _, s := range env.Sources {

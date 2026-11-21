@@ -31,8 +31,6 @@ use (
 	./packages/pg-review
 	./packages/pg-review-router-adapter
 	./packages/pg-router
-	./packages/pg-router-source-pg-connector
-	./packages/pg-router-source-pg-desk
 	./packages/pg-sqlite
 	./packages/pg-task-focus
 	./packages/pg-wrap

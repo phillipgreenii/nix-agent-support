@@ -28,6 +28,16 @@
       "cmd": ["pg-router-sensors"],
       "internal": ["sensors"],
       "stdlibOnly": false
+    },
+    "source-connector": {
+      "cmd": ["pg-router-source-pg-connector"],
+      "internal": ["source/connector"],
+      "stdlibOnly": false
+    },
+    "source-desk": {
+      "cmd": ["pg-router-source-pg-desk"],
+      "internal": ["source/desk"],
+      "stdlibOnly": false
     }
   }
 }

@@ -28,6 +28,7 @@ type pgDeskResult struct {
 // $PATH, permission denied, ...): there is then no exit code and no child
 // stderr.
 func runPgDesk(ctx context.Context, args []string) (pgDeskResult, error) {
+	//cmdrun:unbounded the caller supplies the context deadline; the router bounds this adapter run
 	r := runnerOrExec()(ctx, cmdrun.Call{Name: pgDeskBinary, Args: args})
 	if r.StartErr != nil {
 		return pgDeskResult{}, fmt.Errorf("%s: cannot run: %w", pgDeskBinary, r.StartErr)
