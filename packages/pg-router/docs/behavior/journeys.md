@@ -314,7 +314,7 @@ implement several interfaces at once, and the core neither knows nor cares. It c
 **Preconditions:** none.
 **Intent:** build an event source against `INTF-SOURCE` so a deployment can obtain typed events from
 it, choosing deliberately among the shapes the two independent mode axes allow.
-_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-4`, `INV-FAIL-3`, `INV-INTF-1`,
+_Requires:_ `INV-DISP-1`, `INV-DISP-3`, `INV-EVT-1`, `INV-EVT-4`, `INV-EVT-10`, `INV-FAIL-3`, `INV-INTF-1`,
 `GOAL-MIN-1`.
 _Includes:_ `USECASE-VERIFY-PARTICIPANT`.
 
@@ -717,7 +717,7 @@ populated.
 **Intent:** author, or later edit, the configuration the core resolves — the essential participants,
 their **bindings**, and the **wiring** (a routing graph) those bindings form (`INV-WORKFLOW-1`).
 _Requires:_ `INV-CONC-1`, `INV-DISP-1`, `INV-EVT-1`, `INV-EVT-4`, `INV-ROLE-1`, `INV-ROLE-2`,
-`INV-ROLE-3`, `INV-ROLE-4`, `INV-WORKFLOW-1`.
+`INV-ROLE-3`, `INV-ROLE-4`, `INV-EVT-8`, `INV-EVT-9`, `INV-WORKFLOW-1`.
 _Includes:_ `USECASE-VERIFY-PARTICIPANT` (an edited binding is re-verified in place by the same role
 or query that verified it when it was added), `USECASE-VALIDATE-CONFIG`.
 
@@ -969,7 +969,7 @@ Extensions:
 case's own first step.
 **Intent:** run the validated configuration as a **daemon** (`run`) that routes events until it is
 stopped, and inspect it while it runs (`INV-LIFE-1`).
-_Requires:_ `INV-LIFE-1`, `INV-LIFE-3`.
+_Requires:_ `INV-LIFE-1`, `INV-LIFE-3`, `INV-GATE-1`.
 _Includes:_ `USECASE-VALIDATE-CONFIG` (the startup path validates the wiring before anything runs),
 `USECASE-DEBUG-RUN` (the run-scoped selectors this invocation applies, and the live inspection).
 
@@ -1074,7 +1074,7 @@ without touching configuration (`INV-LIFE-2`).
 _Requires:_ `INV-LIFE-2`, `INV-LIFE-1` (reachability in both run modes).
 _Requires:_ `INV-LVL-1`, `INV-LVL-2`, `INV-LVL-3`, `INV-LVL-4`, `INV-LVL-5`, `INV-LVL-6`, `INV-SEN-1`,
 `INV-SEN-2`, `INV-SEN-3`, `INV-SEN-4`, `INV-SEN-5`, `INV-SEN-6`, `INV-SEN-7`, `INV-ADM-1`, `INV-ADM-2`,
-`INV-ADM-3`, `INV-ADM-4`, `INV-ADM-5`, `INV-ADM-6`, `INV-ADM-7`, `INV-ADM-8`, `INV-STALE-1`.
+`INV-ADM-3`, `INV-ADM-4`, `INV-ADM-5`, `INV-ADM-6`, `INV-ADM-7`, `INV-ADM-8`, `INV-STALE-1`, `INV-ALR-1`.
 _Includes:_ `USECASE-DEBUG-RUN` (reading whether a running core is paused by levels or quiescent).
 
 **Flow.** `pause` sets the `router` resource to `PAUSED` and `resume` clears it; `level set RESOURCE
