@@ -79,6 +79,8 @@ Adopt (e) now and (c) beside it; do not build (f), (a) or (b).
 3. **The runner of a long job SHOULD cap it with a wall-clock limit** (option (c), owned by the
    runner's own work item), because a payload that escapes its group, or hangs without any daemon
    change, is outside what the cancel path can reach.
+   Implemented in `pg-repo-runner`: `nix flake check` runs under a wall-clock cap
+   (`thresholds.check_timeout`, default 3600 s), stored as a red verdict marked `timedOut`.
 4. **The log carries a distinct field** when a dispatch is interrupted by the daemon stopping:
    `interrupted_by=daemon_shutdown` on the orchestrator's "dispatch cut short by shutdown" line,
    so an apply that interrupts a dispatch is findable and distinct from a handler failure.
