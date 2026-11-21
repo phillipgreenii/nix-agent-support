@@ -123,7 +123,7 @@ func (f *fileState) refresh() {
 		return
 	}
 	f.snap = f.acc.Snapshot()
-	f.records = f.acc.Records()
+	f.records = f.acc.RecordsView()
 }
 
 // reader keeps the files pa-monitor folds and the feed cursor that says which

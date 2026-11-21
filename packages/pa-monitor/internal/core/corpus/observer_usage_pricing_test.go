@@ -128,3 +128,63 @@ func TestUsagePricing_EmptyReturnsNilBlock(t *testing.T) {
 		t.Fatalf("Block with no records = %+v, want nil", b)
 	}
 }
+
+// TestUsagePricing_FlattenCacheTracksChanges proves the cached flatten is reused
+// while no file's records change (the same view set again) and rebuilt when a
+// file grows, is replaced, or is pruned.
+func TestUsagePricing_FlattenCacheTracksChanges(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	o := NewUsagePricingObserver(pricingFixture())
+	a := []usage.Record{rec(now.Add(-2*time.Hour), "m", 1, 1)}
+	b := []usage.Record{rec(now.Add(-1*time.Hour), "m", 2, 2)}
+	o.setRecords("a", a)
+	o.setRecords("b", b)
+
+	first := o.flatten()
+	if len(first) != 2 {
+		t.Fatalf("flatten len = %d, want 2", len(first))
+	}
+	o.setRecords("a", a) // unchanged: same view again, as every scan does
+	o.setRecords("b", b)
+	if !o.flatValid {
+		t.Fatalf("unchanged setRecords invalidated the flatten cache")
+	}
+	if again := o.flatten(); &again[0] != &first[0] {
+		t.Fatalf("flatten rebuilt although nothing changed")
+	}
+
+	grown := append(b[:1:1], rec(now.Add(-30*time.Minute), "m", 3, 3))
+	o.setRecords("b", grown)
+	if o.flatValid {
+		t.Fatalf("a grown file did not invalidate the cache")
+	}
+	if got := o.flatten(); len(got) != 3 {
+		t.Fatalf("flatten after growth len = %d, want 3", len(got))
+	}
+
+	o.prunePaths(map[string]bool{"a": true})
+	if got := o.flatten(); len(got) != 1 {
+		t.Fatalf("flatten after prune len = %d, want 1", len(got))
+	}
+}
+
+// BenchmarkUsagePricing_BlockAndWeeklyIdleScan measures the per-scan pricing
+// cost when no file changed: the flatten sort now runs once, not per scan.
+func BenchmarkUsagePricing_BlockAndWeeklyIdleScan(b *testing.B) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	o := NewUsagePricingObserver(pricingFixture())
+	files := make([][]usage.Record, 50)
+	for f := range files {
+		for i := 0; i < 2000; i++ {
+			files[f] = append(files[f], rec(now.Add(-time.Duration(f*2000+i)*time.Second), "m", i, 1))
+		}
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		for f, r := range files {
+			o.setRecords(string(rune('a'+f)), r)
+		}
+		o.Block(now)
+		o.Weekly(now)
+	}
+}

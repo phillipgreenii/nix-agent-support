@@ -22,7 +22,7 @@ func TestProducer_Assemble_FiresProducerPhases(t *testing.T) {
 	if _, err := p.Producer().Assemble(ctx, now); err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	for _, ph := range []string{"discover", "pricer", "limits", "weekly"} {
+	for _, ph := range []string{"discover", "pricer", "limits", "weekly", "assemble_scan", "assemble_fold", "assemble_resolve", "assemble_providers", "assemble_pr", "assemble_reconcile"} {
 		if rec.phases[ph] == 0 {
 			t.Errorf("producer Assemble did not fire phase %q; phases=%v", ph, rec.phases)
 		}

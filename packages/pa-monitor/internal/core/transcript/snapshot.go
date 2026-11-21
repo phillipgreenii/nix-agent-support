@@ -408,6 +408,18 @@ func (a *Accumulator) Records() []usage.Record {
 	return out
 }
 
+// RecordsView returns the pricing records folded so far WITHOUT copying them.
+// The slice is capped at its length, and the accumulator only ever appends past
+// it, so the view stays valid and unchanged while later folds run; callers MUST
+// treat it as read-only. It avoids the per-refresh O(records) copy Records makes.
+func (a *Accumulator) RecordsView() []usage.Record {
+	n := len(a.st.records)
+	if n == 0 {
+		return nil
+	}
+	return a.st.records[:n:n]
+}
+
 // ScanMode reports whether a ScanIncremental call performed a fresh full parse
 // or folded only newly-appended bytes.
 type ScanMode string

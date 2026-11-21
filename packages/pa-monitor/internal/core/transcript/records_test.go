@@ -114,3 +114,31 @@ func TestAccumulatorRecordsIncrementalEqualsCold(t *testing.T) {
 		t.Errorf("cold Records() len = %d, want 2", len(cold))
 	}
 }
+
+// TestAccumulatorRecordsViewIsStableAndUncopied proves RecordsView returns the
+// folded records without copying, that a later fold leaves an earlier view
+// unchanged, and that appending to a view cannot clobber the accumulator.
+func TestAccumulatorRecordsViewIsStableAndUncopied(t *testing.T) {
+	line := func(ts string) []byte {
+		return []byte(`{"type":"assistant","timestamp":"` + ts + `","message":{"model":"claude-opus-4","usage":{"input_tokens":5,"output_tokens":7}}}`)
+	}
+	acc := NewAccumulator()
+	if acc.RecordsView() != nil {
+		t.Fatalf("empty accumulator view should be nil")
+	}
+	acc.FoldLine(line("2026-07-20T10:00:00Z"))
+	v1 := acc.RecordsView()
+	if len(v1) != 1 {
+		t.Fatalf("view len = %d, want 1", len(v1))
+	}
+	acc.FoldLine(line("2026-07-20T11:00:00Z"))
+	v2 := acc.RecordsView()
+	if len(v1) != 1 || len(v2) != 2 || v1[0] != v2[0] {
+		t.Fatalf("earlier view changed after a later fold: %v / %v", v1, v2)
+	}
+	_ = append(v2, v2[0]) // cap-clipped: must reallocate, not write into the accumulator
+	acc.FoldLine(line("2026-07-20T12:00:00Z"))
+	if got := acc.Records(); len(got) != 3 || !got[2].Timestamp.After(got[1].Timestamp) {
+		t.Fatalf("accumulator corrupted by an append to a view: %v", got)
+	}
+}

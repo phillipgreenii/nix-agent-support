@@ -336,6 +336,19 @@ The daemon emits:
   failed or timed out and the cost totals may be undercounted until a later scan converges; 0 means
   the fold is complete. Absent until the first scan.
 
+- **`pa_monitor.poll.phase.duration`** (Prometheus `pa_monitor_poll_phase_duration`, label `phase`) —
+  per-phase duration histogram. Producer phases: `discover`, `pricer`, `limits`, `weekly`, and
+  `assemble`, the whole producer cycle. `assemble` is split into sub-phases that name the slow part
+  (the existing names are unchanged; the sub-phases are additive and run back to back, so they sum to
+  about `assemble` minus the time of `pricer`, `limits` and `weekly`):
+  `assemble_scan` (the Monitor's scan: discovery, fold, resolution), of which `assemble_fold` is the
+  recorder sync and per-file line fold and `assemble_resolve` is transcript resolution, observer
+  feeding and pruning; `assemble_providers` (per-session subshell, git branch, terminal host);
+  `assemble_pr` (PR lookups); `assemble_reconcile` (repo labels and provider-cache reconcile).
+  Mean per scan: `rate(pa_monitor_poll_phase_duration_sum{phase="assemble_fold"}[5m]) / rate(pa_monitor_poll_phase_duration_count{phase="assemble_fold"}[5m])`.
+  The pricing record set is no longer copied per refreshed file and the sorted concatenation Block
+  and Weekly share is built once per change instead of twice per scan.
+
 The cmux-bridge and TUI additionally emit:
 
 - **`pa_monitor.daemon.connected{component="cmux-bridge"|"tui"}`** — gauge, 1 = connected, 0 =

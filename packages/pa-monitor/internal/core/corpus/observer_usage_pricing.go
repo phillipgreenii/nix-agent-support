@@ -24,6 +24,12 @@ type UsagePricingObserver struct {
 	recs    map[string][]usage.Record // keyed by transcript path
 	probed  bool
 	lastErr error
+
+	// flat caches flatten's sorted concatenation until a file's records change.
+	// Block and Weekly each need it every scan, and most scans change nothing, so
+	// without the cache each scan sorted the whole retained set twice.
+	flat      []usage.Record
+	flatValid bool
 }
 
 // NewUsagePricingObserver builds the observer with the account price table. No
@@ -43,7 +49,20 @@ func (o *UsagePricingObserver) Criteria() Criteria {
 // setRecords replaces path's pricing records (the tail returns the whole file's
 // records each fold — including on a cache-hit — so replace, never append).
 func (o *UsagePricingObserver) setRecords(path string, recs []usage.Record) {
+	if old, ok := o.recs[path]; !ok || !sameRecords(old, recs) {
+		o.flatValid = false
+	}
 	o.recs[path] = recs
+}
+
+// sameRecords reports whether a and b are the same view of the same backing
+// array (same length, same first element address). Records are only appended
+// and a reset builds a new array, so equal views hold equal content.
+func sameRecords(a, b []usage.Record) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return len(a) == 0 || &a[0] == &b[0]
 }
 
 // resetErr clears the accumulated scan error; the Monitor calls it at the top of
@@ -69,6 +88,7 @@ func (o *UsagePricingObserver) prunePaths(activePaths map[string]bool) {
 	for p := range o.recs {
 		if !activePaths[p] {
 			delete(o.recs, p)
+			o.flatValid = false
 		}
 	}
 }
@@ -79,6 +99,9 @@ func (o *UsagePricingObserver) prunePaths(activePaths map[string]bool) {
 // order taken from either would let two runs over the same records differ in the
 // last digits.
 func (o *UsagePricingObserver) flatten() []usage.Record {
+	if o.flatValid {
+		return o.flat
+	}
 	var all []usage.Record
 	for _, r := range o.recs {
 		all = append(all, r...)
@@ -103,6 +126,7 @@ func (o *UsagePricingObserver) flatten() []usage.Record {
 		}
 		return x.CacheRead < y.CacheRead
 	})
+	o.flat, o.flatValid = all, true
 	return all
 }
 

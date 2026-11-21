@@ -125,9 +125,12 @@ func (m *Monitor) Scan(ctx context.Context, now time.Time) ([]*session.Session, 
 	m.rd.queries, m.rd.linesFolded, m.rd.filesFolded = 0, 0, 0
 	foldStart := time.Now()
 	foldErr, err := m.sync(ctx, now, ids)
+	recordPhase(m.rec, "assemble_fold", time.Since(foldStart))
 	if err != nil {
 		return nil, err
 	}
+	resolveStart := time.Now()
+	defer func() { recordPhase(m.rec, "assemble_resolve", time.Since(resolveStart)) }()
 	recordScan(m.rec, "feed", time.Since(foldStart), int64(m.rd.linesFolded))
 	dirty := m.rd.dirtyFiles()
 	recordDirtyFiles(m.rec, dirty)

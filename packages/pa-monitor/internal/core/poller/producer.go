@@ -197,7 +197,11 @@ func (pr *Producer) Load() *DerivedState { return pr.ref.Load() }
 // immutable DerivedState priced at `now`. It performs NO burn-rate sampling,
 // status derivation, or DB writes (those stay on the emit tick, buildTree).
 func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState, error) {
+	scanStart := time.Now()
 	sessions, err := pr.Monitor.Scan(ctx, now)
+	// assemble_scan covers discovery, the recorder fold and resolution; the
+	// Monitor splits it further into discover, assemble_fold and assemble_resolve.
+	pr.phase("assemble_scan", scanStart)
 	if errors.Is(err, session.ErrDaemonOffline) {
 		// The recorder is not answering: publish an empty state that says so
 		// ("daemon offline") instead of keeping a stale one or reading Claude's
@@ -220,6 +224,7 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 	// calls; Reconcile (below) then prunes vanished (cwd,branch) keys.
 	pr.Providers.BeginScan()
 
+	providersStart := time.Now()
 	projections := make(map[string]SessionProjection, len(sessions))
 	for _, s := range sessions {
 		path, mtime, ok := pr.Monitor.ResolvedPath(s.SessionID)
@@ -243,6 +248,8 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 		}
 	}
 
+	pr.phase("assemble_providers", providersStart)
+
 	// PR lookups once per directory, keyed by the same first-non-empty-branch
 	// logic aggregate.Build uses so the PR matches the displayed branch.
 	prByDir := map[string]*session.PRInfo{}
@@ -255,11 +262,13 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 			winningBranch[s.Cwd] = s.Branch
 		}
 	}
+	prStart := time.Now()
 	for cwd, branch := range winningBranch {
 		if info, err := pr.Providers.PR(ctx, cwd, branch); err == nil {
 			prByDir[cwd] = info
 		}
 	}
+	pr.phase("assemble_pr", prStart)
 
 	// Limits/weekly are cheap projection reads (the fold happened in Scan); the
 	// phase timers are re-homed here from the emit tick (step 6, §11 parity).
@@ -276,6 +285,7 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 	// reads the map instead of calling provider.Cache.RepoLabel — which would
 	// otherwise race the producer's cwd-node eviction. Only positive labels are
 	// stored; an absent cwd is a non-repo (RepoLabel returns false).
+	reconcileStart := time.Now()
 	repoLabels := map[string]string{}
 	for _, s := range sessions {
 		if s.Cwd == "" {
@@ -292,6 +302,7 @@ func (pr *Producer) Assemble(ctx context.Context, now time.Time) (*DerivedState,
 	// Evict provider-cache nodes for vanished sessions/cwds + prune vanished PR
 	// keys — once per batch, after the per-session loop + PR calls.
 	pr.Providers.Reconcile(sessions)
+	pr.phase("assemble_reconcile", reconcileStart)
 
 	// pricer phase re-homed here from the emit tick (step 6): the pricing fold ran
 	// in Scan; this times the block projection read (§11 parity — the phase label
