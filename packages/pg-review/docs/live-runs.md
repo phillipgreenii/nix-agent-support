@@ -73,3 +73,18 @@ The pool was empty (`ccpool capacity`: free 6 of 6) before this pass.
 - One watched run, agent-workflow over workspace with a 24-hour window (deep-review profile, claude-opus-5-5): state Filed, exit 0, about 1.9 min, 0 queries, 0 repair replies, 0 items filed, prompt hash recorded; its pool session shows closed with close reason handler.
 - Integrity: the analyst working directory stayed empty, and the config file is a read-only store symlink whose directory was last changed by the apply before these runs. A before/after ledger snapshot was not taken in a form that can be compared (the first snapshot command used the wrong `stat` flavour), so the ledger-unchanged criterion is still not confirmed.
 - Still unmet: items filed, validated and rendered with `pg-review human show` (the run again filed nothing; `human pending` is empty), the ledger snapshot comparison, and a clean doctor run.
+
+## Third watched pass (2026-11-20, items filed)
+
+The pool was empty before this pass, and `pg-review job doctor` passed every check, including the session check (`PASS config`, `ledger`, `providers`, `recorder`, `ccpool`, `hook`, `session`). A before/after snapshot was taken with GNU `stat` (`stat --version` checked first): mtime and size of the state directory, ledger, export file, analyst working directory and config directory and file, plus a content hash of the ledger and export file.
+
+| Window | Lens           | Scope     | Run state      | Items filed |
+| ------ | -------------- | --------- | -------------- | ----------- |
+| 24h    | agent-workflow | workspace | Filed (exit 0) | 0           |
+| 72h    | agent-workflow | workspace | Filed (exit 0) | 2           |
+
+- Both runs were one lens and one scope, run one at a time and watched. The 24-hour window filed nothing again, so a 3-day window was tried; the 7-day window was not retried (it times out in evidence collection).
+- `pg-review human pending` then listed 2 pending items, both of kind note. `pg-review human show <id>` rendered each with all numbered sections (title, where from, category, situation, history, problem, why it is a problem, impact, options with pros, cons and what happens if ruled) and an evidence pointer. The rendered text is validated by the ledger on filing, so a rendered item confirms validation.
+- Integrity: the ledger changed (size and hash differ, as expected when items are filed); the export file, the config directory and config file (a read-only store symlink), and the analyst working directory (still empty) were all byte- and mtime-identical before and after. The analyst therefore changed nothing outside the ledger rows the runner files.
+- The pool held no open session after the runs (`ccpool capacity`: free 6 of 6), and the doctor passed again afterwards.
+- One filed item reports that every recorded tool error shares one empty signature; that is a finding about the evidence provider, not a defect of this tool.
