@@ -41,6 +41,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/spf13/cobra"
@@ -50,17 +52,7 @@ import (
 // runs concatenated into Runs, with each backend's own health as one row in
 // Sources — never collapsed, matching the sources[] convention every
 // fan-out uses (INV-OUT-1).
-type ciListOutcome struct {
-	Runs    []schema.CIRun `json:"runs"`
-	Sources []SourceResult `json:"sources"`
-}
-
-// exitCode delegates to the shared fan-out scheme (0/5/3) — the exact same
-// classification logic auth.go/config_validate.go's fan-outs use, applied
-// to ciListOutcome's own Sources rows.
-func (o ciListOutcome) exitCode() int {
-	return FanOutOutcome{Sources: o.Sources}.ExitCode()
-}
+type ciListOutcome = client.CIListOutcome[schema.CIRun]
 
 // fanOutCIList queries "list_runs" against every backend in backends and
 // concatenates their runs, building one sources[] row per backend queried.
@@ -291,7 +283,7 @@ func newCiListCmd() *cobra.Command {
 			return err
 		}
 		outcome := fanOutCIListFresh(cmd.Context(), reg, backends, args[0], *freshFlag)
-		return writeFanOutResult(cmd, outcome, outcome.exitCode(), func() string {
+		return writeFanOutResult(cmd, outcome, outcome.ExitCode(), func() string {
 			return humanizeCiList(outcome)
 		})
 	}

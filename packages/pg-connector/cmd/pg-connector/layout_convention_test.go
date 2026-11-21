@@ -37,6 +37,11 @@ var allowedSharedLayout = map[string]bool{
 	"pkg/connectord": true,
 	// pkg/connectorkit is the generic-infrastructure root ADR 0124 allows.
 	"pkg/connectorkit": true,
+	// client is the published contract package of the umbrella CLI (result
+	// types, exit-code re-exports, typed error, Client and test fake): its own
+	// closure test keeps it to the standard library plus x/cmdrun and
+	// x/exitcode, and the umbrella and its consumers share its types.
+	"client": true,
 }
 
 // Both prefixes name a package whose OWN per-something subpackages are
@@ -169,7 +174,7 @@ func evaluateLayoutConvention(moduleRoot string) ([]string, error) {
 			return nil
 		}
 		violations = append(violations, fmt.Sprintf(
-			"%s: package %q is outside the shared surface (pkg/schema, pkg/provider, pkg/scriptout, pkg/eventlog, pkg/connectord, pkg/connectorkit) and outside cmd/<binary>/ — move it under a backend's own cmd/<binary>/internal/ or into the shared surface",
+			"%s: package %q is outside the shared surface (pkg/schema, pkg/provider, pkg/scriptout, pkg/eventlog, pkg/connectord, pkg/connectorkit, client) and outside cmd/<binary>/ — move it under a backend's own cmd/<binary>/internal/ or into the shared surface",
 			rel, relDir,
 		))
 		return nil

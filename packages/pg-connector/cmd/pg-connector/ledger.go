@@ -40,6 +40,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+
 	"github.com/gofrs/flock"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -156,12 +158,13 @@ func (l *Ledger) RecordFetchOutcome(now time.Time, truncated bool, fetchErr erro
 }
 
 // ChangeKind mirrors the wire "change" field values.
-type ChangeKind string
+// The type and its values are defined once, in the published client package.
+type ChangeKind = client.ChangeKind
 
 const (
-	ChangeAdded   ChangeKind = "added"
-	ChangeChanged ChangeKind = "changed"
-	ChangeRemoved ChangeKind = "removed"
+	ChangeAdded   = client.ChangeAdded
+	ChangeChanged = client.ChangeChanged
+	ChangeRemoved = client.ChangeRemoved
 )
 
 // LedgerChange is one classified entity change, either freshly computed by

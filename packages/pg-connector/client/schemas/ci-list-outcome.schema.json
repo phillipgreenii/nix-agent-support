@@ -1,0 +1,24 @@
+{
+  "$id": "ci-list-outcome",
+  "title": "pg-connector ci list outcome (client.CIListOutcome)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runs", "sources"],
+  "properties": {
+    "runs": { "type": "array" },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "status", "count"],
+        "properties": {
+          "source": { "type": "string" },
+          "status": { "enum": ["succeeded", "degraded", "disabled"] },
+          "count": { "type": "integer" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

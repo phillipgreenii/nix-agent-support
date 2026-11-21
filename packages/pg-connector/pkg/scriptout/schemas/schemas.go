@@ -120,3 +120,23 @@ func ValidateBytes(name string, data []byte) error {
 	}
 	return Validate(name, v)
 }
+
+// ValidateDocument validates raw JSON data against a schema document that is
+// not in the embedded registry (for example a contract package's own
+// checked-in schema). The document uses the same keyword subset as the
+// embedded schemas; a "$ref" resolves against the embedded registry. A
+// failure, including an unparseable document or payload, wraps ErrValidation.
+func ValidateDocument(schemaDoc, data []byte) error {
+	var s schema
+	if err := json.Unmarshal(schemaDoc, &s); err != nil {
+		return fmt.Errorf("%w: malformed schema document: %v", ErrValidation, err)
+	}
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return fmt.Errorf("%w: malformed JSON: %v", ErrValidation, err)
+	}
+	if err := s.validate(v, "$", resolve); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	return nil
+}

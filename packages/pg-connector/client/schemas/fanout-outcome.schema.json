@@ -1,0 +1,24 @@
+{
+  "$id": "fanout-outcome",
+  "title": "pg-connector fan-out outcome (client.FanOutOutcome)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sources"],
+  "properties": {
+    "schemaVersion": { "type": "integer" },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "status", "count"],
+        "properties": {
+          "source": { "type": "string" },
+          "status": { "enum": ["succeeded", "degraded", "disabled"] },
+          "count": { "type": "integer" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

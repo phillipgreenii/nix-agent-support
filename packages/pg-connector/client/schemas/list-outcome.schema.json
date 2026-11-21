@@ -1,0 +1,27 @@
+{
+  "$id": "list-outcome",
+  "title": "pg-connector list outcome (client.ListOutcome)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entities", "present_ids", "sources", "truncated"],
+  "properties": {
+    "entities": { "type": "array" },
+    "present_ids": { "type": "array", "items": { "type": "string" } },
+    "truncated": { "enum": [true, false] },
+    "fingerprints": { "type": "object" },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "status", "count"],
+        "properties": {
+          "source": { "type": "string" },
+          "status": { "enum": ["succeeded", "degraded", "disabled"] },
+          "count": { "type": "integer" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

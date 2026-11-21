@@ -1,0 +1,43 @@
+{
+  "$id": "changes-outcome",
+  "title": "pg-connector changes outcome (client.ChangesOutcome)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sources", "changes"],
+  "properties": {
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["backend", "status", "version", "truncated"],
+        "properties": {
+          "backend": { "type": "string" },
+          "status": { "enum": ["succeeded", "degraded", "disabled"] },
+          "version": { "type": "integer" },
+          "truncated": { "enum": [true, false] },
+          "reason": { "type": "string" },
+          "next_seq": { "type": "integer" },
+          "store_identity": { "type": "string" }
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["change", "source", "entity"],
+        "properties": {
+          "change": { "enum": ["added", "changed", "removed"] },
+          "source": { "type": "string" },
+          "entity": {},
+          "seq": { "type": "integer" },
+          "kinds": {},
+          "fields": {}
+        }
+      }
+    },
+    "sources_freshness": { "type": "array" }
+  }
+}

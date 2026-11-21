@@ -34,6 +34,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/spf13/cobra"
@@ -184,22 +186,7 @@ func humanizePRCommits(raw json.RawMessage) (string, error) {
 // "always populated regardless of ids_only" invariant) is additive to
 // the existing {entities, sources} CLI wire shape, so no existing
 // consumer decoding only Entities/Sources is affected.
-type prListOutcome struct {
-	Entities   []schema.PR    `json:"entities"`
-	PresentIDs []string       `json:"present_ids"`
-	Sources    []SourceResult `json:"sources"`
-	// Truncated is true when ANY queried backend's list result was
-	// truncated (its own Truncated, which the fan-out previously dropped),
-	// so a caller comparing this listing against a prior one can withhold
-	// removals it can no longer trust. A source that did not succeed stays
-	// visible in Sources as before.
-	Truncated bool `json:"truncated"`
-	// Fingerprints maps each entity id in Entities to its fingerprint
-	// string (list.go's addListFingerprint). Present only when the call
-	// passed --fingerprints; omitted otherwise, so the outcome stays
-	// decodable by every consumer that predates it.
-	Fingerprints map[string]string `json:"fingerprints,omitempty"`
-}
+type prListOutcome = client.ListOutcome[schema.PR]
 
 // fanOutPRListFresh queries "list" against every backend in backends (design
 // 's request shape: {"query": query, "cursor": null, "ids_only":

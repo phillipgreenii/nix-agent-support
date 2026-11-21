@@ -135,6 +135,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 	"github.com/spf13/cobra"
@@ -187,14 +189,7 @@ type rawListResult struct {
 // which no source was forwarded is byte-identical to the ledger path's. Seq is a
 // pointer because 0 (a --reset replay entry) is a value the forwarded wire
 // carries.
-type changesEntry struct {
-	Change ChangeKind      `json:"change"`
-	Source string          `json:"source"`
-	Entity json.RawMessage `json:"entity"`
-	Seq    *int64          `json:"seq,omitempty"`
-	Kinds  json.RawMessage `json:"kinds,omitempty"`
-	Fields json.RawMessage `json:"fields,omitempty"`
-}
+type changesEntry = client.Change
 
 // changesSourceRow is one item in the wire response's sources[] array —
 // deliberately NOT outcome.go's shared SourceResult shape: this packet's
@@ -214,29 +209,11 @@ type changesEntry struct {
 // dropped. Mirrors SourceResult's own Reason field and pr.go's
 // formatSourcesTable "(%s)" human-mode rendering — omitempty so a
 // succeeded row's JSON stays exactly as before.
-type changesSourceRow struct {
-	Backend   string       `json:"backend"`
-	Status    SourceStatus `json:"status"`
-	Version   int64        `json:"version"`
-	Truncated bool         `json:"truncated"`
-	Reason    string       `json:"reason,omitempty"`
-	// NextSeq is set only on a forwarded source (changes_forward.go): the
-	// backend's log position scanned up to, which the umbrella acknowledges
-	// after the output is flushed.
-	NextSeq *int64 `json:"next_seq,omitempty"`
-	// StoreIdentity is set only on a forwarded source: the identity of the
-	// backend's own store, passed through unchanged. A fan-out answer has one
-	// store per source, so it sits on the source row.
-	StoreIdentity string `json:"store_identity,omitempty"`
-}
+type changesSourceRow = client.ChangesSource
 
-type changesWire struct {
-	Sources []changesSourceRow `json:"sources"`
-	Changes []changesEntry     `json:"changes"`
-	// SourcesFreshness is set only when at least one source was forwarded
-	// (changes_forward.go); a pointer so an empty list still writes [].
-	SourcesFreshness *[]schema.SourceFreshness `json:"sources_freshness,omitempty"`
-}
+// changesWire is the changes verb's response, defined once in the published
+// client package so the umbrella and its consumers share one type.
+type changesWire = client.ChangesOutcome
 
 // changesBackendResult is one backend's own outcome within a "changes"
 // fan-out call — enough state to build both the wire response
@@ -843,7 +820,12 @@ func changesWireFor(results []changesBackendResult) changesWire {
 		if freshness == nil {
 			freshness = []schema.SourceFreshness{}
 		}
-		w.SourcesFreshness = &freshness
+		raw, err := json.Marshal(freshness)
+		if err != nil {
+			// A []schema.SourceFreshness is plain data and cannot fail to marshal.
+			panic(err)
+		}
+		w.SourcesFreshness = raw
 	}
 	return w
 }

@@ -18,40 +18,27 @@ import (
 
 	"github.com/phillipgreenii/x/exitcode"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// SourceStatus is one row's status in a fan-out response's sources[] array.
-type SourceStatus string
-
-const (
-	// SourceSucceeded: the source answered normally.
-	SourceSucceeded SourceStatus = "succeeded"
-	// SourceDegraded: the source answered, but with a failure/bad state.
-	SourceDegraded SourceStatus = "degraded"
-	// SourceDisabled: the source does not implement/support this op at all
-	// (a well-formed "not applicable," not a failure).
-	SourceDisabled SourceStatus = "disabled"
+// The fan-out outcome types are defined once, in the published client
+// package; the umbrella encodes with the same types a consumer decodes.
+type (
+	// SourceStatus is one row's status in a fan-out response's sources[] array.
+	SourceStatus = client.SourceStatus
+	// SourceResult is one row in a fan-out response's sources[] array.
+	SourceResult = client.SourceResult
+	// FanOutOutcome is the response envelope for a fan-out op; its ExitCode
+	// method (0/5/3) lives with the type.
+	FanOutOutcome = client.FanOutOutcome
 )
 
-// SourceResult is one row in a fan-out response's sources[] array: one row
-// per source queried, never collapsed. Count is that source's own raw
-// pre-merge count; for a fan-out op with no natural item count of its own
-// (auth_status/capabilities), Count MAY be 0 — an implementer choice, not a
-// design-pinned value.
-type SourceResult struct {
-	Source string       `json:"source"`
-	Status SourceStatus `json:"status"`
-	Count  int          `json:"count"`
-	Reason string       `json:"reason,omitempty"`
-}
-
-// FanOutOutcome is the response envelope for a fan-out op: one that queries
-// every registered backend of a type/capability at once (e.g. auth status
-// or config validate).
-type FanOutOutcome struct {
-	Sources []SourceResult `json:"sources"`
-}
+const (
+	SourceSucceeded = client.SourceSucceeded
+	SourceDegraded  = client.SourceDegraded
+	SourceDisabled  = client.SourceDisabled
+)
 
 // configError marks a failure to load or validate the pg-connector config
 // (no file found, unreadable, unparseable, an unrecognised key, or a failed
@@ -69,38 +56,6 @@ func asConfigError(err error) error {
 		return nil
 	}
 	return &configError{err: err}
-}
-
-// ExitCode returns this outcome's pg-connector CLI exit code: 0 (all
-// healthy — succeeded or disabled), 5 (Degraded — at least one source is
-// degraded, but at least one is healthy), or 3 (Unavailable, total failure —
-// no healthy source, including the case of zero sources queried). 1 is
-// never returned here — it is reserved for the CLI's own
-// generic/unexpected-failure path outside this helper.
-//
-// Disabled counts as healthy, not as a failure: per INV-EXIT-2, a
-// no-credential backend that correctly answers "not applicable" is a
-// well-formed negative, not a degraded state. Counting it against the
-// outcome would make a fully correct, fully-configured machine (where
-// some backends are legitimately no-credential) report a standing
-// partial outage forever [bug A2].
-func (o FanOutOutcome) ExitCode() int {
-	healthy, failed := 0, 0
-	for _, s := range o.Sources {
-		if s.Status == SourceDegraded {
-			failed++
-		} else {
-			healthy++
-		}
-	}
-	switch {
-	case failed == 0 && healthy > 0:
-		return exitcode.OK
-	case healthy == 0:
-		return exitcode.Unavailable
-	default:
-		return exitcode.Degraded
-	}
 }
 
 // TargetedExitCode computes pg-connector's own CLI exit code for a targeted

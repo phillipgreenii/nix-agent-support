@@ -179,3 +179,21 @@ func TestResponseErrorSchema_RefResolvesToErrorSchema(t *testing.T) {
 		t.Fatalf("response-error accepted an out-of-taxonomy error.code")
 	}
 }
+
+func TestValidateDocument(t *testing.T) {
+	doc := []byte(`{"type":"object","additionalProperties":false,"required":["a"],"properties":{"a":{"type":"integer"}}}`)
+	if err := ValidateDocument(doc, []byte(`{"a":1}`)); err != nil {
+		t.Fatalf("valid payload rejected: %v", err)
+	}
+	for name, tc := range map[string]struct{ doc, data string }{
+		"wrong type":     {string(doc), `{"a":"x"}`},
+		"extra property": {string(doc), `{"a":1,"b":2}`},
+		"bad payload":    {string(doc), `{`},
+		"bad schema":     {`{`, `{}`},
+	} {
+		err := ValidateDocument([]byte(tc.doc), []byte(tc.data))
+		if !errors.Is(err, ErrValidation) {
+			t.Errorf("%s: err = %v, want ErrValidation", name, err)
+		}
+	}
+}

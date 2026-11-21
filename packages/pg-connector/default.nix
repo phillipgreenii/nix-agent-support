@@ -66,6 +66,7 @@ mkGoApp {
       ./gomod2nix.toml
       ./cmd
       ./pkg
+      ./client
       ./default.nix
       ./pg-connector-github.nix
       ./pg-connector-issue-beads.nix
