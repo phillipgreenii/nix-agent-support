@@ -56,6 +56,15 @@ run_hooklike() {
   [[ "$output" == *none* ]]
 }
 
+@test "the command sees no CCPOOL_* variable" {
+  # Leak ccpool session identity into the guard's own environment, as a drain session does.
+  export CCPOOL_POOL=x CCPOOL_AUTONOMOUS=1 CCPOOL_EXTERNAL_ID=y
+  run_hooklike bash -c 'env | grep "^CCPOOL_" || echo none'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *none* ]]
+  [[ "$output" == *"removing inherited"*CCPOOL_POOL* ]]
+}
+
 @test "a test that writes the ambient config by path fails the run even if it passes" {
   run_hooklike git config --file "$AMBIENT/.git/config" core.worktree /somewhere
   [ "$status" -eq 97 ]

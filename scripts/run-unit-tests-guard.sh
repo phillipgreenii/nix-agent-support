@@ -16,6 +16,10 @@
 #   2. snapshots <common-dir>/config;
 #   3. runs <command> with EVERY GIT_* variable removed, so no test can inherit
 #      GIT_DIR/GIT_WORK_TREE (the cause), naming what it removed on stderr;
+#      EVERY CCPOOL_* variable (ccpool session identity such as CCPOOL_POOL,
+#      CCPOOL_AUTONOMOUS, CCPOOL_EXTERNAL_ID, which change config defaults and
+#      broke the ccpool config tests when a pre-land ran in a ccpool session)
+#      is removed the same way;
 #   4. fails (exit 97) if <common-dir>/config changed (the symptom, e.g. a test
 #      that writes the real config by absolute path), even when <command> passed.
 # Exits with <command>'s own status otherwise. Not inside a git repo: runs
@@ -40,7 +44,7 @@ fi
 scrubbed=()
 while IFS= read -r name; do
   [ -n "$name" ] && scrubbed+=("$name")
-done < <(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p')
+done < <(env | sed -nE 's/^((GIT|CCPOOL)_[A-Za-z0-9_]*)=.*/\1/p')
 if [ "${#scrubbed[@]}" -gt 0 ]; then
   echo "run-unit-tests-guard: removing inherited ${scrubbed[*]} from the test environment" >&2
 fi
