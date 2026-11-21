@@ -166,6 +166,40 @@ The settle unit tier is 2.5 times the phase 2 plain baseline (47.47 s / 18.62 s)
 (15.90 / 6.72), and `-race` is 1.7 times the baseline (123.00 s / 71.07 s); the ratios track the load, so no
 regression is shown, but none is ruled out to better than the load noise.
 
+Load-independent re-measure of the settle unit tier (2026-11-21), the method of "Measuring Test Cost
+On A Loaded Host" in `code-file-standards.md`: test binaries built WITHOUT `-race` with
+`go test -c ./internal/settle` from the code before the split (the plan commit, the parent of the
+first split commit) and from its end (the commit that added the ADR), each extracted with
+`git archive` into its own scratch directory; run from the package directory under
+`nice -n 10 /usr/bin/time -l <bin> -test.count=1`, 5 interleaved pairs, all 10 runs PASS.
+`GOMAXPROCS` unset (11 CPUs). Load average at the runs: 15 to 21 (1 minute), for information only.
+
+| Measure (median of 5, range)     | Before the split         | After the split          | Ratio |
+| -------------------------------- | ------------------------ | ------------------------ | ----- |
+| instructions retired             | 60.02 G (59.59 to 60.22) | 61.46 G (61.06 to 61.79) | 1.024 |
+| cycles elapsed                   | 26.91 G (24.70 to 30.67) | 29.82 G (23.19 to 31.00) | 1.108 |
+| wall time, minimum (information) | 21.59 s                  | 22.25 s                  | 1.03  |
+
+Instructions retired, the precise measure, is 2.4 percent higher after the split (1.44 G /
+60.02 G), with a spread inside each side under 1 percent, so the difference is real but small, and
+the after side also runs the tests the split added. Cycles elapsed overlap between the two sides
+(load noise) and do not contradict that. No slowdown beyond the added tests is shown. The 47.47 s
+figure above is therefore load, not the split. The 18.62 s phase 2 baseline is a wall time on a
+quiet host and cannot be converted to instructions retired; the same-load before and after pair is
+the comparison that stands.
+
+The nix check `pg-claude-code-recorder-go-tests` (`nix build --no-link`, 2026-11-21, from the
+canonical clone, load 15 to 21) FAILED, not passed: `internal/settle` (120.53 s) and
+`internal/serve` (120.61 s) hit the 120 s per-package cap (the panic names
+`TestRemovalGaugesRefreshOnTheFiveMinuteTimer` running in settle and
+`TestFileViewKeepsIDOrderForOutOfOrderArrival` in serve at the alarm); `internal/parser` (108.95 s)
+and `internal/copier` (101.95 s) passed 11 to 18 s under the cap, `internal/query` 70.04 s and
+`internal/lifecycle` 36.26 s. The slowest tests that completed were
+`TestStepsPartitionParseAll` 43.55 s (parser), `TestAggregateReadsGroupsNotRecords` 25.99 s,
+`TestCoverageLazyDoesNotRebuildPerFileLagMaps` 19.31 s and `TestRollingDoctorEqualsTheSynchronousOracle`
+14.52 s. The cap was not raised. Bringing these packages under the cap is already owned by the open
+beads on the same check.
+
 ## Landing
 
 The whole set stays on one feature branch in one worktree until the final verification passes: all
