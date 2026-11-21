@@ -16,9 +16,6 @@
 # refId A is plain PromQL and refId C a single threshold stage, so check-alert-rules.sh can wrap A
 # with C's evaluator and run `promtool test rules` over rule-tests/<uid>.test.yaml.
 #
-# The five pool rules of the tool pg-gwm replaced and its exporter-down rule are removed through
-# alerts-delete.yaml, because Grafana keeps a rule live after the file that defined it is dropped.
-#
 # Every uid is also in registeredRuleUIDs of packages/pg-router-probe/cmd/pg-router-probe/run.go
 # (a firing instance reaches the escalation flow), and a deployment that passes its own
 # --rule-uid list to the probe MUST add them to that list too. The folder "Claude Agents"

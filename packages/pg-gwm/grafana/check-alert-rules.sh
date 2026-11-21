@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Alert rule check for the pg-gwm Grafana alert rules.
 #
-#   check-alert-rules.sh <alerts.yaml> <alerts-reaper.yaml> <dashboard.json> <rule-tests-dir> <probe run.go> <alerts-delete.yaml>
+#   check-alert-rules.sh <alerts.yaml> <alerts-reaper.yaml> <dashboard.json> <rule-tests-dir> <probe run.go>
 #
 # Three parts:
 #
@@ -12,16 +12,15 @@
 #      broken-persisting and max-reached-rate rules and alerts-reaper.yaml exactly the reaper-stale
 #      rule, whose noDataState Alerting is pinned here because promtool cannot test a missing series.
 #   2. Registration: the pg-gwm-* entries of registeredRuleUIDs in the router probe's
-#      run.go are exactly the rule uids of the two files (alerts.yaml first), in order. The delete file holds
-#      deleteRules for exactly the six uids of the tool pg-gwm replaced.
+#      run.go are exactly the rule uids of the two files (alerts.yaml first), in order.
 #   3. PromQL behaviour: refId A of every rule is wrapped as a Prometheus `alert:` rule
 #      `expr: (<A>) <op> <threshold>` (op and threshold from the refId C evaluator, `for` and
 #      labels carried over) next to a recording rule `wrapped:<uid>` over the same expression, and
 #      every `*.test.yaml` in the rule-tests directory runs under `promtool test rules`.
 set -euo pipefail
 
-if [ "$#" -ne 6 ]; then
-  echo "usage: check-alert-rules.sh <alerts.yaml> <alerts-reaper.yaml> <dashboard.json> <rule-tests-dir> <probe run.go> <alerts-delete.yaml>" >&2
+if [ "$#" -ne 5 ]; then
+  echo "usage: check-alert-rules.sh <alerts.yaml> <alerts-reaper.yaml> <dashboard.json> <rule-tests-dir> <probe run.go>" >&2
   exit 2
 fi
 alerts="$1"
@@ -29,7 +28,6 @@ reaper_alerts="$2"
 dashboard="$3"
 tests_dir="$4"
 run_go="$5"
-delete_file="$6"
 
 # uid, for, threshold, dashboard panel id, evaluator, noDataState, severity: one row per rule,
 # alerts.yaml's first, then alerts-reaper.yaml's. An empty panel id means the rule links no
@@ -110,21 +108,6 @@ from_file="$(printf '%s' "$alerts_json" | jq -r '.groups[].rules[].uid' | paste 
 from_probe="$(grep -oE '"pg-gwm-[a-z-]+",' "$run_go" | tr -d '",' | paste -sd, -)"
 [ "$from_file" = "$from_probe" ] ||
   fail "registeredRuleUIDs in run.go has [$from_probe], the rule file has [$from_file]"
-
-# The delete file names exactly the six uids of the tool pg-gwm replaced (five pool rules and its
-# exporter-down rule), all under that tool's uid prefix. The prefix is assembled from two pieces so
-# the old tool name appears literally only in alerts-delete.yaml.
-[ -f "$delete_file" ] || fail "$delete_file is missing"
-old_prefix="pg-checkout""-pool-"
-want_deleted=""
-for suffix in daemon-orphans exhausted-waiting exporter-down leaked-slots quarantined reset-slow; do
-  want_deleted="${want_deleted:+$want_deleted,}${old_prefix}${suffix}"
-done
-got_deleted="$(yq -o=json -I=0 '.' "$delete_file" | jq -r '[.deleteRules[].uid] | sort | join(",")')"
-[ "$got_deleted" = "$want_deleted" ] ||
-  fail "alerts-delete.yaml has [$got_deleted], want exactly [$want_deleted]"
-yq -o=json -I=0 '.' "$delete_file" | jq -e 'keys == ["apiVersion", "deleteRules"] and .apiVersion == 1 and ([.deleteRules[] | .orgId == 1] | all)' >/dev/null ||
-  fail "alerts-delete.yaml must hold only apiVersion 1 and deleteRules entries for orgId 1"
 
 # --- part 3: PromQL behaviour -----------------------------------------------------------
 

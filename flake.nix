@@ -9119,8 +9119,7 @@
                       ${./packages/pg-gwm/grafana/alerting/alerts-reaper.yaml} \
                       ${./packages/pg-gwm/grafana/pg-gwm.json} \
                       ${./packages/pg-gwm/grafana/alerting/rule-tests} \
-                      ${./packages/pg-router/cmd/pg-router-probe/run.go} \
-                      ${./packages/pg-gwm/grafana/alerting/alerts-delete.yaml}
+                      ${./packages/pg-router/cmd/pg-router-probe/run.go}
                     touch "$out"
                   '';
 
