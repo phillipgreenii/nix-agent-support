@@ -8,9 +8,9 @@
 mkGoApp {
   pname = "work-report";
 
-  # go.mod locally replaces ../pg-connector (the test suite drives
-  # pkg/scriptout's fake-backend doubles; production code never imports it),
-  # so the build sandbox must contain both package dirs at their relative
+  # go.mod locally replaces ../pg-connector (production code imports its
+  # published client package; the test suite also drives pkg/scriptout's
+  # fake-backend doubles), so the build sandbox must contain both package dirs at their relative
   # positions (Pattern B, `phillipg-nix-repo-base` ADR 0008; mirrors
   # packages/pg-desk/default.nix).
   src = lib.fileset.toSource {
@@ -42,9 +42,9 @@ mkGoApp {
   # binary bin/work-report-narrative (the narrative generator, docket pg2-6oop0)
   # is installed beside bin/work-report. Verified by `nix build .#work-report`.
   #
-  # work-report execs the pg-connector binary from PATH and nothing else; the
-  # wrapper supplies it at runtime, resolved by its bare $PATH name, never as a
-  # compile-time import. work-report-narrative is deliberately NOT wrapped: it
+  # work-report execs the pg-connector binary from PATH; the wrapper supplies it
+  # at runtime, resolved by its bare $PATH name. Its only compile-time import
+  # of pg-connector is the published client package (result types). work-report-narrative is deliberately NOT wrapped: it
   # execs only `claude`, which is the operator's own install and not a nix
   # package of this flake, so it is resolved from the PATH the report runner
   # passes (the runner's base environment always includes PATH).

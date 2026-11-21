@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pgconn"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pull"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/rangespec"
@@ -359,10 +360,7 @@ func listOpen(ctx context.Context, conn pgconn.Runner, backend string) (map[stri
 	if err != nil {
 		return nil, "", err
 	}
-	var doc struct {
-		Entities []entity    `json:"entities"`
-		Sources  []sourceRow `json:"sources"`
-	}
+	var doc client.ListOutcome[entity]
 	if err := json.Unmarshal(out, &doc); err != nil {
 		return nil, "", fmt.Errorf("decode issue list document: %w", err)
 	}
@@ -380,27 +378,16 @@ func listOpen(ctx context.Context, conn pgconn.Runner, backend string) (map[stri
 	return open, backend, nil
 }
 
-// sourceRow is one sources[] row of a fan-out document.
-type sourceRow struct {
-	Source string `json:"source"`
-	Status string `json:"status"`
-	Reason string `json:"reason,omitempty"`
-}
-
-// statusDisabled is the fan-out status of a backend the call does not apply
-// to, e.g. one that does not define the requested named query.
-const statusDisabled = "disabled"
-
 // pickTracker names the backend that holds the degraded-source beads: the one
 // registered issue backend the unpinned dedup lookup did not report as
 // disabled, because a backend that does not define DedupQuery reports
 // "disabled: query not recognized". Zero or several such backends, or a single
 // one that is itself degraded, is an error naming the candidates and the
 // EnvBackend remedy, never a guess.
-func pickTracker(sources []sourceRow) (string, error) {
-	var candidates []sourceRow
+func pickTracker(sources []client.SourceResult) (string, error) {
+	var candidates []client.SourceResult
 	for _, s := range sources {
-		if s.Status != statusDisabled {
+		if s.Status != client.SourceDisabled {
 			candidates = append(candidates, s)
 		}
 	}
@@ -413,7 +400,7 @@ func pickTracker(sources []sourceRow) (string, error) {
 		return "", fmt.Errorf("no registered issue backend defines the %q query (registered: %v); define it on the tracker's backend or set %s",
 			DedupQuery, registered, EnvBackend)
 	case 1:
-		if c := candidates[0]; c.Status != "succeeded" {
+		if c := candidates[0]; c.Status != client.SourceSucceeded {
 			return "", fmt.Errorf("tracker backend %s is %s: %s", c.Source, c.Status, c.Reason)
 		}
 		return candidates[0].Source, nil

@@ -8,21 +8,21 @@ import (
 	"sort"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/store"
 )
 
 // This file holds work-report's own decoding of the wire shape of
 // `pg-connector activity list --output json` (the umbrella verb's output): the
 // standard fan-out sources[] rows plus a flat items list, each item carrying
-// its source and an ActivityItem. Nothing here imports pg-connector.
+// its source and an ActivityItem. The activity verb has no published client
+// type, so only the per-source row comes from the client package.
 
-// wireRow is one sources[] row.
+// wireRow is one sources[] row: the published per-source row plus the
+// truncated flag the activity verb adds to it.
 type wireRow struct {
-	Source    string `json:"source"`
-	Status    string `json:"status"`
-	Count     int    `json:"count"`
-	Truncated bool   `json:"truncated"`
-	Reason    string `json:"reason"`
+	client.SourceResult
+	Truncated bool `json:"truncated"`
 }
 
 // wireItem is one items[] element; Item is decoded (and may be rejected) per

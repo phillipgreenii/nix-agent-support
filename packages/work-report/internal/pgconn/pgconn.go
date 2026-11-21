@@ -1,10 +1,9 @@
 // Package pgconn runs the pg-connector binary and nothing else.
 //
-// work-report never imports pg-connector's Go packages: it execs the
-// pg-connector binary found on PATH and decodes its JSON output into its own
-// small structs (see internal/pull). This package is the one place that
-// touches os/exec for that purpose, behind the Runner seam so callers can be
-// driven by a fake.
+// work-report imports only pg-connector's published client package (the result
+// types it decodes into); it execs the pg-connector binary found on PATH. This
+// package is the one place that touches os/exec for that purpose, behind the
+// Runner seam so callers can be driven by a fake.
 package pgconn
 
 import (
