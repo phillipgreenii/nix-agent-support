@@ -18,8 +18,8 @@
 // back capture write is re-applied from the journal. The derived tables
 // (records, fields, texts, parse offsets, parse_seq) commit with their parse
 // offset in one transaction and roll back together; the parser resumes from the
-// stored offset. A commit a delete depends on (CommitFull) and the removal
-// Barrier are synchronous=FULL with F_FULLFSYNC.
+// stored offset. A commit a delete depends on (CommitFull) is synchronous=FULL
+// with F_FULLFSYNC. The Barrier (not run by removal) is FULL with F_FULLFSYNC too.
 //
 // The copier's appends use plain fsync, which on darwin does not flush the
 // drive's cache. They are therefore weaker than the settle and removal path,
@@ -1400,22 +1400,24 @@ func (s *Store) applyAllOn(ctx context.Context, db txBeginner, recs []*Rec) erro
 	return nil
 }
 
-// ErrBarrierBusy means the removal barrier could not checkpoint the whole WAL
-// because a reader still pins an older snapshot of it.
+// ErrBarrierBusy means Barrier could not checkpoint the whole WAL because a
+// reader still pins an older snapshot of it.
 var ErrBarrierBusy = errors.New("store: the WAL could not be fully checkpointed (a reader pins it)")
 
 // barrierBusyTimeoutMS bounds how long the barrier waits for a reader before it
-// reports ErrBarrierBusy, so the removal pass is refused, not stalled.
+// reports ErrBarrierBusy.
 const barrierBusyTimeoutMS = 250
 
-// Barrier is the durability barrier that runs before the recorder lets an
-// original be removed from Claude's directories. Normal running keeps the index
-// at synchronous=NORMAL, so the tail of recent commits may sit only in the WAL
-// and the OS cache; the barrier makes everything committed so far durable: the
+// Barrier makes everything committed so far durable in the database file: the
 // journal (F_FULLFSYNC), then a TRUNCATE checkpoint under synchronous=FULL with
 // fullfsync and checkpoint_fullfsync, then F_FULLFSYNC of the database file
 // itself. It returns ErrBarrierBusy when a reader keeps the checkpoint from
-// finishing; the caller MUST NOT remove anything on any error.
+// finishing, which on a busy daemon is the normal outcome.
+//
+// Removal does NOT run it: the "removal pending" record is a CommitFull, whose
+// journal fsync is the durability a delete rests on (the 2026-11-04 durability
+// investigation, amended 2026-11-21). The tests use it to put a consistent
+// database image on disk.
 func (s *Store) Barrier() error { return s.BarrierCtx(context.Background()) }
 
 // BarrierCtx is Barrier with its checkpoint connection taken under ctx.

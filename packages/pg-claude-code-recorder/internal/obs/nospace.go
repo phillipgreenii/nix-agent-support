@@ -19,7 +19,7 @@ const (
 	OpCopy            = "copy"             // copying a file into the store (ingest)
 	OpParseIndex      = "parse_index"      // parse and index writes
 	OpArchive         = "archive"          // compression and archive segment writes (settle)
-	OpRemovalBarrier  = "removal_barrier"  // the durability barrier that gates a removal
+	OpRemovalBarrier  = "removal_barrier"  // the archive flush that gates a removal
 	OpIndexCheckpoint = "index_checkpoint" // the WAL checkpoint and truncate
 	OpRebuild         = "rebuild"          // the rebuild free-space preflight
 )

@@ -21,6 +21,9 @@ real transcript content appears here.
 | Removal                | archive hash-verified, then "removal pending" committed FULL, archive flushed before unlink | before the pending list is committed and before any rename: archive F_FULLFSYNC, then `Store.Barrier`; any failure refuses the removal with the reason `durability_barrier` |
 | Bulk rebuild           | finished at FULL                                                                            | finishes at FULL for its last checkpoint, then returns the connection to NORMAL                                                                                             |
 
+_Update 2026-11-21: the Removal row's `Store.Barrier` step is no longer run; see the amendment at the end of this
+document._
+
 The group-commit window does not touch the 60 s parse-lag health threshold: the worst added latency is the 5 s
 cap plus the batch itself.
 
@@ -56,6 +59,10 @@ because the WAL survives):
    than its journalled offset is already detected by `Recover` (`copy_mismatch`); NORMAL does not change that.
 
 ## The removal barrier and `PRAGMA fullfsync` on macOS
+
+_Superseded for removal on 2026-11-21: step 2 below (`Store.Barrier`) is no longer run by removal, and the test
+names in this section were renamed or replaced. The amendment at the end of this document says why. What
+follows is the design as it stood on 2026-11-04._
 
 `Settler.durabilityBarrier` runs after `listFiles` has read every archive segment back and proved it equal to
 its original (size and hash), and before the pending list is committed or any file is renamed:
@@ -123,3 +130,46 @@ per-wakeup 800 / 1.757 s = 455; after coalesced 40 / 0.584 s = 68 transactions p
 files. Reading: NORMAL alone changes little here (the profile that prompted the work found fsync only 6 percent
 of non-idle samples; writes dominate), and group commit is what pays: 20x fewer transactions, 6.6x fewer parse
 bytes written (109,584,384 / 16,695,296), and 3x less parse time (1,727 / 584).
+
+## Amendment 2026-11-21: removal no longer runs `Store.Barrier`
+
+Operator ruling (Phillip, 2026-11-21): before a Conversation's originals are removed, only two things must
+hold: the files have been quiet for the minimum time, and they are fully copied with a correct hash. The
+registry-file check stays. "drop the TRUNCATE checkpoint".
+
+What changed: `Settler.durabilityBarrier` is now `flushArchive` alone. Step 2 of "The removal barrier and
+`PRAGMA fullfsync` on macOS" (`Store.Barrier`, with its `wal_checkpoint(TRUNCATE)`) is no longer part of
+removal, so the table row for removal above ("then `Store.Barrier`") no longer applies. `Store.Barrier`
+and `ErrBarrierBusy` remain as a store primitive that the tests use. The reason `durability_barrier`, the log
+event `removal_barrier_failed` and the no-space op `removal_barrier` keep their names; they now describe a
+failed archive flush.
+
+Why it was needed to change: on the live daemon the checkpoint never succeeded. It makes one attempt with a
+250 ms busy timeout, which needs a moment with no reader, and a busy daemon (8 reader connections, queries
+up to 25 s) never offers one, so every removal was refused with `durability_barrier` and none ever ran.
+
+Why dropping it is safe: durability of the removal decision comes from the journal, not from the main
+database file.
+
+1. A FULL commit (`CommitFull`) writes its journal record and runs `F_FULLFSYNC` on the journal BEFORE it
+   touches the database. The journal is one append-only file, so that sync also makes every earlier record
+   durable: the settle rows, the segment ranges and the "settled" stage row.
+2. `Open` replays every journal record past `meta.last_seq`, so a database row rolled back by a power loss
+   (the "removal pending" record included) is re-applied. Recovery of a half-done removal reads that record and
+   the quarantine directory; it never reads checkpoint state.
+3. The archive bytes stay durable through `flushArchive`, which runs before the pending record and again before
+   each unlink.
+4. A TRUNCATE checkpoint only moves WAL frames into the main database file. A passive or automatic checkpoint
+   on the normal connections runs at `checkpoint_fullfsync=OFF`, and the barrier used to repair that; nothing
+   removal depends on is read from the main file's durability, because the index is re-derivable from the
+   journal and the copies.
+
+Residual risk, unchanged from the ruling at the top of this document: a torn main `index.db` after a checkpoint
+that was not fully synced. The index is rebuilt from the journal and the copies (`rebuild`).
+
+Tests: `TestCrashBetweenArchiveFlushAndCheckpointRemovesNothing` is now
+`TestCrashBetweenArchiveFlushAndPendingRecordRemovesNothing` (crash point `remove.before-pending`).
+`TestBarrierThatCannotCheckpointRefusesRemoval` is replaced by `TestRemovalSucceedsWhileAReaderPinsTheWAL`
+(a reader pins the WAL and removal still completes; it fails if the checkpoint is restored), and
+`TestArchiveFlushFailureRefusesRemovalAsDurabilityBarrier` pins the refusal that remains. The names in the
+"Tests:" paragraph above no longer exist.

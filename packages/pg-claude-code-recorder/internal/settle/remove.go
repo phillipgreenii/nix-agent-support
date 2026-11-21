@@ -419,13 +419,16 @@ func (s *Settler) removeConversation(ctx context.Context, c *conv, now time.Time
 		return false, reason, err
 	}
 	// The durability barrier: nothing leaves Claude's directories until the
-	// archive and every index commit so far are on disk. A failure refuses the
-	// removal and changes nothing.
-	if err := s.durabilityBarrier(ctx, pl); err != nil {
+	// archive is on disk. The index needs no checkpoint here: the "removal
+	// pending" record below is committed FULL, whose journal F_FULLFSYNC makes
+	// every earlier journal record durable and which Open replays after a power
+	// loss. A failure refuses the removal and changes nothing.
+	if err := s.durabilityBarrier(pl); err != nil {
 		s.cfg.Obs.Log.Warn("removal_barrier_failed", "session", pl.Session, "err", err.Error())
 		s.cfg.Obs.NoteNoSpace(obs.OpRemovalBarrier, err, "", s.freeBytesStr())
 		return false, BlockBarrier, nil
 	}
+	faults.At("remove.before-pending")
 	if err := s.commitPending(ctx, pl, now, true); err != nil {
 		return false, "", err
 	}
@@ -738,16 +741,14 @@ func mustJSON(v any) string {
 // durabilityBarrier runs before any original is quarantined. listFiles has just
 // read every archive segment back and proved it byte-equal (by hash and size) to
 // its original; the barrier makes that archive durable (F_FULLFSYNC of every
-// segment, the manifest and the directory) and then the index: the journal, a
-// TRUNCATE checkpoint under synchronous=FULL with fullfsync, and a flush of
-// index.db itself. The index runs at synchronous=NORMAL otherwise, so without
-// this the "removal pending" decision could rest on commits that a power loss
-// would roll back.
-func (s *Settler) durabilityBarrier(ctx context.Context, pl *pendingList) error {
-	if err := s.flushArchive(pl.Session); err != nil {
-		return err
-	}
-	return s.st.BarrierCtx(ctx)
+// segment, the manifest and the directory). It does not checkpoint the index:
+// the "removal pending" record committed right after it is a FULL commit, whose
+// journal F_FULLFSYNC makes every earlier journal record durable, and a power
+// loss that rolls the database back is repaired by replaying the journal at the
+// next Open. A TRUNCATE checkpoint here failed on the live daemon (it needs a
+// moment with no reader, which a busy daemon never has) and added no durability.
+func (s *Settler) durabilityBarrier(pl *pendingList) error {
+	return s.flushArchive(pl.Session)
 }
 
 // flushArchive flushes the archive that holds the Conversation's bytes (the
