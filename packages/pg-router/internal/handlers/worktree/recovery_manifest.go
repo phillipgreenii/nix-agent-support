@@ -74,7 +74,7 @@ func writeRecoveryManifest(ctx context.Context, path, destDir, beadID, branch st
 	if _, err := gitOut(ctx, path, env, "add", "-A"); err != nil {
 		return err
 	}
-	patch, err := gitOut(ctx, path, env, "diff", "--cached", "--binary", "--no-ext-diff", "HEAD")
+	patch, err := gitOut(ctx, path, env, "diff", "--cached", "--binary", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "HEAD")
 	if err != nil {
 		return err
 	}

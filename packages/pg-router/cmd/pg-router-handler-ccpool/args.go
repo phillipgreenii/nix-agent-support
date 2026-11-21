@@ -1,6 +1,6 @@
 package main
 
-const usageLine = "usage: pg-router-handler-ccpool <dispatch|postStartup|preShutdown|validate|register|self-status|origin|pool-capacity|janitor|split|query|version|help> [flags]"
+const usageLine = "usage: pg-router-handler-ccpool <dispatch|postStartup|preShutdown|validate|register|self-status|origin|pool-capacity|janitor|split|query|reclaim-interrupted|version|help> [flags]"
 
 const helpText = `pg-router-handler-ccpool — the ccpool adapter for pg-router.
 
@@ -91,6 +91,16 @@ Subcommands:
                  its beads-backed label/title-prefix/item-type filters;
                  --config/PG_ROUTER_CCPOOL_HANDLER_CONFIG supplies
                  RepoRoot/BeadsPrefix.
+  reclaim-interrupted  NOT part of the wire contract: the disk reclaimer's item for the
+                 "<worktreeDir>-interrupted" holding area. --dir names that
+                 directory and --repo the repository the recovery manifests'
+                 branches live in. It lists each entry as REMOVE with the rule
+                 that proves nothing is lost (empty patch and clean status, or
+                 the patch already in the branch tip by git patch-id --stable)
+                 or KEEP with the reason (no manifest, unreadable manifest, a
+                 rule that cannot be evaluated). Without --apply it changes
+                 nothing; --apply removes exactly the listed REMOVE entries;
+                 --size-kb prints the KiB they hold.
   version       print the version.
   help          print this text.
 

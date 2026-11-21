@@ -12455,8 +12455,11 @@
                     defaultLaunchConfig.phillipgreenii.programs.pg-router-ccpool-handler.launchConfigFile;
 
                   # The handler no longer registers a worktree pool with
-                  # pg-disk-reclaimer (pg-gwm owns its worktrees), so the enabled
-                  # module contributes no registry entry.
+                  # pg-disk-reclaimer (pg-gwm owns its worktrees); the enabled
+                  # module contributes exactly one entry, for the
+                  # "<worktreeDir>-interrupted" holding area, whose dry run and
+                  # removal both run the handler's `reclaim-interrupted`
+                  # subcommand against that directory and the repo root.
                   worktreeReclaimEntries = withLaunchConfig.phillipgreenii.programs.pg-disk-reclaimer.registryEntries;
 
                   # disabled -- must contribute NO registry entry (zero
@@ -13764,7 +13767,16 @@
                 assert wrapMessageNames npBadHandlerFired "np-bad" "absolute path";
                 assert wrapMessageNames npDefaultPoolFired "np-stray" "default pool";
                 assert wrapMessageNames npSharedPoolFired "np-without-spec" "/tmp/pg2-12gr4-10-shared";
-                assert worktreeReclaimEntries == [ ];
+                assert builtins.length worktreeReclaimEntries == 1;
+                assert
+                  (builtins.head worktreeReclaimEntries).id == "pg-router-ccpool-handler-interrupted-worktrees";
+                assert (builtins.head worktreeReclaimEntries).path == "/tmp/pg2-qsred-repo/.worktrees-interrupted";
+                assert lib.hasInfix
+                  "reclaim-interrupted --dir /tmp/pg2-qsred-repo/.worktrees-interrupted --repo /tmp/pg2-qsred-repo"
+                  (builtins.head worktreeReclaimEntries).displayCommand;
+                assert lib.all (
+                  v: lib.hasInfix " --apply" v.removeCommand && !lib.hasInfix "--apply" v.dryRunCommand
+                ) (builtins.head worktreeReclaimEntries).variants;
                 # disabled module: zero behavior change (no registry entry
                 # contributed at all).
                 assert disabledWorktreeReclaimEntries == [ ];

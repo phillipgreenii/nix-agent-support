@@ -541,6 +541,42 @@ let
     )
   ) ccpoolRolesWithOwnPool;
 
+  # pg-disk-reclaimer item for the "<worktreeDir>-interrupted" holding area
+  # (the sibling directory an interrupted checkout's recovery manifest and patch
+  # are written to). The handler's own `reclaim-interrupted` subcommand owns the
+  # rule: an entry is removed ONLY when its manifest exists and either the patch
+  # is empty and the recorded status clean, or the patch is already in the
+  # branch tip (git patch-id --stable). Entries without a readable manifest, and
+  # any entry the rule cannot evaluate, are kept and reported. The dry run lists
+  # each entry with the rule or the reason; the real run removes exactly the
+  # listed REMOVE entries.
+  interruptedWorktreeDir = "${cfg.launchConfig.worktreeDir}-interrupted";
+  interruptedReclaimArgs = lib.concatStringsSep " " [
+    "--dir"
+    (lib.escapeShellArg interruptedWorktreeDir)
+    "--repo"
+    (lib.escapeShellArg cfg.launchConfig.repoRoot)
+  ];
+  interruptedReclaimRegistryEntry = {
+    id = "pg-router-ccpool-handler-interrupted-worktrees";
+    description = "pg-router-ccpool-handler's interrupted-checkout holding area: removes only entries whose recovery manifest proves nothing is lost";
+    path = interruptedWorktreeDir;
+    displayCommand = "${ccpoolAdapterBin} reclaim-interrupted ${interruptedReclaimArgs}";
+    displayTimeoutSeconds = 180;
+    sizeCommand = "${ccpoolAdapterBin} reclaim-interrupted ${interruptedReclaimArgs} --size-kb";
+    sizeKind = "estimate";
+    sizeMethod = "manifest-and-patch-bytes";
+    sizeBasis = "Sum of the manifest and patch file sizes of the entries the rule would remove, rounded up per entry; an entry holds only those two files.";
+    variants = [
+      {
+        aggressiveness = 2;
+        variantDescription = "remove an interrupted-checkout entry only when its manifest proves nothing is lost (empty patch with clean status, or patch already in the branch tip by git patch-id --stable); keep every other entry";
+        dryRunCommand = "${ccpoolAdapterBin} reclaim-interrupted ${interruptedReclaimArgs}";
+        removeCommand = "${ccpoolAdapterBin} reclaim-interrupted ${interruptedReclaimArgs} --apply";
+      }
+    ];
+  };
+
   # mkRegisterExec renders the `register` invocation shared by periodicDrain's
   # timer-triggered heartbeat and daemon's boot-time announcement below --
   # this module's ONLY systemd-facing action (Task 5.12; `phillipgreenii-nix-
@@ -2518,6 +2554,8 @@ in
       ]
       # The worktree-isolation dispatch leases its worktree through pg-gwm.
       ++ lib.optional (lib.any usesWorktreeIsolation (lib.attrValues ccpoolRoles)) pkgs.pg-gwm;
+
+      phillipgreenii.programs.pg-disk-reclaimer.registryEntries = [ interruptedReclaimRegistryEntry ];
 
       # pool activation (pg2-1p4yp): bootstrap the dedicated pool dir through
       # a REAL `ccpool` invocation BEFORE installing our own config.toml over

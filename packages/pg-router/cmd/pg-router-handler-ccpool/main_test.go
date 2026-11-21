@@ -129,7 +129,7 @@ func TestRun_SubcommandSet(t *testing.T) {
 // twelve subcommands this binary dispatches, and none of the old binary's
 // retired spellings.
 func TestHelp_ListsExactlyItsOwnSubcommands(t *testing.T) {
-	want := []string{"dispatch", "validate", "origin", "postStartup", "preShutdown", "register", "self-status", "pool-capacity", "janitor", "split", "query", "version", "help"}
+	want := []string{"dispatch", "validate", "origin", "postStartup", "preShutdown", "register", "self-status", "pool-capacity", "janitor", "split", "query", "reclaim-interrupted", "version", "help"}
 	for _, sub := range want {
 		if !strings.Contains(usageLine, sub) {
 			t.Errorf("usageLine lacks %q", sub)
