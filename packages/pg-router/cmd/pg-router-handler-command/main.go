@@ -21,44 +21,32 @@
 package main
 
 import (
-	"fmt"
-	"log/slog"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/api/participant"
-	"github.com/phillipgreenii/pg-router/internal/handlers/cliutil"
-	"github.com/phillipgreenii/x/jsonllogger"
+	"github.com/phillipgreenii/pg-router/api/handlerkit"
 )
 
 var version = "dev"
 
-func main() {
-	slog.SetDefault(jsonllogger.NewLogger(os.Stderr, jsonllogger.WithService("pg-router-handler-command")))
-	os.Exit(run(os.Args[1:]))
+func adapter() handlerkit.Adapter {
+	return handlerkit.Adapter{
+		Name:    "pg-router-handler-command",
+		Version: version,
+		Usage:   usageLine,
+		Help:    helpText,
+		Commands: map[string]func([]string) int{
+			"dispatch":    runDispatch,
+			"postStartup": func(a []string) int { return runLifecycle("postStartup", a) },
+			"preShutdown": func(a []string) int { return runLifecycle("preShutdown", a) },
+			"validate":    runValidate,
+		},
+	}
 }
 
-func run(args []string) int {
-	if len(args) == 0 {
-		cliutil.PrintUsageErr("pg-router-handler-command: a subcommand is required", usageLine)
-		return participant.ExitUsage
-	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		fmt.Print(helpText)
-		return participant.ExitOK
-	case "-v", "--version", "version":
-		fmt.Println(version)
-		return participant.ExitOK
-	case "dispatch":
-		return runDispatch(args[1:])
-	case "postStartup":
-		return runLifecycle("postStartup", args[1:])
-	case "preShutdown":
-		return runLifecycle("preShutdown", args[1:])
-	case "validate":
-		return runValidate(args[1:])
-	default:
-		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-command: unknown subcommand %q", args[0]), usageLine)
-		return participant.ExitUsage
-	}
+func main() {
+	a := adapter()
+	a.JSONLog = true
+	handlerkit.Main(a)
 }
+
+func run(args []string) int { return handlerkit.Execute(adapter(), args, os.Stdout, os.Stderr) }

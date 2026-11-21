@@ -9,7 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+
+	"github.com/phillipgreenii/pg-router/api/handlerkit"
 )
 
 // Version is injected at build time by mkGoApp (versionPath defaults to
@@ -43,5 +44,5 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	handlerkit.Main(handlerkit.Adapter{Name: "pg-router-source-pg-desk", Run: run})
 }

@@ -1,6 +1,7 @@
 {
   "shared": [
     "api/event",
+    "api/handlerkit",
     "api/participant",
     "api/participant/coreclient",
     "api/status",

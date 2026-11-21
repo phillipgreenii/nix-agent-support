@@ -34,63 +34,46 @@
 package main
 
 import (
-	"fmt"
-	"log/slog"
 	"os"
 
-	"github.com/phillipgreenii/pg-router/api/participant"
-	"github.com/phillipgreenii/pg-router/internal/handlers/cliutil"
-	"github.com/phillipgreenii/x/jsonllogger"
+	"github.com/phillipgreenii/pg-router/api/handlerkit"
 )
 
 var version = "dev"
 
 func main() {
 	w := newWiring()
-	w.sweeper.InstallProductionGauges()
-	slog.SetDefault(jsonllogger.NewLogger(os.Stderr, jsonllogger.WithService("pg-router-handler-ccpool")))
-	os.Exit(w.run(os.Args[1:]))
+	a := w.adapter()
+	a.JSONLog = true
+	a.Setup = w.sweeper.InstallProductionGauges
+	handlerkit.Main(a)
 }
 
 // run is the command with its production wiring.
 func run(args []string) int { return newWiring().run(args) }
 
 func (w wiring) run(args []string) int {
-	if len(args) == 0 {
-		cliutil.PrintUsageErr("pg-router-handler-ccpool: a subcommand is required", usageLine)
-		return participant.ExitUsage
-	}
-	switch args[0] {
-	case "-h", "--help", "help":
-		fmt.Print(helpText)
-		return participant.ExitOK
-	case "-v", "--version", "version":
-		fmt.Println(version)
-		return participant.ExitOK
-	case "register":
-		return runRegister(args[1:])
-	case "self-status":
-		return runSelfStatus(args[1:])
-	case "dispatch":
-		return w.runDispatch(args[1:])
-	case "postStartup":
-		return runPostStartup(args[1:])
-	case "preShutdown":
-		return runPreShutdown(args[1:])
-	case "validate":
-		return runValidate(args[1:])
-	case "origin":
-		return w.runOrigin(args[1:])
-	case "pool-capacity":
-		return runPoolCapacity(args[1:])
-	case "split":
-		return runSplit(args[1:])
-	case "query":
-		return w.runQuery(args[1:])
-	case "janitor":
-		return w.sweeper.RunJanitor(args[1:])
-	default:
-		cliutil.PrintUsageErr(fmt.Sprintf("pg-router-handler-ccpool: unknown subcommand %q", args[0]), usageLine)
-		return participant.ExitUsage
+	return handlerkit.Execute(w.adapter(), args, os.Stdout, os.Stderr)
+}
+
+func (w wiring) adapter() handlerkit.Adapter {
+	return handlerkit.Adapter{
+		Name:    "pg-router-handler-ccpool",
+		Version: version,
+		Usage:   usageLine,
+		Help:    helpText,
+		Commands: map[string]func([]string) int{
+			"register":      runRegister,
+			"self-status":   runSelfStatus,
+			"dispatch":      w.runDispatch,
+			"postStartup":   runPostStartup,
+			"preShutdown":   runPreShutdown,
+			"validate":      runValidate,
+			"origin":        w.runOrigin,
+			"pool-capacity": runPoolCapacity,
+			"split":         runSplit,
+			"query":         w.runQuery,
+			"janitor":       w.sweeper.RunJanitor,
+		},
 	}
 }

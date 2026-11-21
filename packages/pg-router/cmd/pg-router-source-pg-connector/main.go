@@ -12,8 +12,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
+	"github.com/phillipgreenii/pg-router/api/handlerkit"
 	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 )
@@ -115,5 +115,5 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	handlerkit.Main(handlerkit.Adapter{Name: "pg-router-source-pg-connector", Run: run})
 }
