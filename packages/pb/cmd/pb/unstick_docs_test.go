@@ -140,3 +140,23 @@ func TestUnstickBeadsDescribesEpicStage(t *testing.T) {
 		t.Error("unstick-beads.md no longer describes the worker pool")
 	}
 }
+
+// A RELEASE that strips every label hides a producer-managed alert bead from
+// the producer's own dedup query (escalated-all lists beads carrying
+// escalated or a human label), so the next probe tick files a duplicate.
+// Operator-observed 2026-11-21; the command text must state the rule and the
+// detection key.
+func TestUnblockHumanBeadsKeepsEscalatedOnProducerManagedBeads(t *testing.T) {
+	doc := readMarketplace(t, "commands/unblock-human-beads.md")
+	requireAll(
+		t, doc, "unblock-human-beads.md",
+		"Producer-managed beads keep `escalated`",
+		"pg_router_escalation_fingerprint",
+		"escalated-all",
+		"BEFORE any RELEASE or class-3 dependency release, detect a producer-managed bead",
+		"MUST keep exactly `escalated`",
+		"MUST NOT strip every label",
+		"file it as a SEPARATE work bead",
+		"MUST NOT close a producer-managed bead as a duplicate",
+	)
+}

@@ -74,6 +74,27 @@ and when the cause was transient, release the bead back to the drain pool. It is
 of a bead carrying it MUST add `stale-escalation` to the same `--remove-label` list, so the marker
 does not follow a later genuine escalation.
 
+**Producer-managed beads keep `escalated` (dedup-label rule).** Some beads are filed by an
+automated producer that finds its own OPEN bead again only through a label query: the
+`pg-router-probe` and `ccpool-probe` alert beads are looked up by the `escalated-all` dedup query,
+which lists beads carrying `escalated` or a human label. A released bead with none of those labels
+is invisible to that query, so the producer's next tick files a DUPLICATE for every alert still
+firing (observed 2026-11-21: 18 duplicates about 20 minutes after a run released or
+dependency-wired about 30 probe beads; `work-report` degraded beads have the same constraint).
+Therefore, BEFORE any RELEASE or class-3 dependency release, detect a producer-managed bead: its
+metadata carries `pg_router_escalation_fingerprint`, or another producer's lookup key that reads
+labels. For such a bead:
+
+- The RELEASE MUST keep exactly `escalated` and drop only `human`, `attention`, `stale-escalation`
+  (and the other markers the release would normally drop); it MUST NOT strip every label. Add
+  `--add-label escalated` if the bead does not already carry it. When the bead is wired behind a
+  blocker this is harmless: the triager and `escalation-watchdog` both read `bd ready`, which skips
+  blocked beads.
+- If agent work must reach drain, file it as a SEPARATE work bead and wire the alert bead
+  blocked-by that work bead; do not release the alert bead itself as the work item.
+- MUST NOT close a producer-managed bead as a duplicate of a bead the producer cannot see (for
+  example a `local-alert-triage` bead): the producer re-files it.
+
 ## Sourcing invariant (deferred-safety by construction — DO NOT REGRESS)
 
 Claim work ONLY via the preview-then-claim sequence in "Template/formula exclusion" below
