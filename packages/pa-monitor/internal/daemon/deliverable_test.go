@@ -11,6 +11,8 @@ import (
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/service"
+	"github.com/phillipgreenii/pa-monitor/internal/store"
 )
 
 func sv(pid int, alive, inbox, known bool) *aggregate.SessionView {
@@ -150,5 +152,43 @@ func TestControlResolver_LaunchesNoPsOrTmux(t *testing.T) {
 	}
 	if n := calls(); n != 0 {
 		t.Errorf("gate launched ps/tmux %d bytes of calls, want none", n)
+	}
+}
+
+// The DB-materialised tree that serves status and the nudger carries no
+// recorder fact and, before the fix, no PidAlive either, so every session read
+// control_inbox=false. A session with a live pid (non-nil stored PID) and an
+// inbox FIFO must read true through the converter plus the overlay; a dead one,
+// or one without a FIFO, must not.
+func TestConvertedTreeReportsControlInboxFromFIFO(t *testing.T) {
+	dir := t.TempDir()
+	mkInbox(t, dir, 3646, true)
+	mkInbox(t, dir, 4000, true)
+	live, dead, none := 3646, 4000, 5000
+	mk := func(id string, pid *int) *store.SessionWithContribution {
+		return &store.SessionWithContribution{Session: store.Session{SessionID: id, PID: pid}}
+	}
+	st := &service.State{Dirs: []*service.Directory{{Path: "/p", Sessions: []store.SessionWithContribution{
+		*mk("live", &live), *mk("dead", nil), *mk("nofifo", &none),
+	}}}}
+	_ = dead
+	tree := convertStateToAggregateTree(st)
+	overlayControlInbox(tree, func(k string) string {
+		if k == "PG_CLAUDE_CONTROL_STATE_DIR" {
+			return dir
+		}
+		return ""
+	})
+	got := map[string]bool{}
+	for _, v := range tree.Sessions() {
+		got[v.SessionID] = v.ControlInbox
+	}
+	if !got["live"] || got["dead"] || got["nofifo"] {
+		t.Fatalf("control inbox by session = %v; want live=true dead=false nofifo=false", got)
+	}
+	for _, v := range tree.Sessions() {
+		if v.SessionID == "live" && !controlDeliverable(v, noEnv) {
+			t.Error("a live session with an inbox must be deliverable on the DB-path tree")
+		}
 	}
 }

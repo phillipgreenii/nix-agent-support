@@ -141,6 +141,7 @@ func (s *sharedState) snapshot(ctx context.Context) *aggregate.Tree {
 		return nil
 	}
 	tree := convertStateToAggregateTree(st)
+	overlayControlInbox(tree, os.Getenv)
 	// Overlay the live rate_limits reading. The persisted block carries it only
 	// while a cost block is active; the server's window outlives that block (the
 	// hour-floored block ends up to 30 minutes before a :30-anchored window

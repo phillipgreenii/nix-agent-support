@@ -77,3 +77,19 @@ func newControlResolver(tree *aggregate.Tree, getenv func(string) string) *contr
 
 // HasSurface reports whether pid has a live session with a control inbox.
 func (r *controlResolver) HasSurface(pid int) bool { return r.byPID[pid] }
+
+// overlayControlInbox sets the control-inbox answer on every session of a
+// DB-materialised tree. The store persists neither the recorder's control_inbox
+// fact nor liveness (only a nil PID for a dead process), so without this every
+// served session reads control_inbox=false and 'no control mod'. The inbox FIFO
+// is the same file the recorder's fact reports, so it is checked directly.
+func overlayControlInbox(tree *aggregate.Tree, getenv func(string) string) {
+	dir := controlStateDir(getenv)
+	for _, sv := range tree.Sessions() {
+		if sv == nil || sv.Session == nil || !sv.PidAlive {
+			continue
+		}
+		sv.ControlInbox = inboxIsFIFO(dir, sv.PID)
+		sv.ControlInboxKnown = true
+	}
+}

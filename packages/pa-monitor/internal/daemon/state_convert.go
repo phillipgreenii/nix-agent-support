@@ -136,15 +136,17 @@ func convertSessionWithContribution(sc *store.SessionWithContribution) *aggregat
 	}
 
 	sess := &session.Session{
-		PID:             pid,
-		SessionID:       sc.SessionID,
-		Cwd:             sc.Cwd,
-		Kind:            sc.Kind,
-		Entrypoint:      sc.Entrypoint,
-		Name:            sc.Name,
-		Branch:          sc.Branch,
-		StartedAt:       sc.StartedAt,
-		TerminalHost:    sc.TerminalHost,
+		PID:          pid,
+		SessionID:    sc.SessionID,
+		Cwd:          sc.Cwd,
+		Kind:         sc.Kind,
+		Entrypoint:   sc.Entrypoint,
+		Name:         sc.Name,
+		Branch:       sc.Branch,
+		StartedAt:    sc.StartedAt,
+		TerminalHost: sc.TerminalHost,
+		// The store records a dead process as a nil PID, so non-nil is live.
+		PidAlive:        sc.PID != nil,
 		TranscriptMTime: sc.TranscriptMTime,
 		Status:          parseSessionStatus(sc.Status),
 		Blocker:         parseSessionBlocker(sc.Status, sc.Blocker),
