@@ -59,6 +59,12 @@ func lockLog(logPath string) (*os.File, error) {
 	return f, nil
 }
 
+// LockLog takes the exclusive log lock of the log at logPath without blocking and
+// returns the file that holds it (close it to release). It is how an offline
+// operator step proves no daemon is running: it returns an *ErrLogLocked while
+// any other holder has the log.
+func LockLog(logPath string) (*os.File, error) { return lockLog(logPath) }
+
 func flockTry(f *os.File) error {
 	for {
 		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)

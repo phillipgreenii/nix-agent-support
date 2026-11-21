@@ -425,7 +425,9 @@ other source, and a source that declares neither behaves as before. On a query t
   the durable queue and ledger and re-evaluates the report, so a crash between acceptance and report
   loses nothing.
 - **Reset.** Resetting a consumer's cursor is an operator step; the adapter does not signal it to the
-  core.
+  core. The operator drops the query's lane ledger (`pg-router ledger drop <query>`, with the router
+  stopped) before the reset; a dropped ledger is re-derived from the next poll, and the redelivery it
+  causes is absorbed as at-least-once duplicates. The order and checks are in the package README.
 
 ## `INTF-HANDLER` — event handler <!-- uuid: 10939663-7a48-4d44-8c4a-9a2df8ae4654 -->
 

@@ -329,6 +329,33 @@ Seeing it:
   `calendar slot skipped` (reason `enqueue failed`), `calendar clock clamp`,
   `calendar state write failed`, `calendar state unreadable`.
 
+### Resetting a settle consumer (`ledger drop`)
+
+A query that declares `settle` keeps a durable lane ledger (`<LogDir>/ack-ledger.json`). A consumer
+reset (`--reset`) replays history, so the ledger of that query MUST be dropped first, or the core
+would report tokens of the old history. The reset is an operator step; the adapter does not signal it.
+
+`pg-router ledger drop <query>` deletes every lane of one query (lane lists, tokens, settled ids and,
+with them, the lane retention of accepted ids); other queries are untouched. It is offline only: it
+takes the queue log's lock and is refused with exit 9 (busy, nothing changed) while any daemon runs.
+That is narrower than "refuse only while a settle is in flight": a running core holds the ledger in
+memory and rewrites the file at its next poll, so an edit under it would be undone, and a stopped
+router has no settle in flight by construction.
+
+Order:
+
+1. Stop the router (the `ledger drop` is refused while it runs). Pausing the query is not enough.
+2. `pg-router ledger drop <query>`; it prints `dropped N lane(s) of query <query>` (N may be 0 when
+   the query held no lane, which is also success).
+3. Run the consumer reset: `pg-connector <type> changes --reset` with the consumer id.
+4. Start the router.
+
+Success: the first poll re-reads history and the ledger holds fresh tokens from that poll; no report
+of a pre-reset token is sent (the first `settle` carries a token of the replayed history); the
+redelivered events are absorbed as at-least-once duplicates. Check afterwards that
+`pg_router_source_frontier_age_seconds{query}` restarts from zero (it counts from the first moment the
+core sees an id on a lane) and that `pg_router_source_settle_failures_total{query}` does not climb.
+
 ### Re-running a transiently failed dispatch
 
 A failed dispatch is normally accepted and never re-run (`INV-FAIL-1`: post-accept failures are the

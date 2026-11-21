@@ -74,6 +74,8 @@ func run() int {
 		return runDoctor(r.rest)
 	case routeDeadLetters:
 		return runDeadLetters(r.rest)
+	case routeLedger:
+		return runLedger(r.rest)
 	case routeLog:
 		return runLog(r.rest)
 	}

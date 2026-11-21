@@ -186,6 +186,26 @@ func (l *Ledger) Poll(query, laneName string, items []Item, now time.Time) error
 	return l.saveLocked()
 }
 
+// DropQuery removes every lane of query (list, tokens, settled flags) and
+// reports how many lanes it dropped. Other queries are untouched. It is the
+// operator reset of a settle consumer: the next poll re-derives the lanes.
+func (l *Ledger) DropQuery(query string) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for k, x := range l.lanes {
+		if x.Query == query {
+			delete(l.lanes, k)
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	l.rebuildHeldLocked()
+	return n, l.saveLocked()
+}
+
 // MarkSettled records id as settled in every lane that lists it and reports
 // whether anything changed.
 func (l *Ledger) MarkSettled(id string) (bool, error) {
