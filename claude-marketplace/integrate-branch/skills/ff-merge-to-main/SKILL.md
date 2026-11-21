@@ -220,7 +220,9 @@ What differs from the old steps, and what the handler MUST keep in mind:
   which the tool treats as a retryable stop.
 - FF-1c is `pre-land-eval`, the eval-only check (`pn workspace flake-check
 --no-build`): it evaluates `checks`, `packages` and `devShells` derivation paths
-  and builds none of them. It is enabled by the hook's presence in the repository's
+  and builds none of them. Its `eval-failed` verdict is exit 20 (0 ok, 2 usage,
+  127 not installed); the tool maps any non-zero hook status to `hook-failed`.
+  It is enabled by the hook's presence in the repository's
   configuration. **The skill neither sets nor requires the retired git config key
   `pgii-integrate-branch.preLandEval`**; a leftover key is historical and ignored.
   No land step calls `pn workspace update`, `upgrade` or `lock`, runs

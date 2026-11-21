@@ -113,7 +113,7 @@ Read in full when step 6 of `SKILL.md` applies. Moved verbatim from /drain-beads
    - the FF-1c eval-only check (`pre-land-eval`, enablement-gated per clone, operator
      ruling 2026-10-23) is a SECOND hard gate on `ff-merge-to-main`, run through
      `bgrun`/`bgwait` (about one to three minutes): the lander MUST NOT run
-     `merge --ff-only` after an exit 10 (`eval-failed`) or any other non-zero exit
+     `merge --ff-only` after an exit 20 (`eval-failed`) or any other non-zero exit
      except 127
      (`pre-land-eval` not installed: record the handler's notice and continue, like
      FF-1b's 127). Report `stopped:eval-failed` with the failing output and the
