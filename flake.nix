@@ -7775,6 +7775,8 @@
                       pkgs.gh
                       pkgs.pg-connector
                       pkgs.pg-desk
+                      # data/pg-gwm.json: this repo's own overlay package (packages/pg-gwm).
+                      pkgs.pg-gwm
                       # pg2-33slg: pa-monitor (status / info, the audit-worktrees liveness
                       # check) is this repo's own overlay package (packages/pa-monitor).
                       pkgs.pa-monitor

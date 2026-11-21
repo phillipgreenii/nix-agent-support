@@ -68,16 +68,16 @@
         "provenance": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go conversations, this repo 2026-11-14",
         "citations": {
           "provenance": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/main.go:67 dispatch: case \"conversations\" calls a.conversations; lifecycle.go registers its flag set; help.go:22 synopsis"
           },
           "stdin": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go conversations handler: no read of os.Stdin; all inputs are flags (help.go:22 synopsis)"
           },
           "stdout": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/help.go:77 \"conversations rows are newest first ... each carries session id, cwd, end time\": rows are printed to stdout, as text or with --json"
           },
           "unknownFlag": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go:64-69 conversations flag set: an undefined flag is a flag-parse usage error"
           }
         },
         "flags": {
@@ -90,7 +90,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/common.go:25 fs.BoolVar(&c.partialOK, \"allow-partial\"): exit 0 instead of 5 while the recorder is behind"
             }
           },
           "--crashed": {
@@ -102,7 +102,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go:65 fs.BoolVar(&crashed, \"crashed\"): shortcut for --ended crashed"
             }
           },
           "--ended": {
@@ -114,7 +114,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go:64 fs.StringVar(&ended, \"ended\"): list Conversations that ended this way: crashed, exited, cleared, closed or unknown"
             }
           },
           "--json": {
@@ -126,7 +126,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/common.go:24 fs.BoolVar(&c.jsonOut, \"json\"): print the stable JSON shape"
             }
           },
           "--limit": {
@@ -138,7 +138,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go:69 fs.IntVar(&limit, \"limit\", 50): most rows to return"
             }
           },
           "--since": {
@@ -150,7 +150,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go:67 fs.StringVar(&since, \"since\", \"7d\"): only Conversations that ended since a duration or RFC 3339 time"
             }
           },
           "--suspected-crash": {
@@ -162,7 +162,7 @@
               "kind": "none"
             },
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go:66 fs.BoolVar(&suspected, \"suspected-crash\"): crashed plus unknown rows with a stale registry file"
             }
           }
         },
@@ -176,7 +176,7 @@
             }
           },
           "citation": {
-            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+            "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/help.go:22 synopsis: conversations takes flags only, no positional operands"
           }
         },
         "implicitEffects": [
@@ -187,7 +187,7 @@
             },
             "target": "pg-claude-code-recorder",
             "citation": {
-              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-claude-code-recorder\"]"
+              "source": "packages/pg-claude-code-recorder/cmd/pg-claude-code-recorder/lifecycle.go conversations handler: queries the recorder daemon (read-only listing of Conversations; help.go:77), no write"
             }
           }
         ],

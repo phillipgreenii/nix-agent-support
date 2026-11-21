@@ -64,6 +64,13 @@ var Exempt = map[string]bool{
 	// sandbox PATH; like uuidgen there is no ONE pinned help text to hash. The
 	// spec models only the bounded forms cited in data/ping.json.
 	"ping": true,
+	// `.` and `source` are bash builtins with no on-PATH binary (like cd/export);
+	// their specs cite bash `help source`. assume is an operator-installed role
+	// helper that agents must never run (operator ruling, Phillip, 2026-11-17),
+	// so there is no packaged binary whose --help could be pinned.
+	".":      true,
+	"source": true,
+	"assume": true,
 }
 
 // ScriptSuffix marks a spec whose command is a plugin HELPER SCRIPT resolved
