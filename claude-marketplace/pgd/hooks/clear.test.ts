@@ -4,7 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 import { CLEAR_RETRY_DELAYS_MS, registerClearHooks } from './clear'
 import { readCompactionOnce } from './compaction'
-import { loadSessionFacts, resetSessionFacts } from './info-modal'
+import { infoSpec, loadSessionFacts, resetSessionFacts } from './info-modal'
 import { captureLimits, flushLimitsCapture, initLimitsCapture } from './limits-capture'
 import { setOptions } from './options'
 import { defineSource, initSources, readCached, setValue } from './source'
@@ -239,4 +239,55 @@ test('when the engine end step rejects, the clear already ran, the error propaga
   expect((caught as Error).message).toBe('end step failed')
   expect(readCached('usage')).toBe(undefined)
   expect(timers).toHaveLength(1)
+})
+
+test('a clear makes the Info modal read the version and repo again, not only the id', async () => {
+  const { hook, $ } = setup()
+  const world = { id: 'a', version: '1.0', repo: 'repo-a' }
+  const host = {
+    session: {
+      id: async () => world.id,
+      version: async () => ({ version: world.version }),
+      repo: async () => ({ name: world.repo }),
+    },
+  }
+  resetSessionFacts()
+  await loadSessionFacts(host as never)
+  const rows = () => Object.fromEntries(infoSpec().items.map(i => [i.label, i.value]).filter(([l]) => ['session id', 'version', 'repo'].includes(l as string)))
+  expect(rows()).toEqual({ 'session id': 'a', version: '1.0', repo: 'repo-a' })
+  Object.assign(world, { id: 'b', version: '2.0', repo: 'repo-b' })
+  await hook($, END, async () => ({}))
+  expect(rows()['version']).toBe(undefined) // dropped at once, never stale
+  await loadSessionFacts(host as never)
+  expect(rows()).toEqual({ 'session id': 'b', version: '2.0', repo: 'repo-b' })
+})
+
+test('an Info read still in flight when the session changes does not put the old rows back', async () => {
+  const { hook, $ } = setup()
+  let release: (v: string) => void = () => {}
+  const slow = {
+    session: {
+      id: () => new Promise<string>(r => (release = r)),
+      version: async () => ({ version: 'old-version' }),
+      repo: async () => ({ name: 'old-repo' }),
+    },
+  }
+  resetSessionFacts()
+  const inFlight = loadSessionFacts(slow as never)
+  await hook($, END, async () => ({}))
+  release('old-id')
+  await inFlight
+  const labels = infoSpec().items.map(i => i.label)
+  expect(labels.includes('version')).toBe(false)
+  expect(labels.includes('repo')).toBe(false)
+})
+
+test('a resume drops the cached effort (it may differ in the resumed session); a clear keeps it', async () => {
+  const { hook, $ } = setup()
+  defineSource<string>({ id: 'effort', intervalMs: 0 })
+  setValue('effort', 'high')
+  await hook($, END, async () => ({}))
+  expect(readCached('effort')).toBe('high')
+  await hook($, { reason: 'resume', sessionId: 'old-id' }, async () => ({}))
+  expect(readCached('effort')).toBe(undefined)
 })

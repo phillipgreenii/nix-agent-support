@@ -25,18 +25,21 @@ export const CLEAR_RETRY_DELAYS_MS = [300, 1000, 2000, 5000] as const
 const ENDING_REASONS: ReadonlySet<string> = new Set(['clear', 'resume'])
 
 // Sources whose value is about the conversation, not the machine, the repo or the environment.
-// The model and effort are left alone: they follow the settings, not the conversation (an
-// in-process /resume into a session that used another model is refreshed with the model read).
+// The model and effort are left alone by a /clear: they follow the settings, not the conversation
+// (an in-process /resume into a session that used another model is refreshed with the model read).
+// A /resume can land in a session that used another effort, and no accessor reads the effort (only
+// turn.step carries it), so a resume drops the cached effort: blank until the next step, never stale.
 const SESSION_SCOPED = ['usage', SESSION_NAME_ID, 'sessionMode', COMPACTION_ID, 'lastCompaction'] as const
 // The id-keyed sources the id switch reads again (usage is set from $.session.usage() instead).
 const ID_KEYED = [SESSION_NAME_ID, 'sessionMode', COMPACTION_ID] as const
 
-export function clearSessionValues(): void {
+export function clearSessionValues(reason?: string): void {
   resetSessionName()
   resetLimitsCapture()
   resetCompactionRead()
   resetSessionFacts()
   for (const id of SESSION_SCOPED) clearValue(id)
+  if (reason === 'resume') clearValue('effort')
   requestInvalidate()
 }
 
@@ -68,7 +71,7 @@ export function registerClearHooks(on: ModApi): void {
       }
       try {
         // Clear before the engine's end step: the end chain shares one short wall-clock bound.
-        clearSessionValues()
+        clearSessionValues(String(e?.reason))
       } catch {
         // a failing clear must not stop the engine's end step
       }

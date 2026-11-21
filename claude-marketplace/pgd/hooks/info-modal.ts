@@ -19,8 +19,12 @@ interface SessionFacts {
 
 let facts: SessionFacts = {}
 let pending: Promise<void> | undefined
+// Bumped by resetSessionFacts: a load that began under an older generation drops its result, so a
+// read still in flight when the conversation changes cannot put the old session's rows back.
+let generation = 0
 
 export function resetSessionFacts(): void {
+  generation += 1
   facts = {}
   pending = undefined
 }
@@ -28,6 +32,7 @@ export function resetSessionFacts(): void {
 // Read the session accessors once, through the facade, before the modal first opens (never from a
 // draw); later calls reuse the first answer. A failed read leaves those rows omitted.
 export function loadSessionFacts(host: ModApi): Promise<void> {
+  const started = generation
   pending ??= (async () => {
     try {
       const next: SessionFacts = {}
@@ -35,7 +40,7 @@ export function loadSessionFacts(host: ModApi): Promise<void> {
       next.version = (await host.session.version?.())?.version
       const repo = await host.session.repo?.()
       if (repo) next.repo = repo.name ?? repo.remote ?? repo.root
-      facts = next
+      if (started === generation) facts = next
     } catch {
       // keep what is known; the rows stay omitted
     }
