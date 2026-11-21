@@ -91,6 +91,10 @@ different meaning for a shared term it takes a different name (`INV-20`).
   (`INV-CACHE-8`). A read carrying the watch option is forwarded to the daemon (`INV-JIRA-WATCH-1`).
   Every read answer MUST carry `served_from`, `stale`, `age_seconds` and `groups[]`, as the GitHub
   backend's does (`INV-GH-FRESH-8`).
+
+  `not_found` is this backend's own answer status for an id the origin does not know; the GitHub
+  backend's read-through rules do not define it.
+
 - **`INV-JIRA-FRESH-3`** <!-- uuid: 782a82e1-933c-4cc8-9336-3abce722692f --> — The issue entity MUST carry a **comment summary**,
   the count of comments and the time of the latest comment, derived from the detail group, so that
   a comment is a visible field difference. The normalised content (`INV-JIRA-CHG-1`) covers exactly

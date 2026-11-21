@@ -105,6 +105,10 @@ flowchart LR
     that event until `expiresAt` (INV-EVT-4) and dedupes the same id for as long as it is retained
     (INV-EVT-3).
 
+  `as_of` and `emitted_at` are this adapter's own field names, not the router's: `as_of` is the
+  moment a connector answer was read (a per-fetch value), and `emitted_at` is the moment this
+  adapter printed a row.
+
   For a backend that owns its changes (ADR 0090), each reported change also carries a sequence
   number `seq`, the change `kinds` and the changed `fields`, and the adapter decodes all three and
   prints each, when the row carries it, on the item's `metadata` under the keys `seq`, `kinds` and
