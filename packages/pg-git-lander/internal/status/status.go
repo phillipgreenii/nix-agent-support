@@ -43,6 +43,9 @@ type Input struct {
 	// empty lists the whole clone. Orphans, stale files and the configuration
 	// belong to no branch and are always listed.
 	Branch string
+	// StaleAfter, when positive, also lists in Report.Stale each stopped
+	// operation whose stop is older than it. Zero lists none.
+	StaleAfter time.Duration
 }
 
 // Command is a running command of an operation.
@@ -91,6 +94,8 @@ type Stopped struct {
 	Context   map[string]any `json:"context"`
 	Log       string         `json:"log"`
 	Next      []string       `json:"next"`
+	// AgeS is the seconds since the stop; set only on Report.Stale entries.
+	AgeS int64 `json:"age_s,omitempty"`
 }
 
 // Orphan is a pg-git-lander/* branch no record names.
@@ -130,15 +135,20 @@ type Config struct {
 
 // Report is the status --json object.
 type Report struct {
-	Schema    int         `json:"schema"`
-	Outcome   string      `json:"outcome"`
-	Repo      string      `json:"repo"`
-	Branch    string      `json:"branch"`
-	Locks     []Lock      `json:"locks"`
-	Stopped   []Stopped   `json:"stopped"`
-	Orphans   []Orphan    `json:"orphans"`
-	StaleLock []StaleLock `json:"stale_locks"`
-	Config    Config      `json:"config"`
+	Schema  int       `json:"schema"`
+	Outcome string    `json:"outcome"`
+	Repo    string    `json:"repo"`
+	Branch  string    `json:"branch"`
+	Locks   []Lock    `json:"locks"`
+	Stopped []Stopped `json:"stopped"`
+	// StaleAfterS and Stale are present only when --stale-after was given:
+	// Stale holds the stopped operations older than StaleAfterS seconds,
+	// each with its resume commands in Next.
+	StaleAfterS int64       `json:"stale_after_s,omitempty"`
+	Stale       []Stopped   `json:"stale,omitempty"`
+	Orphans     []Orphan    `json:"orphans"`
+	StaleLock   []StaleLock `json:"stale_locks"`
+	Config      Config      `json:"config"`
 }
 
 func stamp(t time.Time) string {
@@ -193,10 +203,22 @@ func Collect(ctx context.Context, in Input) (*Report, error) {
 		rep.Locks = append(rep.Locks, lockOf(l, st, now))
 		if s := stoppedOf(common, st.Rec); s != nil {
 			rep.Stopped = append(rep.Stopped, *s)
+			if age := now.Sub(stoppedAt(st.Rec)); in.StaleAfter > 0 && age > in.StaleAfter {
+				old := *s
+				old.AgeS = int64(age.Seconds())
+				rep.Stale = append(rep.Stale, old)
+			}
 		}
 	}
 	sort.SliceStable(rep.Locks, func(i, j int) bool { return rep.Locks[i].Ref < rep.Locks[j].Ref })
 	sort.SliceStable(rep.Stopped, func(i, j int) bool { return rep.Stopped[i].OpID < rep.Stopped[j].OpID })
+	sort.SliceStable(rep.Stale, func(i, j int) bool { return rep.Stale[i].OpID < rep.Stale[j].OpID })
+	if in.StaleAfter > 0 {
+		rep.StaleAfterS = int64(in.StaleAfter.Seconds())
+		if rep.Stale == nil {
+			rep.Stale = []Stopped{}
+		}
+	}
 
 	if rep.Orphans, err = orphans(ctx, in, wts, named); err != nil {
 		return nil, err
@@ -260,6 +282,15 @@ func stoppedOf(common string, r *locks.Record) *Stopped {
 	}
 	s.Next = outcome.NextCommands(r.Operation, r.Branch, "", flags)
 	return s
+}
+
+// stoppedAt is when the record stopped, falling back to when it started for a
+// stopped record that carries no stop.
+func stoppedAt(r *locks.Record) time.Time {
+	if r.Stop != nil && !r.Stop.At.IsZero() {
+		return r.Stop.At
+	}
+	return r.StartedAt
 }
 
 func orphans(ctx context.Context, in Input, wts []gitexec.Worktree, named map[string]bool) ([]Orphan, error) {

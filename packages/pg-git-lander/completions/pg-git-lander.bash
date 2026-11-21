@@ -17,7 +17,7 @@ _pg_git_lander() {
     mapfile -t COMPREPLY < <(compgen -W "--into --target-worktree --source-worktree --work-worktree --keep-source-worktree --keep-source-branch --no-verify --wait --context --json --continue --skip --abort --quit --repo --help" -- "$cur")
     ;;
   status)
-    mapfile -t COMPREPLY < <(compgen -W "--json --repo --help" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--json --stale-after --repo --help" -- "$cur")
     ;;
   log)
     mapfile -t COMPREPLY < <(compgen -W "--tail --repo --help" -- "$cur")

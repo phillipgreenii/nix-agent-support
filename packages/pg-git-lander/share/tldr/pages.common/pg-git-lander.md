@@ -42,6 +42,10 @@
 
 `pg-git-lander status --json`
 
+- List stopped operations that have been stopped for more than 2 hours, with their `--continue`/`--abort` commands:
+
+`pg-git-lander status --stale-after {{2h}}`
+
 - Print the last 50 lines of an operation's log:
 
 `pg-git-lander log {{op_id|branch}} --tail {{50}}`

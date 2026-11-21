@@ -54,6 +54,7 @@ _pg_git_lander() {
       _arguments \
         '--repo=[any path inside the clone]:path:_files -/' \
         '--json[print exactly one JSON object]' \
+        '--stale-after=[also list stopped operations older than this duration, with their resume commands]:duration' \
         '(- *)--help[show help]' \
         '1:branch:__pg_git_lander_branches'
       ;;

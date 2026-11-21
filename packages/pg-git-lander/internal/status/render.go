@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // JSON renders the report as one line.
@@ -51,6 +52,18 @@ func (r *Report) Human() string {
 		}
 		for _, n := range s.Next {
 			fmt.Fprintf(&b, "\n    next: %s", n)
+		}
+	}
+	if r.StaleAfterS > 0 {
+		fmt.Fprintf(&b, "\n\nstopped operations older than %s:", time.Duration(r.StaleAfterS)*time.Second)
+		if len(r.Stale) == 0 {
+			b.WriteString(" none")
+		}
+		for _, s := range r.Stale {
+			fmt.Fprintf(&b, "\n  %s %s: stopped %s ago (%s)", s.Operation, s.Branch, time.Duration(s.AgeS)*time.Second, s.Reason)
+			for _, n := range s.Next {
+				fmt.Fprintf(&b, "\n    next: %s", n)
+			}
 		}
 	}
 	b.WriteString("\n\norphan work branches:")

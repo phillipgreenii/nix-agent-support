@@ -37,7 +37,7 @@ const Synopsis = `usage:
   pg-git-lander rebase [BRANCH] --continue | --skip [--no-verify] [--wait DURATION] [--json]
   pg-git-lander land   [BRANCH] --continue | --skip [--no-verify] [--wait DURATION] [--json]
   pg-git-lander rebase|land [BRANCH] --abort | --quit [--wait DURATION] [--json]
-  pg-git-lander status [BRANCH] [--json]
+  pg-git-lander status [BRANCH] [--stale-after DURATION] [--json]
   pg-git-lander log    OP_ID | BRANCH [--tail N]
   pg-git-lander config check [--file PATH] [--json]
 every form accepts --repo PATH`
@@ -64,7 +64,9 @@ type Command struct {
 	// NoVerify is --no-verify: skip pre-merge-verify hooks and git's own hooks.
 	NoVerify bool
 	Wait     *time.Duration
-	Context  []hooks.ContextPair
+	// StaleAfter is status's --stale-after; zero when absent.
+	StaleAfter time.Duration
+	Context    []hooks.ContextPair
 
 	// File is config check's --file; Tail is log's --tail (-1 when absent).
 	File string
@@ -115,6 +117,7 @@ var flagSpecs = map[string]flagSpec{
 	"--abort":                {kinds: kinds(KindRebase, KindLand)},
 	"--quit":                 {kinds: kinds(KindRebase, KindLand)},
 	"--file":                 {value: true, kinds: kinds(KindConfigCheck)},
+	"--stale-after":          {value: true, kinds: kinds(KindStatus)},
 	"--tail":                 {value: true, kinds: kinds(KindLog)},
 }
 
@@ -285,6 +288,12 @@ func (c *Command) set(name, val string) *UsageError {
 			return usagef("--wait needs a duration such as 30s or 2m, not %q", val)
 		}
 		c.Wait = &d
+	case "--stale-after":
+		d, err := time.ParseDuration(val)
+		if err != nil || d <= 0 {
+			return usagef("--stale-after needs a positive duration such as 2h or 90m, not %q", val)
+		}
+		c.StaleAfter = d
 	case "--onto":
 		c.Onto = val
 	case "--into":

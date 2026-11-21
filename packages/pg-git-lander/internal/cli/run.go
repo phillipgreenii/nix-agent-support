@@ -211,7 +211,7 @@ func runStatus(ctx context.Context, env *Env, c *Command, dir string) error {
 	d := env.Deps
 	rep, err := status.Collect(ctx, status.Input{
 		Git: d.Git, Clock: d.Clock, Liveness: d.Liveness, Host: d.Host, Paths: d.Paths,
-		Dir: dir, Branch: c.Branch,
+		Dir: dir, Branch: c.Branch, StaleAfter: c.StaleAfter,
 	})
 	if err != nil {
 		return err

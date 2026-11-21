@@ -486,3 +486,60 @@ func TestLogOfAFormerVersionPrintsUnchanged(t *testing.T) {
 		}
 	}
 }
+
+func TestStaleAfterListsOldStoppedOperationsWithResumeCommands(t *testing.T) {
+	f := newFx(t)
+	old := locks.Record{
+		Schema: 1, Role: locks.RoleBranch, State: locks.StateStopped, OpID: "20261110T085900Z-cccccc",
+		Operation: "land", Branch: "feature/old", Target: "main", Owner: owner(1, thisHost),
+		StartedAt: t0.Add(-190 * time.Minute), Stage: "rebasing", StageStartedAt: t0.Add(-185 * time.Minute),
+		WorkBranch: "pg-git-lander/20261110T085900Z-cccccc",
+		Stop: &locks.Stop{
+			Reason: "conflict", At: t0.Add(-3 * time.Hour), Stage: "rebasing", Paths: []string{"a.txt"}, Message: "conflict",
+		},
+	}
+	f.plantRecord(locks.BranchRef("feature/old"), old)
+
+	collect := func(after time.Duration) *status.Report {
+		in := f.input("")
+		in.StaleAfter = after
+		rep, err := status.Collect(t.Context(), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rep
+	}
+
+	rep := collect(2 * time.Hour)
+	if rep.StaleAfterS != 7200 || len(rep.Stale) != 1 {
+		t.Fatalf("2h threshold: %+v", rep)
+	}
+	s := rep.Stale[0]
+	if s.Branch != "feature/old" || s.AgeS != 3*3600 {
+		t.Fatalf("stale entry: %+v", s)
+	}
+	if !slices.Contains(s.Next, "pg-git-lander land feature/old --abort") ||
+		!slices.Contains(s.Next, "pg-git-lander land feature/old --continue") {
+		t.Fatalf("resume commands: %v", s.Next)
+	}
+	if h := rep.Human(); !strings.Contains(h, "older than 2h0m0s") || !strings.Contains(h, "next: pg-git-lander land feature/old --abort") {
+		t.Fatalf("human output:\n%s", h)
+	}
+
+	rep = collect(4 * time.Hour)
+	if rep.StaleAfterS != 14400 || rep.Stale == nil || len(rep.Stale) != 0 {
+		t.Fatalf("4h threshold: %+v", rep)
+	}
+	if len(rep.Stopped) != 1 {
+		t.Fatalf("the full stopped list is unaffected: %+v", rep.Stopped)
+	}
+
+	rep = collect(0)
+	raw, err := rep.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"stale"`) || strings.Contains(string(raw), "stale_after_s") {
+		t.Fatalf("without --stale-after the JSON carries no stale fields: %s", raw)
+	}
+}

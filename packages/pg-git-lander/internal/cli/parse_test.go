@@ -85,6 +85,14 @@ func TestParseStatusLogConfigCheck(t *testing.T) {
 	if c := mustParse(t, "status", "b"); c.Branch != "b" {
 		t.Fatalf("%+v", c)
 	}
+	if c := mustParse(t, "status", "--stale-after", "2h"); c.StaleAfter != 2*time.Hour {
+		t.Fatalf("%+v", c)
+	}
+	for _, bad := range []string{"soon", "0s", "-1h"} {
+		if _, err := cli.Parse([]string{"status", "--stale-after", bad}); err == nil {
+			t.Fatalf("--stale-after %q accepted", bad)
+		}
+	}
 	if c := mustParse(t, "log", "op-1", "--tail", "20", "--repo", "/r"); c.Kind != cli.KindLog || c.Branch != "op-1" || c.Tail != 20 {
 		t.Fatalf("%+v", c)
 	}

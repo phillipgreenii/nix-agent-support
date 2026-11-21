@@ -16,7 +16,7 @@ pg-git-lander land   BRANCH [--into TARGET] [--target-worktree PATH] [--source-w
 pg-git-lander rebase [BRANCH] --continue | --skip [--no-verify] [--wait DURATION] [--json]
 pg-git-lander land   [BRANCH] --continue | --skip [--no-verify] [--wait DURATION] [--json]
 pg-git-lander rebase|land [BRANCH] --abort | --quit [--wait DURATION] [--json]
-pg-git-lander status [BRANCH] [--json]
+pg-git-lander status [BRANCH] [--stale-after DURATION] [--json]
 pg-git-lander log    OP_ID | BRANCH [--tail N]
 pg-git-lander config check [--file PATH] [--json]
 ```
