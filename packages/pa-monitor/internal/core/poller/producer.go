@@ -132,7 +132,11 @@ func (pr *Producer) loop(ctx context.Context, cs ChangeSource) {
 // "daemon offline", but it is not a successful scan and does not refresh the stamp.
 func (pr *Producer) refresh(ctx context.Context) {
 	now := pr.now()
+	start := time.Now()
 	ds, err := pr.Assemble(ctx, now)
+	// assemble is the whole producer cycle body: with the feed interval it sets
+	// how long a session start or exit waits for the next discovery.
+	pr.phase("assemble", start)
 	if err != nil {
 		return
 	}

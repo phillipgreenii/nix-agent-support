@@ -508,7 +508,10 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	// would then treat as present.
 	if opts.Emitter != nil {
 		if s, ok := opts.Poller.(interface{ SetPhaseRecorder(any) }); ok {
-			s.SetPhaseRecorder(opts.Emitter)
+			// ScanRecorder, not the bare Emitter: the Emitter's RecordPhase takes a
+			// context, so it fails the poller's recorder interface assertion and
+			// every producer-side phase would be dropped without an error.
+			s.SetPhaseRecorder(otel.ScanRecorder{Emitter: opts.Emitter})
 		}
 	}
 
