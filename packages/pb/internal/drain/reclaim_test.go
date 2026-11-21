@@ -127,22 +127,33 @@ func TestReclaim_primaryMovedOnStillZeroCommits(t *testing.T) {
 
 // A dirty worktree (untracked file, or a modified tracked file) is untouched
 // and its bead is NOT given the note.
-func TestReclaim_dirtyWorktreeIsUntouched(t *testing.T) {
-	for name, dirty := range map[string]func(t *testing.T, wt string){
-		"untracked": func(t *testing.T, wt string) {
-			if err := os.WriteFile(filepath.Join(wt, "new.txt"), []byte("wip\n"), 0o644); err != nil {
+func TestReclaim_dirtyOrCommittedWorktreeIsUntouched(t *testing.T) {
+	// One fixture serves both kinds of dirt, then the committed case: the
+	// worktree is only ever kept, so the untracked file is removed again before
+	// the modified-file case, which then stands alone.
+	repo, wt, r := reclaimFixture(t, "pg2-r3")
+	untracked := filepath.Join(wt, "new.txt")
+	steps := []struct {
+		name  string
+		dirty func(t *testing.T)
+	}{
+		{"untracked", func(t *testing.T) {
+			if err := os.WriteFile(untracked, []byte("wip\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-		},
-		"modified": func(t *testing.T, wt string) {
+		}},
+		{"modified", func(t *testing.T) {
+			if err := os.Remove(untracked); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(filepath.Join(wt, "f.txt"), []byte("edited\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			repo, wt, r := reclaimFixture(t, "pg2-r3")
-			dirty(t, wt)
+		}},
+	}
+	for _, st := range steps {
+		t.Run(st.name, func(t *testing.T) {
+			st.dirty(t)
 			res, err := reclaim(t, r, repo, "pg2-r3")
 			if err != nil {
 				t.Fatalf("Reclaim: %v", err)
@@ -158,40 +169,47 @@ func TestReclaim_dirtyWorktreeIsUntouched(t *testing.T) {
 			}
 		})
 	}
-}
 
-// A branch with commits of its own is untouched even when its tree is clean
-// (the work is committed; a later session resumes it), and gets no note.
-func TestReclaim_branchWithCommitsIsUntouched(t *testing.T) {
-	repo, wt, r := reclaimFixture(t, "pg2-r4")
-	if err := os.WriteFile(filepath.Join(wt, "wip.txt"), []byte("wip\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitTest(t, repo, "-C", wt, "add", "wip.txt")
-	gitTest(t, repo, "-C", wt, "commit", "-m", "WIP (parked): pg2-r4")
-	res, err := reclaim(t, r, repo, "pg2-r4")
+	// A branch with commits of its own is untouched even when its tree is clean
+	// (the work is committed; a later session resumes it), and gets no note.
+	gitTest(t, repo, "-C", wt, "add", "-A")
+	gitTest(t, repo, "-C", wt, "commit", "-m", "WIP (parked): pg2-r3")
+	res, err := reclaim(t, r, repo, "pg2-r3")
 	if err != nil {
 		t.Fatalf("Reclaim: %v", err)
 	}
 	if res.Outcome != OutcomeKeptCommits || !strings.Contains(res.Reason, "1 commit") {
 		t.Errorf("result = %+v, want kept-commits naming 1 commit", res)
 	}
-	if !exists(filepath.Join(wt, "wip.txt")) || !branchPresent(t, repo, "drain/pg2-r4") {
-		t.Error("committed worktree or its branch was removed")
+	if !exists(filepath.Join(wt, "f.txt")) || !branchPresent(t, repo, "drain/pg2-r3") || len(r.calls) != 0 {
+		t.Errorf("committed worktree or its branch was removed, or noted (bd calls = %v)", r.calls)
 	}
-	if len(r.calls) != 0 {
-		t.Errorf("bd calls = %v, want none", r.calls)
+
+	// The canonical clone is never an isolation worktree: a work branch that is
+	// the canonical clone's own checked-out branch is refused, not removed.
+	_, err = Reclaim(context.Background(), r, ReclaimParams{RepoPath: repo, BeadID: "pg2-r3", Branch: "main", Actor: "a"})
+	if err == nil || !strings.Contains(err.Error(), "canonical clone") {
+		t.Fatalf("err = %v, want a refusal naming the canonical clone", err)
+	}
+	if !exists(filepath.Join(repo, "f.txt")) || len(r.calls) != 0 {
+		t.Error("canonical clone was touched or noted")
 	}
 }
 
 // Nothing has the branch checked out (never isolated, or already reclaimed): a
 // quiet no-op, so a second call after a removal does not write a second note.
+// The first call here has its note fail, which also covers the typed error.
 func TestReclaim_noWorktreeIsANoOpAndIdempotent(t *testing.T) {
-	repo, _, r := reclaimFixture(t, "pg2-r5")
-	if _, err := reclaim(t, r, repo, "pg2-r5"); err != nil {
-		t.Fatal(err)
-	}
+	repo, wt, r := reclaimFixture(t, "pg2-r5")
+	r.fail = true
 	res, err := reclaim(t, r, repo, "pg2-r5")
+	if !errors.Is(err, ErrNoteFailed) {
+		t.Fatalf("first call err = %v, want ErrNoteFailed (the removal stands when the note cannot be written)", err)
+	}
+	if res.Outcome != OutcomeRemoved || res.Note == "" || exists(wt) {
+		t.Errorf("first call = %+v, worktree exists = %v; want removed with the note text to post", res, exists(wt))
+	}
+	res, err = reclaim(t, r, repo, "pg2-r5")
 	if err != nil || res.Outcome != OutcomeNone {
 		t.Fatalf("second call = %+v, err = %v; want none", res, err)
 	}
@@ -221,32 +239,5 @@ func TestReclaim_wtdoneRefusalLeavesWorktreeAndWritesNoNote(t *testing.T) {
 	}
 	if len(r.calls) != 0 {
 		t.Errorf("bd calls = %v, want none", r.calls)
-	}
-}
-
-// The removal stands when the note cannot be written; the error is typed so the
-// caller can post the note itself.
-func TestReclaim_noteFailureAfterRemovalIsTyped(t *testing.T) {
-	repo, wt, r := reclaimFixture(t, "pg2-r7")
-	r.fail = true
-	res, err := reclaim(t, r, repo, "pg2-r7")
-	if !errors.Is(err, ErrNoteFailed) {
-		t.Fatalf("err = %v, want ErrNoteFailed", err)
-	}
-	if res.Outcome != OutcomeRemoved || res.Note == "" || exists(wt) {
-		t.Errorf("result = %+v, worktree exists = %v; want removed with the note text to post", res, exists(wt))
-	}
-}
-
-// The canonical clone is never an isolation worktree: a work branch that is the
-// canonical clone's own checked-out branch is refused, not removed.
-func TestReclaim_refusesTheCanonicalClone(t *testing.T) {
-	repo, _, r := reclaimFixture(t, "pg2-r8")
-	_, err := Reclaim(context.Background(), r, ReclaimParams{RepoPath: repo, BeadID: "pg2-r8", Branch: "main", Actor: "a"})
-	if err == nil || !strings.Contains(err.Error(), "canonical clone") {
-		t.Fatalf("err = %v, want a refusal naming the canonical clone", err)
-	}
-	if !exists(filepath.Join(repo, "f.txt")) || len(r.calls) != 0 {
-		t.Error("canonical clone was touched or noted")
 	}
 }

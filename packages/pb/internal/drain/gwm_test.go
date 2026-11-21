@@ -279,16 +279,6 @@ func TestGwm_maxReachedRetriesOnceThenTransient(t *testing.T) {
 
 // Acceptance 3: a repo with no pg-gwm config keeps the legacy behavior, and a
 // configured repo can still be forced onto it.
-func TestGwm_unconfiguredRepoKeepsLegacyWorktree(t *testing.T) {
-	repo := newRepo(t) // TestMain points XDG_* at an empty config
-	out, err := Isolate(context.Background(), &recRunner{}, Params{RepoPath: repo, BeadID: "pg2-l1", Actor: "sess-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Isolation != IsolationLegacy || out.Worktree != filepath.Join(repo, ".worktrees", "pg2-l1") || out.LeaseID != "" {
-		t.Errorf("out = %+v, want legacy .worktrees/<bead>", out)
-	}
-}
 
 func TestGwm_forcedLegacyOnConfiguredRepo(t *testing.T) {
 	repo, _ := gwmFixture(t, 3)
@@ -304,12 +294,17 @@ func TestGwm_forcedLegacyOnConfiguredRepo(t *testing.T) {
 	}
 }
 
-// A legacy worktree reclaimed with pg-gwm present is still removed by wtdone.
+// A repo with no pg-gwm config keeps the legacy worktree (acceptance 3), and
+// that legacy worktree reclaimed with pg-gwm present is still removed by wtdone.
 func TestGwm_reclaimOfLegacyWorktreeIsUnchanged(t *testing.T) {
-	repo := newRepo(t)
+	repo := newRepo(t) // TestMain points XDG_* at an empty config
 	rr := &recRunner{}
-	if _, err := Isolate(context.Background(), rr, Params{RepoPath: repo, BeadID: "pg2-l3"}); err != nil {
+	iso, err := Isolate(context.Background(), rr, Params{RepoPath: repo, BeadID: "pg2-l3", Actor: "sess-1"})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if iso.Isolation != IsolationLegacy || iso.Worktree != filepath.Join(repo, ".worktrees", "pg2-l3") || iso.LeaseID != "" {
+		t.Errorf("out = %+v, want legacy .worktrees/<bead>", iso)
 	}
 	out, _ := Reclaim(context.Background(), rr, ReclaimParams{RepoPath: repo, BeadID: "pg2-l3", Actor: "a"})
 	if out.Isolation != IsolationLegacy {

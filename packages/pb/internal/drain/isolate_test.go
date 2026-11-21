@@ -527,10 +527,14 @@ func TestIsolate_bundleStatesWriteNoFileAndReportState(t *testing.T) {
 		// The retired legacy state (an old pg-hooks) falls through to missing.
 		{"legacy", 0, "missing"},
 	}
+	// One repository serves every state: the first Isolate creates the worktree
+	// and each later one reuses it, which reports the bundle state the same way
+	// (see TestIsolate_bundleStateOnReuseStillWritesNothing) for far fewer git
+	// spawns than a fresh repository and worktree per state.
+	repo := newRepo(t)
+	withCanonicalConfig(t, repo) // a config exists, yet must NOT be linked
 	for _, tc := range cases {
 		t.Run(tc.state, func(t *testing.T) {
-			repo := newRepo(t)
-			withCanonicalConfig(t, repo) // a config exists, yet must NOT be linked
 			stubPgHooks(t, tc.state, tc.exit)
 			out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11b"})
 			if err != nil {
@@ -672,9 +676,9 @@ func TestIsolate_hooksKeyFollowingState(t *testing.T) {
 		{"broken", "failing", 12, "broken"},
 		{"not-enrolled", "n/a", 0, "n/a"},
 	}
+	repo := newRepo(t) // shared: later Isolate calls reuse the worktree
 	for _, tc := range cases {
 		t.Run(tc.state+"/"+tc.hooks, func(t *testing.T) {
-			repo := newRepo(t)
 			stubPgHooks(t, tc.state, tc.exit)
 			t.Setenv("PG_HOOKS_STUB_HOOKS", tc.hooks)
 			out, err := Isolate(context.Background(), run.CLIRunner{}, Params{RepoPath: repo, BeadID: "pg2-t11h"})
