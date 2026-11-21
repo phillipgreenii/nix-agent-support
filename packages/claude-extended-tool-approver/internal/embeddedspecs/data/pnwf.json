@@ -780,6 +780,19 @@
               "source": "pnwf update-relock --help: \"-h, --help Show this help message\""
             }
           },
+          "--scope": {
+            "arity": "one",
+            "operand": {
+              "kind": "allowed-literal",
+              "set": "pn-update-scope"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf update-relock: \"--scope {siblings|flake|full}\" (nix-repo-base modules/pnwf/pnwf/pnwf.md; completions list siblings flake full); closed value set modeled as allowed-literal pn-update-scope"
+            }
+          },
           "--set": {
             "arity": "none",
             "operand": {

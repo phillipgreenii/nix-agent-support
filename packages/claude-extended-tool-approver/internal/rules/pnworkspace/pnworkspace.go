@@ -67,6 +67,9 @@ import (
 var approvedSubcommands = map[string]bool{
 	"build": true, "status": true, "push": true, "doctor": true, "update": true,
 	"rebase": true,
+	// explain: read-only trace analysis added by nix-repo-base 2026-11-21
+	// (operator ruling, Phillip, 2026-11-18, "yes" to filing the bead).
+	"explain": true,
 }
 
 // approvedWorkforestSubcommands are the routine `pn workspace workforest

@@ -97,6 +97,16 @@ func (r *P15Report) probe(root string, reg cmddesc.Registry, fact, probe string)
 
 // probeFlags probes every flag of schema, building each probe as
 // prefix + flag (+ " x" for a one-argument flag) + suffix, sorted by flag.
+// flagProbeValue is the operand a value-taking flag is probed with: a member
+// of the closed value set for --scope (pn workspace update / pnwf
+// update-relock), whose other values are insufficient by design, else "x".
+func flagProbeValue(flag string) string {
+	if flag == "--scope" {
+		return "flake"
+	}
+	return "x"
+}
+
 func (r *P15Report) probeFlags(root string, reg cmddesc.Registry, schema cmddesc.CommandSchema, prefix, suffix string) {
 	flags := make([]string, 0, len(schema.Flags))
 	for f := range schema.Flags {
@@ -106,7 +116,7 @@ func (r *P15Report) probeFlags(root string, reg cmddesc.Registry, schema cmddesc
 	for _, f := range flags {
 		probe := prefix + " " + f
 		if schema.Flags[f].Arity == cmddesc.ArityOne {
-			probe += " x"
+			probe += " " + flagProbeValue(f)
 		}
 		r.probe(root, reg, "flag "+f, probe+suffix)
 	}
@@ -705,7 +715,7 @@ func GeneratePnWorkspaceMarkerP15(base string) (*P15Report, error) {
 		for _, f := range flags {
 			command := prefix + " " + f
 			if schema.Flags[f].Arity == cmddesc.ArityOne {
-				command += " x"
+				command += " " + flagProbeValue(f)
 			}
 			probe("flag "+f+" of "+prefix, command+suffix)
 		}

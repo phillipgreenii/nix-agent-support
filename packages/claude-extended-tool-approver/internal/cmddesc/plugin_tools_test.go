@@ -368,7 +368,7 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		"pg-wi-flow next --stage s", "pg-wi-flow resolve x --defer 2026-10-10", "pg-hooks run pre-commit a.go b.go",
 		"pg-hooks status --porcelain", "pg-hooks fix", "prek run --files a b", "prek run --all-files", "bats tests/",
 		"gh pr view feature --json url,state,number", "gh pr create --draft --head f --base main --fill",
-		"pn workspace push", "pn workspace update", "pn workspace apply", "pn workspace doctor",
+		"pn workspace push", "pn workspace update", "pn workspace update --scope flake", "pn workspace explain", "pn workspace apply", "pn workspace doctor",
 		"pn workspace workforest list", "pn workspace workforest prune",
 		"claude-extended-tool-approver evaluate --misses-only --format=json", "claude-extended-tool-approver show 1 2 --format=json",
 		"claude-extended-tool-approver lint --embedded", "claude-extended-tool-approver spec-drift-check --embedded",

@@ -127,6 +127,7 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - flag --help of pn workspace update: `pn workspace update --help`
 - flag --in-place of pn workspace update: `pn workspace update --in-place`
 - flag --no-telemetry of pn workspace update: `pn workspace update --no-telemetry`
+- flag --scope of pn workspace update: `pn workspace update --scope flake`
 - flag --siblings-only of pn workspace update: `pn workspace update --siblings-only`
 - flag --terminal of pn workspace update: `pn workspace update --terminal x`
 - flag --verbose of pn workspace update: `pn workspace update --verbose`
@@ -138,6 +139,7 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - flag --set of pnwf sync-fetch: `pnwf sync-fetch --set`
 - flag -h of pnwf sync-fetch: `pnwf sync-fetch -h`
 - flag --help of pnwf update-relock: `pnwf update-relock --help`
+- flag --scope of pnwf update-relock: `pnwf update-relock --scope flake`
 - flag --set of pnwf update-relock: `pnwf update-relock --set`
 - flag -h of pnwf update-relock: `pnwf update-relock -h`
 
@@ -260,6 +262,7 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - flag --help of pn workspace update: `pn workspace update --help` => **approve** inside, **abstain** outside
 - flag --in-place of pn workspace update: `pn workspace update --in-place` => **approve** inside, **abstain** outside
 - flag --no-telemetry of pn workspace update: `pn workspace update --no-telemetry` => **approve** inside, **abstain** outside
+- flag --scope of pn workspace update: `pn workspace update --scope flake` => **approve** inside, **abstain** outside
 - flag --siblings-only of pn workspace update: `pn workspace update --siblings-only` => **approve** inside, **abstain** outside
 - flag --terminal of pn workspace update: `pn workspace update --terminal x` => **approve** inside, **abstain** outside
 - flag --verbose of pn workspace update: `pn workspace update --verbose` => **approve** inside, **abstain** outside
@@ -271,6 +274,7 @@ What to check: the newly approved facts are ONLY Exec producers (one section per
 - flag --set of pnwf sync-fetch: `pnwf sync-fetch --set` => **approve** inside, **abstain** outside
 - flag -h of pnwf sync-fetch: `pnwf sync-fetch -h` => **approve** inside, **abstain** outside
 - flag --help of pnwf update-relock: `pnwf update-relock --help` => **approve** inside, **abstain** outside
+- flag --scope of pnwf update-relock: `pnwf update-relock --scope flake` => **approve** inside, **abstain** outside
 - flag --set of pnwf update-relock: `pnwf update-relock --set` => **approve** inside, **abstain** outside
 - flag -h of pnwf update-relock: `pnwf update-relock -h` => **approve** inside, **abstain** outside
 - (control) no marker-reachable Exec fact: `pn workspace status` => **approve** inside, **approve** outside

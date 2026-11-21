@@ -857,6 +857,151 @@
             "unknownFlag": "insufficient",
             "endOfOptions": true
           },
+          "explain": {
+            "name": "explain",
+            "provenance": "pn workspace explain --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace explain --help: \"Report where a pn run spent its time, from its Tempo trace\"; read-only, runs no workspace code"
+              },
+              "stdin": {
+                "source": "pn workspace explain --help: usage \"pn workspace explain [<trace-id>]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace explain --help: usage \"pn workspace explain [<trace-id>]\" prints the analysis to the terminal; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace explain --help: full flag listing reviewed; no behavior documented for an unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help (workspace persistent flag): \"-h, --help help for update\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help: \"--json print the report as JSON\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help (workspace persistent flag): \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--partial": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help: \"--partial analyze a trace that has no pn.verb span\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help (workspace persistent flag): \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--top": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help: \"--top string keep the N slowest builds\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help (workspace persistent flag): \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help (workspace persistent flag): \"-h, --help help for update\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace explain --help (workspace persistent flag): \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace explain --help: usage \"pn workspace explain [<trace-id>]\": an optional trace id; no path or code operand"
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
           "flake-check": {
             "name": "flake-check",
             "provenance": "pn workspace flake-check --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
@@ -2028,6 +2173,19 @@
                 },
                 "citation": {
                   "source": "pn workspace update --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--scope": {
+                "arity": "one",
+                "operand": {
+                  "kind": "allowed-literal",
+                  "set": "pn-update-scope"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"--scope string siblings, flake or full (see above)\"; the closed value set is modeled as allowed-literal pn-update-scope"
                 }
               },
               "--siblings-only": {

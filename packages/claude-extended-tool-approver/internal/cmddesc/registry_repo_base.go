@@ -106,6 +106,10 @@ func pnWorkspaceVerbSchema(name string, extra map[string]FlagSpec, implicit ...I
 	}
 }
 
+// pnScopeFlag is `--scope siblings|flake|full` of `pn workspace update` and
+// `pnwf update-relock`: it takes a value, and only the closed set is inert.
+var pnScopeFlag = FlagSpec{Arity: ArityOne, Operand: AllowedLiteral("pn-update-scope")}
+
 var pnWorkspacePush = pnWorkspaceVerbSchema(
 	"push", map[string]FlagSpec{
 		"--no-siblings": inert, "-u": inert, "--set-upstream": inert, "--remote": literal1,
@@ -157,8 +161,12 @@ var repoBasePnSchema = CommandSchema{
 				"lock":  pnWorkspaceVerbSchema("lock", map[string]FlagSpec{"--allow-missing-edges": inert}, pnWorkspaceExec("lock")),
 				"clone": pnWorkspaceVerbSchema("clone", nil, pnWorkspaceExec("clone")),
 				"update": pnWorkspaceVerbSchema("update", map[string]FlagSpec{
-					"--in-place": inert, "--siblings-only": inert,
+					"--in-place": inert, "--siblings-only": inert, "--scope": pnScopeFlag,
 				}, pnWorkspaceExec("update")),
+				// Read-only trace analysis (queries the telemetry backend); no effect.
+				"explain": pnWorkspaceVerbSchema("explain", map[string]FlagSpec{
+					"--json": inert, "--partial": inert, "--top": literal1,
+				}),
 				"rebase":     pnWorkspaceVerbSchema("rebase", nil, pnWorkspaceExec("rebase")),
 				"apply":      pnWorkspaceVerbSchema("apply", map[string]FlagSpec{"--force": inert}, pnWorkspaceExec("apply")),
 				"push":       pnWorkspacePush,
@@ -191,9 +199,10 @@ func pnwfExec(verb string) ImplicitEffect {
 }
 
 var (
-	pnwfSetFlag   = map[string]FlagSpec{"--set": inert}
-	pnwfNoPos     = PositionalSpec{}
-	pnwfBranchPos = PositionalSpec{Leading: []OperandRole{Literal}}
+	pnwfSetFlag     = map[string]FlagSpec{"--set": inert}
+	pnwfRelockFlags = map[string]FlagSpec{"--set": inert, "--scope": pnScopeFlag}
+	pnwfNoPos       = PositionalSpec{}
+	pnwfBranchPos   = PositionalSpec{Leading: []OperandRole{Literal}}
 )
 
 var repoBasePnwfSchema = CommandSchema{
@@ -215,7 +224,7 @@ var repoBasePnwfSchema = CommandSchema{
 		// canonical primary to origin when it is ahead (never --force); see the
 		// file comment for why that push is not a declared effect.
 		"sync-fetch":    pnwfVerb("sync-fetch", pnwfSetFlag, pnwfNoPos, pnwfExec("sync-fetch")),
-		"update-relock": pnwfVerb("update-relock", pnwfSetFlag, pnwfNoPos, pnwfExec("update-relock")),
+		"update-relock": pnwfVerb("update-relock", pnwfRelockFlags, pnwfNoPos, pnwfExec("update-relock")),
 		// cleanup WITHOUT the two --force-* flags only removes members already
 		// confirmed as ancestors of their primary (via wtdone). The force flags
 		// are absent from Flags, so their presence is insufficient.

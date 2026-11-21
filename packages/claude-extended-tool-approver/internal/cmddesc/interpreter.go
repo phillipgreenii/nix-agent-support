@@ -589,6 +589,10 @@ var allowedLiteralSets = map[string]func(string) bool{
 	"git-stash-message": func(tok string) bool {
 		return tok != "" && !strings.HasPrefix(tok, "-")
 	},
+	// "pn-update-scope": the closed value set of `--scope` on `pn workspace
+	// update` and `pnwf update-relock` (nix-repo-base 2026-11-21: siblings,
+	// flake or full). Any other value is insufficient rather than inert.
+	"pn-update-scope": inSet("siblings", "flake", "full"),
 	// "git-plain-refspec": a `git push` refspec that is neither a force
 	// (`+src:dst`) nor a delete (`:dst`) nor a glob — the operand shapes
 	// that turn an "ordinary" push into the unreviewable rewrites R6 rejects
