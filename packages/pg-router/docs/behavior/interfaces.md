@@ -182,7 +182,8 @@ stateDiagram-v2
   an in-flight dispatch when it stops and **MUST NOT** wait for it to finish; the offer is left
   un-accepted, so the next core re-offers the event (`INV-EVT-1`) in its first offer pass, before
   its first source query (`INV-LIFE-3`), and the handler absorbs the
-  duplicate onto the work already running (`INV-EVT-2`). A role that makes no such declaration
+  duplicate onto the work already running (`INV-EVT-2`; a command handler does so by declining
+  the redelivery while an earlier run of the event is alive, `INV-CMA-11`). A role that makes no such declaration
   keeps the default: in-flight dispatches get a bounded drain, then are cancelled.
 - **`stopped`** — the participant has drained and deregistered; no messages cross.
 - **`crashing`** — a **best-effort** signal emitted on a _sudden_ shutdown (crash or forced kill)
