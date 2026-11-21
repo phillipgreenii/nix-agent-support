@@ -136,27 +136,6 @@ func (c *passCounts) examined() {
 	}
 }
 
-func (c *passCounts) cached() {
-	if c != nil {
-		c.Cached++
-	}
-}
-
-func (c *passCounts) setPhase(phase string, d time.Duration) {
-	if c == nil {
-		return
-	}
-	ms := d.Milliseconds()
-	switch phase {
-	case phaseList:
-		c.ListMS = &ms
-	case phaseProbe:
-		c.ProbeMS = &ms
-	case phaseScan:
-		c.ScanMS = &ms
-	}
-}
-
 // finish fixes the derived numbers once the pass has returned how many things
 // it removed.
 func (c *passCounts) finish(removed int) {

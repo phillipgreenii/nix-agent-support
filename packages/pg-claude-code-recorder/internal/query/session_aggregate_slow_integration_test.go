@@ -3,11 +3,13 @@
 package query
 
 import (
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/sources"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
 
 // pa-monitor counts a session's user turns with an aggregate pinned to the
@@ -50,4 +52,16 @@ func TestSessionPinnedAggregateIsDrivenBySessionIndex(t *testing.T) {
 	if len(ans.Rows) != 1 || ans.Rows[0][0] != int64(10) {
 		t.Errorf("rows = %v, want [[10]]", ans.Rows)
 	}
+}
+
+// recordingQuerier remembers each statement and its arguments.
+type recordingQuerier struct {
+	store.Querier
+	sql  []string
+	args [][]any
+}
+
+func (r *recordingQuerier) Query(q string, args ...any) (*sql.Rows, error) {
+	r.sql, r.args = append(r.sql, q), append(r.args, args)
+	return r.Querier.Query(q, args...)
 }

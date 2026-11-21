@@ -17,22 +17,6 @@ import (
 // Janitor cut-stage record, bounded trash purge, closed-bead resume, cached
 // status timeouts and the run-deadline flag.
 
-// cancelOnList cancels a context when the sweep lists sessions.
-type cancelOnList struct {
-	ccpool.Runner
-	cancel context.CancelFunc
-}
-
-func (c cancelOnList) ListLight(ctx context.Context) ([]ccpool.Session, error) {
-	c.cancel()
-	return nil, ccpool.ErrNoFacetsUnsupported
-}
-
-func (c cancelOnList) List(ctx context.Context) ([]ccpool.Session, error) {
-	c.cancel()
-	return c.Runner.List(ctx)
-}
-
 func TestCutStage_otherPassesAndFirstCutOnly(t *testing.T) {
 	cases := []struct {
 		pass, phase string

@@ -32,7 +32,7 @@ func TestEachFile(t *testing.T) {
 	}{
 		{"all rows in order", &s.Reader, 0, n, nil},
 		{"callback error stops the scan", &s.Reader, 3, 3, boom},
-		{"cancelled context stops the scan", s.Reader.WithContext(cancelled), 0, 0, context.Canceled},
+		{"cancelled context stops the scan", s.WithContext(cancelled), 0, 0, context.Canceled},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -121,3 +121,17 @@ func TestV3RebuildHoldsTheSameRecordsFactsAndAnswersAsV2(t *testing.T) {
 		}
 	}
 }
+
+func answerJSON(t *testing.T, e *query.Engine, req string) string {
+	t.Helper()
+	var r query.Request
+	if err := json.Unmarshal([]byte(req), &r); err != nil {
+		t.Fatal(err)
+	}
+	a, err := e.Query(context.Background(), r)
+	if err != nil {
+		t.Fatalf("%s: %v", req, err)
+	}
+	a.AsOf = ""
+	return js(a)
+}

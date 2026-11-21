@@ -2,12 +2,10 @@ package query_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/testkit"
 )
@@ -31,20 +29,6 @@ func parityKits(t *testing.T) (v2, v3 *testkit.Kit) {
 		k.Parse()
 	}
 	return v2, v3
-}
-
-func answerJSON(t *testing.T, e *query.Engine, req string) string {
-	t.Helper()
-	var r query.Request
-	if err := json.Unmarshal([]byte(req), &r); err != nil {
-		t.Fatal(err)
-	}
-	a, err := e.Query(context.Background(), r)
-	if err != nil {
-		t.Fatalf("%s: %v", req, err)
-	}
-	a.AsOf = ""
-	return js(a)
 }
 
 func rowsOf(t *testing.T, k *testkit.Kit, qs string) string {
