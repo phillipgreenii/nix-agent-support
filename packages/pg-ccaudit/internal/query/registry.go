@@ -1486,7 +1486,10 @@ ORDER BY calls DESC, skill`,
 			Notes: "T-2/T-15: lines_bad makes malformed input countable rather than assumed, and " +
 				"complete_files distinguishes files whose ingest is FINAL from files still being " +
 				"appended. If indexed_bytes < corpus_bytes the remaining bytes are an unparsed tail, " +
-				"not a loss.",
+				"not a loss. " +
+				"On the recorder feed every files row is a placeholder (size, complete and line counts " +
+				"stay 0), so this table reads all zeros there; `pg-ccaudit status` detects that and " +
+				"reports event counts instead.",
 			SQL: `
 SELECT COUNT(*)                        AS files,
        SUM(complete)                   AS complete_files,

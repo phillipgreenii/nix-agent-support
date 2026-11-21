@@ -539,6 +539,14 @@ snapshot) before the records that follow it. With the recorder down, ingest says
 "recorder offline", exits 0 and polls again at the next tick; it never falls back
 to the files.
 
+The recorder feed never fills the `files` columns `size`, `mtime`, `complete`,
+`lines_ok`, `lines_bad` or `resume_offset`: each `files` row is a placeholder.
+When every row is a placeholder, `pg-ccaudit status` (and the staleness note on
+every query) says "not tracked on the recorder feed" and reports event, file and
+session counts from `events` instead of an all-zero `coverage` table and "index
+current"; `status --json` carries `recorder_feed` and `events`. The `coverage`
+query itself is unchanged and still reads zeros on this feed.
+
 A snapshot is resumable: each page is committed together with its position (a
 `<subscription>.snapshot` row in `feed_cursors` holding the snapshot cursor and
 the next page token), and the subscription's own cursor is saved only with the

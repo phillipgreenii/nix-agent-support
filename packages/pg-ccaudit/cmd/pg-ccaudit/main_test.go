@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-ccaudit/internal/lock"
+	"github.com/phillipgreenii/pg-ccaudit/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/client/clienttest"
 )
 
@@ -185,7 +186,9 @@ func TestStatusCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	for _, want := range []string{"staleness:", "lines_bad", "thinking table"} {
+	// This corpus is fed by the recorder, so the files-table counters are
+	// placeholders and status must say so rather than print zeros.
+	for _, want := range []string{"staleness:", "not tracked on the recorder feed", "thinking table"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status output omits %q:\n%s", want, out)
 		}
@@ -199,6 +202,55 @@ func TestStatusCommand(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("status --json omits %q:\n%s", want, out)
 		}
+	}
+}
+
+// Recorder-fed databases hold one placeholder files row per recorder file (size,
+// mtime, complete and line counts all zero). Status must not present those zeros
+// as a healthy index ("index current", all-zero coverage table).
+func TestStatusOnRecorderPlaceholderRowsIsNotVacuouslyHealthy(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "transcripts.db")
+	w, err := store.Open(t.Context(), dbPath, false)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	for _, p := range []string{"f_1/g1", "f_2/g1"} {
+		if _, err := w.ExecContext(t.Context(), `INSERT INTO files (path, project_dir, size, mtime, resume_offset, complete, lines_ok, lines_bad, ingested_at)
+			VALUES (?, '', 0, 0, 0, 0, 0, 0, 1)`, p); err != nil {
+			t.Fatalf("insert file: %v", err)
+		}
+		for seq := 0; seq < 3; seq++ {
+			if _, err := w.ExecContext(t.Context(), `INSERT INTO events (path, seq, session_id, ts, type) VALUES (?, ?, 'S1', '2026-11-20T10:00:00Z', 'user')`, p, seq); err != nil {
+				t.Fatalf("insert event: %v", err)
+			}
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	out, _, err := captureRun(t, "status", "--db", dbPath)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if strings.Contains(out, "index current") {
+		t.Errorf("status claims the index is current on placeholder rows:\n%s", out)
+	}
+	if strings.Contains(out, "complete_files") {
+		t.Errorf("status prints the all-zero files coverage table:\n%s", out)
+	}
+	for _, want := range []string{"not tracked on the recorder feed", "events=6"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status omits %q:\n%s", want, out)
+		}
+	}
+
+	out, _, err = captureRun(t, "status", "--db", dbPath, "--json")
+	if err != nil {
+		t.Fatalf("status --json: %v", err)
+	}
+	if !strings.Contains(out, `"recorder_feed": true`) || !strings.Contains(out, `"events": 6`) {
+		t.Errorf("status --json omits recorder_feed/events:\n%s", out)
 	}
 }
 

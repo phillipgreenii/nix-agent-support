@@ -29,6 +29,14 @@ type Staleness struct {
 	NewestOnDisk  time.Time
 	NewestIndexed time.Time
 	LinesBad      int64
+	// RecorderFeed is true when files holds rows but every one is a recorder-feed
+	// placeholder (size, mtime, complete, lines and resume offset all zero). The
+	// recorder feed never fills those columns, so file-level coverage and the
+	// on-disk staleness comparison are meaningless there and are not reported.
+	RecorderFeed bool
+	// Events is the number of rows in events; it is the coverage figure that is
+	// real on the recorder feed.
+	Events int64
 	// RootErr records a corpus root that could not be walked. The index is still
 	// queryable; only the staleness comparison is unavailable.
 	RootErr error
@@ -47,6 +55,12 @@ func (s Staleness) Note() string {
 			s.Root, s.RootErr, s.FilesIndexed)
 	}
 	var sb strings.Builder
+	if s.RecorderFeed {
+		fmt.Fprintf(&sb, "staleness: not tracked on the recorder feed — %d file row(s) are recorder placeholders "+
+			"(size, complete and line counts are never recorded), so freshness cannot be judged here; %d event(s) indexed",
+			s.FilesIndexed, s.Events)
+		return sb.String()
+	}
 	if !s.Stale() {
 		fmt.Fprintf(&sb, "staleness: index current — %d file(s) indexed, %d still open",
 			s.FilesIndexed, s.OpenFiles)
@@ -109,6 +123,15 @@ func Measure(ctx context.Context, db *sql.DB, root string) Staleness {
 	s.FilesIndexed = len(indexed)
 
 	_ = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(lines_bad), 0) FROM files`).Scan(&s.LinesBad)
+
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&s.Events)
+	var tracked int64
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM files
+WHERE size <> 0 OR complete <> 0 OR lines_ok <> 0 OR lines_bad <> 0 OR resume_offset <> 0`).Scan(&tracked); err == nil &&
+		tracked == 0 && s.FilesIndexed > 0 {
+		s.RecorderFeed = true
+		return s
+	}
 
 	var walkErr error
 	if root == "" {

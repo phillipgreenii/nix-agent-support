@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -62,6 +63,8 @@ FLAGS
 			"lines_bad":      s.LinesBad,
 			"stale":          s.Stale(),
 			"thinking_table": hasThinking,
+			"recorder_feed":  s.RecorderFeed,
+			"events":         s.Events,
 		}
 		if !s.NewestOnDisk.IsZero() {
 			payload["newest_on_disk"] = s.NewestOnDisk.UTC().Format(time.RFC3339)
@@ -77,6 +80,17 @@ FLAGS
 	fmt.Fprintf(stdout, "db:   %s\n", resolvedDB)
 	fmt.Fprintln(stdout, s.Note())
 	fmt.Fprintf(stdout, "thinking table (T-16): %t\n", hasThinking)
+
+	if s.RecorderFeed {
+		// The files-table coverage columns are all zero by construction on the
+		// recorder feed; printing them would read as an empty but healthy index.
+		var sessions int64
+		var newest sql.NullString
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT session_id), MAX(ts) FROM events`).Scan(&sessions, &newest)
+		fmt.Fprintf(stdout, "coverage: not tracked on the recorder feed (files-table counters are placeholders); "+
+			"events=%d files=%d sessions=%d newest_event_ts=%s\n", s.Events, s.FilesIndexed, sessions, newest.String)
+		return nil
+	}
 
 	req := query.Request{Query: mustQuery("coverage"), Format: query.FormatTable}
 	res, err := query.Run(ctx, db, req)
