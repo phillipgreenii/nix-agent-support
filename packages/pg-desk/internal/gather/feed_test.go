@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const feedWire = `{"sources":[{"backend":"jira","status":"succeeded","version":"v1","truncated":false,"next_seq":9,"store_identity":"store-a"}],` +
+const feedWire = `{"sources":[{"backend":"jira","status":"succeeded","version":1,"truncated":false,"next_seq":9,"store_identity":"store-a"}],` +
 	`"changes":[{"change":"changed","source":"jira","seq":7,"kinds":["fields_changed","commented"],"fields":{"summary":"x"},"entity":{"id":"PROJ-1","title":"t"}},` +
 	`{"change":"added","source":"jira","seq":8,"kinds":["created"],"fields":{},"entity":{"id":"PROJ-2"}}],` +
 	`"sources_freshness":[{"query":"mine","last_success_at":"2026-10-26T00:00:00Z"},{"query":"team","last_error":"boom"}]}`

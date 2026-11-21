@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 )
 
 // ErrUnavailable is the sentinel (errors.Is) for pg-connector's wire error
@@ -18,14 +20,31 @@ var ErrUnavailable = errors.New("pg-connector: unavailable")
 // feed key a consumer's cursor pointed at.
 const cursorExpiredPrefix = "cursor_expired:"
 
-// wireErrorCode is the error code of a failed call's stdout (a wireEnvelope
-// error branch), or "" when the stdout is not such an envelope.
+// wireErrorCode is the error code of a failed call's stdout (the wire error
+// envelope), or "" when the stdout is not such an envelope.
 func wireErrorCode(stdout []byte) string {
-	var env wireEnvelope
-	if err := json.Unmarshal(stdout, &env); err == nil && env.Error != nil {
-		return env.Error.Code
+	return client.NewExitError(nil, 0, stdout).Code
+}
+
+// wireErrorMessage best-effort extracts a human-readable message from a
+// failed call's stdout: "code: message" from an error envelope, else the raw
+// stdout text.
+func wireErrorMessage(stdout []byte) string {
+	return errorText(client.NewExitError(nil, 0, stdout))
+}
+
+// errorText is the "code: message" text of a typed client error (the bare
+// message when the call printed no error code).
+func errorText(e *client.Error) string {
+	if e.Code == "" {
+		return e.Message
 	}
-	return ""
+	return e.Code + ": " + e.Message
+}
+
+// wireErrorOf is the *WireError of a failed call a typed client reported.
+func wireErrorOf(args []string, e *client.Error) error {
+	return &WireError{Code: e.Code, msg: fmt.Sprintf("pg-connector %v: exit %d: %s", args, e.ExitCode, errorText(e))}
 }
 
 // WireError is the error for a pg-connector call that exited with a code the
@@ -66,8 +85,7 @@ func ErrorCode(err error) string {
 // exitError is the error for a pg-connector call that exited with a code the
 // caller treats as failure; see WireError.
 func exitError(args []string, code int, stdout []byte) error {
-	msg := fmt.Sprintf("pg-connector %v: exit %d: %s", args, code, wireErrorMessage(stdout))
-	return &WireError{Code: wireErrorCode(stdout), msg: msg}
+	return wireErrorOf(args, client.NewExitError(args, code, stdout))
 }
 
 // FeedRow is one row of an owning backend's change feed: the log position,
@@ -110,26 +128,19 @@ type FeedResult struct {
 	Freshness []FeedFreshness
 }
 
+// feedWireOut is the typed changes answer plus the error member a failed
+// call prints.
 type feedWireOut struct {
-	Sources []struct {
-		Backend       string `json:"backend"`
-		Status        string `json:"status"`
-		Reason        string `json:"reason"`
-		NextSeq       *int64 `json:"next_seq"`
-		StoreIdentity string `json:"store_identity"`
-	} `json:"sources"`
-	Changes []struct {
-		Seq    int64           `json:"seq"`
-		Kinds  []string        `json:"kinds"`
-		Fields json.RawMessage `json:"fields"`
-		Entity json.RawMessage `json:"entity"`
-	} `json:"changes"`
-	Freshness []struct {
-		Query         string `json:"query"`
-		LastSuccessAt string `json:"last_success_at"`
-		LastError     string `json:"last_error"`
-	} `json:"sources_freshness"`
-	Error *wireError `json:"error"`
+	client.ChangesOutcome
+	Error json.RawMessage `json:"error"`
+}
+
+// feedFreshnessWire is one sources_freshness[] row (the outcome keeps the array
+// raw).
+type feedFreshnessWire struct {
+	Query         string `json:"query"`
+	LastSuccessAt string `json:"last_success_at"`
+	LastError     string `json:"last_error"`
 }
 
 // ListFeed runs `pg-connector <type> changes [--query <query>] --consumer
@@ -170,32 +181,48 @@ func (g *Gatherer) ListFeed(ctx context.Context, entityType, query, consumer, ba
 	if err := json.Unmarshal(res.stdout, &wire); err != nil {
 		return FeedResult{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
-	if wire.Error != nil {
+	if hasWireError(wire.Error) {
 		return FeedResult{}, exitError(args, res.exitCode, res.stdout)
 	}
 	out := FeedResult{
 		Sources:   make([]FeedSource, 0, len(wire.Sources)),
 		Rows:      make([]FeedRow, 0, len(wire.Changes)),
-		Freshness: make([]FeedFreshness, 0, len(wire.Freshness)),
+		Freshness: make([]FeedFreshness, 0),
 	}
 	for _, s := range wire.Sources {
 		out.Sources = append(out.Sources, FeedSource{
-			Backend: s.Backend, Status: s.Status, Reason: s.Reason,
+			Backend: s.Backend, Status: string(s.Status), Reason: s.Reason,
 			NextSeq: s.NextSeq, StoreIdentity: s.StoreIdentity,
 			CursorExpired: strings.HasPrefix(s.Reason, cursorExpiredPrefix),
 		})
 	}
 	for _, c := range wire.Changes {
+		var seq int64
+		if c.Seq != nil {
+			seq = *c.Seq
+		}
+		var kinds []string
+		if len(c.Kinds) > 0 {
+			if err := json.Unmarshal(c.Kinds, &kinds); err != nil {
+				return FeedResult{}, fmt.Errorf("decode pg-connector %v kinds: %w", args, err)
+			}
+		}
 		var ent changesEntityWire
 		if err := json.Unmarshal(c.Entity, &ent); err != nil {
 			return FeedResult{}, fmt.Errorf("decode pg-connector %v entity: %w", args, err)
 		}
 		if ent.ID == "" {
-			return FeedResult{}, fmt.Errorf("pg-connector %v reported feed row %d for an entity with no id", args, c.Seq)
+			return FeedResult{}, fmt.Errorf("pg-connector %v reported feed row %d for an entity with no id", args, seq)
 		}
-		out.Rows = append(out.Rows, FeedRow{Seq: c.Seq, Kinds: c.Kinds, Fields: c.Fields, EntityID: ent.ID, Entity: c.Entity})
+		out.Rows = append(out.Rows, FeedRow{Seq: seq, Kinds: kinds, Fields: c.Fields, EntityID: ent.ID, Entity: c.Entity})
 	}
-	for _, f := range wire.Freshness {
+	var freshness []feedFreshnessWire
+	if len(wire.SourcesFreshness) > 0 {
+		if err := json.Unmarshal(wire.SourcesFreshness, &freshness); err != nil {
+			return FeedResult{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
+		}
+	}
+	for _, f := range freshness {
 		out.Freshness = append(out.Freshness, FeedFreshness{Query: f.Query, LastSuccessAt: f.LastSuccessAt, LastError: f.LastError})
 	}
 	return out, nil
@@ -361,4 +388,10 @@ func degradedReason(issueShow json.RawMessage) string {
 		return "issue answer served from " + doc.ServedFrom
 	}
 	return ""
+}
+
+// hasWireError reports whether a decoded "error" member is present and not
+// JSON null.
+func hasWireError(raw json.RawMessage) bool {
+	return len(raw) > 0 && string(raw) != "null"
 }

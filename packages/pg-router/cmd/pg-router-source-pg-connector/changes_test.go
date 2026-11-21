@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+
 	apievent "github.com/phillipgreenii/pg-router/api/event"
 
 	"github.com/phillipgreenii/x/exitcode"
@@ -578,7 +580,7 @@ func TestChanges_RetryWindow_ABAFlipHashesToTheFirstID(t *testing.T) {
 // silently change every id the router has retained.
 func TestChanges_RetryWindow_DigestRecipeIsPinned(t *testing.T) {
 	id := entityIdentity{ID: "o/r#1", HeadSHA: []byte(` "h1" `)}
-	got, err := changeDigest(changesEntry{Change: "changed", Source: "gh"}, id, "2026-10-07T12:00:00.123Z")
+	got, err := changeDigest(client.Change{Change: "changed", Source: "gh"}, id, "2026-10-07T12:00:00.123Z")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -742,17 +744,17 @@ func TestChanges_RetryWindow_SeqKindsFieldsDoNotReachTheDigest(t *testing.T) {
 	// The digest recipe for an owning backend's row is pinned: {change, source,
 	// entity_id, head_sha, version}, version a raw JSON number.
 	id := entityIdentity{ID: "o/r#1", HeadSHA: []byte(`"h1"`), Version: []byte(`7`)}
-	sum := func(c changesEntry) string {
+	sum := func(c client.Change) string {
 		d, err := changeDigest(c, id, "2026-10-07T12:00:00.123Z")
 		if err != nil {
 			t.Fatal(err)
 		}
 		return d
 	}
-	plain := sum(changesEntry{Change: "changed", Source: "gh"})
-	withExtras := sum(changesEntry{
+	plain := sum(client.Change{Change: "changed", Source: "gh"})
+	withExtras := sum(client.Change{
 		Change: "changed", Source: "gh",
-		Seq: []byte(`41`), Kinds: []byte(`["x"]`), Fields: []byte(`[]`),
+		Seq: ptrSeq(41), Kinds: []byte(`["x"]`), Fields: []byte(`[]`),
 	})
 	if plain != withExtras {
 		t.Fatalf("digest %q with extras vs %q without", withExtras, plain)
@@ -1047,3 +1049,6 @@ func TestChanges_DeferredAck_DecodeFailureAfterFlush_AcknowledgesNothing(t *test
 		}
 	}
 }
+
+// ptrSeq is the address of a seq literal (Change.Seq is optional).
+func ptrSeq(n int64) *int64 { return &n }

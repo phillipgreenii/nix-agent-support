@@ -20,12 +20,13 @@ import (
 	"io"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/x/cmdrun"
 	"github.com/phillipgreenii/x/exitcode"
 )
 
-// pgConnectorBinary is the ambient $PATH name this adapter execs. Never a
-// compile-time import of packages/pg-connector [design: section 6.1].
+// pgConnectorBinary is the ambient $PATH name this adapter execs; its answers
+// decode with the typed client package of packages/pg-connector.
 const pgConnectorBinary = "pg-connector"
 
 // connectorRunner runs the pg-connector subprocess through the shared x
@@ -165,31 +166,6 @@ func invokeOrFail(ctx context.Context, stderr io.Writer, args []string, extraEnv
 	return res.stdout, nil
 }
 
-// pgConnectorSourceRow is the minimal subset of a fan-out wire response's
-// sources[] row this adapter needs to recover a degraded/failed
-// backend's own reason text on the failure path (invokeOrFail above).
-// The row's own identifying field is spelled "backend" in pg-connector's
-// "changes" wire (changesSourceRow, changes.go) and "source" in every
-// other fan-out verb's own SourceResult-shaped wire ("list", which
-// list.go/sweep.go both invoke) — both are decoded here so this one
-// extraction works across every verb this adapter invokes, without
-// needing to know which shape a given call used [bead pg2-wa5uk].
-type pgConnectorSourceRow struct {
-	Backend string `json:"backend"`
-	Source  string `json:"source"`
-	Reason  string `json:"reason"`
-}
-
-// pgConnectorSourcesEnvelope is the minimal subset of pg-connector's own
-// stdout JSON this adapter needs on its own failure path: just the
-// sources[] array, decoded generically since invokeOrFail is shared by
-// every verb and a Tier-1 CLI-level failure (no backend ever dispatched)
-// carries no sources[] at all — that case simply yields zero rows below,
-// not a decode error [bead pg2-wa5uk].
-type pgConnectorSourcesEnvelope struct {
-	Sources []pgConnectorSourceRow `json:"sources"`
-}
-
 // failureReasons extracts one "<backend>: <reason>" string per sources[]
 // row that carries a non-empty reason, from pg-connector's own stdout on
 // invokeOrFail's failure path. best-effort: a malformed/non-JSON stdout
@@ -198,24 +174,34 @@ type pgConnectorSourcesEnvelope struct {
 // genuinely different failure mode never masks itself as "no reason
 // available" [bead pg2-wa5uk].
 func failureReasons(stdout []byte) []string {
-	var env pgConnectorSourcesEnvelope
-	if err := json.Unmarshal(stdout, &env); err != nil {
+	// A "changes" answer names a row's backend in "backend"; every other
+	// fan-out verb names it in "source". Both rows are decoded with the typed
+	// client outcomes (each decode ignores the other's key), so one extraction
+	// serves every verb; a Tier-1 failure with no sources[] yields none.
+	var list client.FanOutOutcome
+	var changes client.ChangesOutcome
+	if err := json.Unmarshal(stdout, &list); err != nil {
 		return nil
 	}
-	reasons := make([]string, 0, len(env.Sources))
-	for _, s := range env.Sources {
-		if s.Reason == "" {
+	if err := json.Unmarshal(stdout, &changes); err != nil {
+		return nil
+	}
+	// Both decodes read the same sources[] array, so their rows pair by index.
+	reasons := make([]string, 0, len(list.Sources))
+	for i, s := range list.Sources {
+		backend := s.Source
+		if backend == "" && i < len(changes.Sources) {
+			backend = changes.Sources[i].Backend
+		}
+		reason := s.Reason
+		if reason == "" {
 			continue
 		}
-		backend := s.Backend
 		if backend == "" {
-			backend = s.Source
-		}
-		if backend == "" {
-			reasons = append(reasons, s.Reason)
+			reasons = append(reasons, reason)
 			continue
 		}
-		reasons = append(reasons, backend+": "+s.Reason)
+		reasons = append(reasons, backend+": "+reason)
 	}
 	return reasons
 }

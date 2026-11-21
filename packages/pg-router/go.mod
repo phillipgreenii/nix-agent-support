@@ -2,7 +2,10 @@ module github.com/phillipgreenii/pg-router
 
 go 1.26.10
 
-require github.com/phillipgreenii/claude-transcript v0.0.0
+require (
+	github.com/phillipgreenii/claude-transcript v0.0.0
+	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0
+)
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -108,3 +111,7 @@ replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-s
 // package pkg/deskapi (standard library only) is imported, by the pg-desk
 // source adapter.
 replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk => ../pg-desk
+
+// pg-connector's published client package types every call and decode of the
+// pg-connector CLI that pg-router-source-pg-connector makes.
+replace github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector => ../pg-connector

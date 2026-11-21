@@ -17,6 +17,7 @@ cachePackages = [
   'github.com/modern-go/reflect2',
   'github.com/munnerz/goautoneg',
   'github.com/ncruces/go-strftime',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/engine',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/feed',

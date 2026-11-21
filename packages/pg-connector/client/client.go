@@ -162,6 +162,28 @@ func (c Client) LedgerShow(ctx context.Context) (json.RawMessage, error) {
 	return c.stdout(ctx, []string{"ledger", "show", "--output", "json"}, ExitOK)
 }
 
+// Targeted runs an arbitrary single-backend verb with args (the argv after
+// the binary name) and returns the envelope's result: exit 0 returns it; any
+// other exit (4 NotFound included) is an *Error. It is for op verbs that have
+// no dedicated method; prefer a dedicated method where one exists.
+func (c Client) Targeted(ctx context.Context, args ...string) (json.RawMessage, error) {
+	return c.targeted(ctx, args)
+}
+
+// FanOutStdout runs an arbitrary fan-out verb with args and returns its raw
+// stdout when it ends with exit 0 or 5 (degraded); any other exit is an
+// *Error. The caller decodes the stdout (for example into a ListOutcome).
+func (c Client) FanOutStdout(ctx context.Context, args ...string) (json.RawMessage, error) {
+	res, err := c.do(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	if res.Code != ExitOK && res.Code != ExitDegraded {
+		return nil, newExitError(args, res.Code, res.Stdout)
+	}
+	return json.RawMessage(res.Stdout), nil
+}
+
 // do runs one call and maps every failure that is not a clean exit into an
 // *Error; it returns the raw result for the caller to classify by exit code.
 func (c Client) do(ctx context.Context, args []string) (cmdrun.Result, *Error) {

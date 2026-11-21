@@ -353,13 +353,10 @@ func newChangesCmd(entityType string) *cobra.Command {
 }
 
 // envIssueBeadsDir mirrors pg-connector-issue-beads's own EnvWorkspaceDir
-// constant (cmd/pg-connector-issue-beads/internal/runner.go) — duplicated
-// rather than imported, matching this module's established "no
-// compile-time dependency on a Tier-2 backend's own internal package"
-// convention (e.g. pg-router-source-pg-connector's own changesWire, which
-// duplicates pg-connector's changes wire shape for the identical reason).
-// Read here, on pg-connector's OWN process environment — inherited
-// unchanged from whatever invoked pg-connector, see
+// constant (cmd/pg-connector-issue-beads/internal/runner.go), kept as a copy
+// because this module has no compile-time dependency on a Tier-2 backend's
+// own internal package. Read here, on pg-connector's OWN process environment
+// — inherited unchanged from whatever invoked pg-connector, see
 // pg-router-source-pg-connector's beadsDirEnv — to recover the SAME
 // per-invocation tracker override the exec'd backend itself resolves,
 // purely to disambiguate this call's own LedgerKey (see

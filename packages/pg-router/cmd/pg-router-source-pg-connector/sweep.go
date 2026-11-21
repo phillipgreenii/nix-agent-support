@@ -11,18 +11,10 @@ import (
 	"fmt"
 
 	apievent "github.com/phillipgreenii/pg-router/api/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 
 	"github.com/spf13/cobra"
 )
-
-// idsOnlyWire is the "list --ids-only" wire response's shape this file
-// needs: the TOP-LEVEL present_ids array. entities is always empty for
-// --ids-only (this packet's own Contract "Consumes" section) and is
-// deliberately not decoded here — reading it for ids would silently drop
-// every id on every real invocation [design: section 6.1].
-type idsOnlyWire struct {
-	PresentIDs []string `json:"present_ids"`
-}
 
 func newSweepCmd() *cobra.Command {
 	var beadsDir, since, backend string
@@ -66,7 +58,7 @@ func newSweepCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var wire idsOnlyWire
+			var wire client.ListOutcome[json.RawMessage]
 			if err := json.Unmarshal(out, &wire); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), err)
 				return errFailed

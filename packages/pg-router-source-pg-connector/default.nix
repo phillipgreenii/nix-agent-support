@@ -15,11 +15,10 @@ mkGoApp {
   # and the module files (members.json lists them; the Go boundary test reads the
   # same file), so a router-engine edit does not bump this binary's --version.
   #
-  # This binary has no compile-time dependency on packages/pg-connector: it
-  # execs pg-connector as a subprocess and parses its stdout JSON generically
-  # [design: section 6.1]. Reusing packages/pg-connector's own pkg/schema
-  # types was therefore never an option here — there is nothing to reuse
-  # across that seam by design.
+  # It still execs pg-connector as a subprocess (ambient $PATH binary), but
+  # decodes the answers with the published client package of
+  # packages/pg-connector (a local replace of ../pg-connector, carried by
+  # members.memberFileset).
   src = lib.fileset.toSource {
     root = members.packagesRoot;
     fileset = members.memberFileset "source-connector";

@@ -20,11 +20,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/x/cmdrun"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
 )
@@ -122,44 +123,25 @@ type issueShowResult struct {
 // issueClient.targetedCall exactly, one layer further (issue show rather
 // than pr show or issue create/update/transition).
 func (c *connectorIssueShower) Show(ctx context.Context, id string) (string, map[string]string, error) {
-	args := []string{"issue", "show", id}
-	args = append(args, c.backendFlag()...)
-
-	res := runner(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args, Env: c.issueBeadsDirEnv(), Timeout: callTimeout})
-	if res.StartErr != nil {
-		return "", nil, fmt.Errorf("beadref: exec pg-connector %v: %w", args, res.StartErr)
+	backend := ""
+	if c.cfg != nil {
+		backend = c.cfg.AgentTrackerBackend
 	}
-	exitCode := res.Code
-	stdout := res.Stdout
-
-	switch exitCode {
-	case 0:
-		var env wireEnvelope
-		if decErr := json.Unmarshal(stdout, &env); decErr != nil {
-			return "", nil, fmt.Errorf("beadref: decode pg-connector %v stdout: %w", args, decErr)
+	cl := client.Client{Run: runner, Env: c.issueBeadsDirEnv(), Timeout: callTimeout}
+	raw, err := cl.Get(ctx, client.GetRequest{Type: "issue", ID: id, Backend: backend})
+	if err != nil {
+		if client.IsNotFound(err) {
+			return "", nil, fmt.Errorf("beadref: pg-connector issue show %s: not_found", id)
 		}
-		var res issueShowResult
-		if len(env.Result) > 0 {
-			if decErr := json.Unmarshal(env.Result, &res); decErr != nil {
-				return "", nil, fmt.Errorf("beadref: decode pg-connector %v result: %w", args, decErr)
-			}
+		return "", nil, fmt.Errorf("beadref: %w", err)
+	}
+	var res issueShowResult
+	if len(raw) > 0 {
+		if decErr := json.Unmarshal(raw, &res); decErr != nil {
+			return "", nil, fmt.Errorf("beadref: decode pg-connector issue show %s result: %w", id, decErr)
 		}
-		return res.Title, res.Metadata, nil
-	case 4:
-		return "", nil, fmt.Errorf("beadref: pg-connector %v: not_found", args)
-	default:
-		return "", nil, fmt.Errorf("beadref: pg-connector %v: exit %d: %s", args, exitCode, wireErrorMessage(stdout))
 	}
-}
-
-// backendFlag pins dispatch to cfg.AgentTrackerBackend when configured —
-// design section 7.5's "pinned to agent_tracker_backend", mirroring
-// internal/sync's own issueClient.backendFlag exactly.
-func (c *connectorIssueShower) backendFlag() []string {
-	if c.cfg == nil || c.cfg.AgentTrackerBackend == "" {
-		return nil
-	}
-	return []string{"--backend", c.cfg.AgentTrackerBackend}
+	return res.Title, res.Metadata, nil
 }
 
 // issueBeadsDirEnv builds the extraEnv slice this call carries:
@@ -176,24 +158,4 @@ func (c *connectorIssueShower) issueBeadsDirEnv() []string {
 		return nil
 	}
 	return []string{"PG_CONNECTOR_ISSUE_BEADS_DIR=" + dir}
-}
-
-// wireEnvelope/wireError mirror internal/gather/gather.go's own decode
-// shapes for pkg/scriptout's Response envelope.
-type wireEnvelope struct {
-	Result json.RawMessage `json:"result"`
-	Error  *wireError      `json:"error"`
-}
-
-type wireError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
-func wireErrorMessage(stdout []byte) string {
-	var env wireEnvelope
-	if err := json.Unmarshal(stdout, &env); err == nil && env.Error != nil {
-		return env.Error.Code + ": " + env.Error.Message
-	}
-	return strings.TrimSpace(string(stdout))
 }

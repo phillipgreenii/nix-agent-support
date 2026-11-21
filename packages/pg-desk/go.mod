@@ -67,10 +67,10 @@ require (
 	modernc.org/memory v1.13.0 // indirect
 )
 
-// pg-connector is a sibling module in this same repo, used only by
-// internal/gather's own test suite to reuse pkg/scriptout/conformance's
-// real wire-envelope schema checker rather than hand-rolling a parallel
-// one (docket pg2-2j5ac.32, packet 4's own Files instruction) — resolved
+// pg-connector is a sibling module in this same repo: its published client
+// package carries every call and decode of the pg-connector CLI, and
+// internal/gather's own test suite reuses pkg/scriptout/conformance's real
+// wire-envelope schema checker — resolved
 // natively via a local replace, the same "local replace => ../sibling"
 // pattern packages/pg-router-handlers's go.mod already uses for its
 // own sibling-module dependencies (phillipg-nix-repo-base ADR 0008).

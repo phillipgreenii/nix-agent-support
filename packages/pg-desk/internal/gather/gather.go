@@ -103,6 +103,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
@@ -762,10 +763,6 @@ type workBeadEntity struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
-type workBeadsFanOut struct {
-	Entities []workBeadEntity `json:"entities"`
-}
-
 // matchWorkBeads filters raw (an `issue list` fan-out result) down to the
 // entities that match (repo, number) by metadata or title key — design
 // section 7.5's own dedup-key vocabulary: metadata "repo"+"pr_number", or a
@@ -775,7 +772,7 @@ type workBeadsFanOut struct {
 // JSON or zero matches — an empty match set is a normal, expected outcome
 // (not every PR has a work bead yet).
 func matchWorkBeads(raw json.RawMessage, repo string, number int) []workBeadEntity {
-	var out workBeadsFanOut
+	var out client.ListOutcome[workBeadEntity]
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil
 	}
@@ -813,15 +810,17 @@ func (e workBeadEntity) matchesPR(repo string, number int) bool {
 // passed through verbatim. ok is false when raw is not a decodable fan-out
 // result, in which case the caller should keep raw as it is.
 func PRWorkBeadsView(raw json.RawMessage, repo string, number int) (view json.RawMessage, ok bool) {
-	var out struct {
-		Entities []json.RawMessage `json:"entities"`
-		Sources  []struct {
-			Source string `json:"source"`
-			Status string `json:"status"`
-		} `json:"sources"`
-	}
+	var out client.ListOutcome[json.RawMessage]
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, false
+	}
+	type sourceView struct {
+		Source string              `json:"source"`
+		Status client.SourceStatus `json:"status"`
+	}
+	sources := make([]sourceView, 0, len(out.Sources))
+	for _, src := range out.Sources {
+		sources = append(sources, sourceView{Source: src.Source, Status: src.Status})
 	}
 	type keyed struct {
 		id  string
@@ -842,7 +841,7 @@ func PRWorkBeadsView(raw json.RawMessage, repo string, number int) (view json.Ra
 	for _, k := range own {
 		entities = append(entities, k.raw)
 	}
-	view, err := json.Marshal(map[string]any{"entities": entities, "sources": out.Sources})
+	view, err := json.Marshal(map[string]any{"entities": entities, "sources": sources})
 	if err != nil {
 		return nil, false
 	}
@@ -893,19 +892,6 @@ func (g *Gatherer) run(ctx context.Context, args []string, extraEnv []string) (r
 	return runResult{stdout: res.Stdout, exitCode: res.Code}, nil
 }
 
-// wireEnvelope is the subset of pkg/scriptout's Response envelope this
-// package decodes for itself (see prShowFields' doc comment for why this
-// package hand-decodes rather than importing pkg/scriptout).
-type wireEnvelope struct {
-	Result json.RawMessage `json:"result"`
-	Error  *wireError      `json:"error"`
-}
-
-type wireError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
 // targetedCall runs a targeted pg-connector verb (pr show/files/commits,
 // issue deps) and classifies its outcome per pg-connector's own 0/4/1
 // targeted exit-code scheme (cmd/pg-connector's outcome.go TargetedExitCode):
@@ -913,22 +899,40 @@ type wireError struct {
 // exit 4 (a well-formed negative answer — result is empty); any other
 // outcome (exit 1, or a failure to even start pg-connector) returns err.
 func (g *Gatherer) targetedCall(ctx context.Context, args []string, extraEnv []string) (result json.RawMessage, notFound bool, err error) {
-	res, runErr := g.run(ctx, args, extraEnv)
-	if runErr != nil {
-		return nil, false, runErr
-	}
-	switch res.exitCode {
-	case 0:
-		var env wireEnvelope
-		if decErr := json.Unmarshal(res.stdout, &env); decErr != nil {
-			return nil, false, fmt.Errorf("decode pg-connector %v stdout: %w", args, decErr)
-		}
-		return env.Result, false, nil
-	case 4:
+	c := client.Client{Run: g.clientRunner, Env: extraEnv, Timeout: callTimeout}
+	raw, cerr := c.Targeted(ctx, args...)
+	switch {
+	case cerr == nil:
+		return raw, false, nil
+	case client.IsNotFound(cerr):
 		return nil, true, nil
-	default:
-		return nil, false, exitError(args, res.exitCode, res.stdout)
 	}
+	return nil, false, g.callError(args, cerr)
+}
+
+// clientRunner adapts run (the bounded exec seam) to the cmdrun.Runner the
+// typed client calls through: a failure to start (or a deadline) reaches the
+// client as a start error so it is never read as an exit code.
+func (g *Gatherer) clientRunner(ctx context.Context, call cmdrun.Call) cmdrun.Result {
+	res, err := g.run(ctx, call.Args, call.Env)
+	if err != nil {
+		return cmdrun.Result{Code: -1, StartErr: err}
+	}
+	return cmdrun.Result{Code: res.exitCode, Stdout: res.stdout}
+}
+
+// callError maps a typed client error onto this package's errors: a start
+// failure or deadline keeps run's own error (which wraps ErrUnavailable for a
+// timeout), and an exit failure becomes a *WireError.
+func (g *Gatherer) callError(args []string, err error) error {
+	var ce *client.Error
+	if !errors.As(err, &ce) {
+		return err
+	}
+	if ce.Cause != nil {
+		return ce.Cause
+	}
+	return wireErrorOf(args, ce)
 }
 
 // fanOutCall runs a fan-out pg-connector verb (ci list, issue list) and
@@ -951,15 +955,4 @@ func (g *Gatherer) fanOutCall(ctx context.Context, args []string, extraEnv []str
 	default:
 		return nil, exitError(args, res.exitCode, res.stdout)
 	}
-}
-
-// wireErrorMessage best-effort extracts a human-readable message from a
-// failed call's stdout (a wireEnvelope error branch), falling back to the
-// raw stdout text when it does not decode as one.
-func wireErrorMessage(stdout []byte) string {
-	var env wireEnvelope
-	if err := json.Unmarshal(stdout, &env); err == nil && env.Error != nil {
-		return env.Error.Code + ": " + env.Error.Message
-	}
-	return strings.TrimSpace(string(stdout))
 }

@@ -278,3 +278,37 @@ func TestSchemaVersionCompatibility(t *testing.T) {
 		t.Fatalf("v2 = %+v, %v", v2, err)
 	}
 }
+
+func TestTargetedAndFanOutStdout(t *testing.T) {
+	f := NewFake().
+		Script(cmdrun.Result{Stdout: []byte(`{"result":{"n":1}}`)}, "pr", "files").
+		Script(cmdrun.Result{Code: ExitDegraded, Stdout: []byte(fanOutJSON)}, "issue", "list").
+		Script(cmdrun.Result{Code: ExitUnavailable, Stdout: []byte(`{"error":{"code":"unavailable","message":"down"}}`)}, "ci", "list")
+	c := newTestClient(f)
+	ctx := context.Background()
+
+	res, err := c.Targeted(ctx, "pr", "files", "7")
+	if err != nil || string(res) != `{"n":1}` {
+		t.Fatalf("Targeted = %s, %v", res, err)
+	}
+	raw, err := c.FanOutStdout(ctx, "issue", "list", "--query", "q")
+	if err != nil || string(raw) != fanOutJSON {
+		t.Fatalf("FanOutStdout degraded = %s, %v", raw, err)
+	}
+	_, err = c.FanOutStdout(ctx, "ci", "list", "7")
+	var ce *Error
+	if !errors.As(err, &ce) || ce.ExitCode != ExitUnavailable || ce.Code != "unavailable" {
+		t.Fatalf("FanOutStdout failure = %v", err)
+	}
+	want := [][]string{{"pr", "files", "7"}, {"issue", "list", "--query", "q"}, {"ci", "list", "7"}}
+	if got := f.Argv(); !slices.EqualFunc(got, want, slices.Equal[[]string]) {
+		t.Fatalf("argv = %v, want %v", got, want)
+	}
+}
+
+func TestNewExitErrorReadsEnvelope(t *testing.T) {
+	e := NewExitError([]string{"pr", "show"}, ExitNotFound, []byte(`{"error":{"code":"not_found","message":"gone","reason":"r"}}`))
+	if e.ExitCode != ExitNotFound || e.Code != "not_found" || e.Message != "gone" || e.Reason != "r" {
+		t.Fatalf("NewExitError = %+v", e)
+	}
+}

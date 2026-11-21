@@ -61,6 +61,9 @@ rec {
       ++ [ sharedFileset ]
       ++ [ (here + "/../claude-transcript") ]
       ++ [ deskapiFileset ]
+      # go.mod replaces ../pg-connector (the published client package), so the
+      # module must resolve in the store copy of every member build.
+      ++ [ (here + "/../pg-connector") ]
     );
 
   # `lib.fileset` value for the router itself (the docs tree and every member

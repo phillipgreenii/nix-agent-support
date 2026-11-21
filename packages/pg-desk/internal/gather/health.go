@@ -51,12 +51,12 @@ func (g *Gatherer) BaselineOpenAges(ctx context.Context, entityType, backend str
 				} `json:"queries"`
 			} `json:"status"`
 		} `json:"backends"`
-		Error *wireError `json:"error"`
+		Error json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(res.stdout, &wire); err != nil {
 		return nil, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
-	if wire.Error != nil {
+	if hasWireError(wire.Error) {
 		return nil, exitError(args, res.exitCode, res.stdout)
 	}
 	for _, b := range wire.Backends {

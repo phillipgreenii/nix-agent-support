@@ -8,12 +8,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strconv"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 )
@@ -31,18 +31,18 @@ type laneSet struct {
 // refused here, naming the backend, because only an owning backend can be
 // acknowledged by position. A row that is not succeeded carries no usable
 // position and is never acknowledged.
-func newLaneSet(stderr io.Writer, sources []changesSource) (*laneSet, error) {
+func newLaneSet(stderr io.Writer, sources []client.ChangesSource) (*laneSet, error) {
 	l := &laneSet{nextSeq: make(map[string]string)}
 	for _, s := range sources {
-		if s.Status == "disabled" {
+		if s.Status == client.SourceDisabled {
 			fmt.Fprintf(stderr, "pg-router-source-pg-connector changes: --deferred-ack refused: backend %q does not own its changes (%s)\n", s.Backend, s.Reason)
 			return nil, errUsage
 		}
-		if s.Status != "succeeded" || isAbsentRaw(s.NextSeq) {
+		if s.Status != client.SourceSucceeded || s.NextSeq == nil {
 			continue
 		}
-		var n int64
-		if err := json.Unmarshal(s.NextSeq, &n); err != nil || n < 0 {
+		n := *s.NextSeq
+		if n < 0 {
 			fmt.Fprintf(stderr, "pg-router-source-pg-connector changes: backend %q: next_seq is not a non-negative integer\n", s.Backend)
 			return nil, errFailed
 		}
@@ -112,6 +112,9 @@ func newSettleCmd() *cobra.Command {
 
 // changeSeqKey is the row's own seq as the digest key of --deferred-ack, or ""
 // when the row carries none.
-func changeSeqKey(c changesEntry) string {
-	return string(compactRaw(c.Seq))
+func changeSeqKey(c client.Change) string {
+	if c.Seq == nil {
+		return ""
+	}
+	return strconv.FormatInt(*c.Seq, 10)
 }

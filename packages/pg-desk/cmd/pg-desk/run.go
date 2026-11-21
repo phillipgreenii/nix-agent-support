@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -22,8 +20,8 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/threadref"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
-	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // runFlags holds parsed CLI flags for `pg-desk run`.
@@ -521,22 +519,6 @@ type threadShowResult struct {
 	AsOf string `json:"as_of"`
 }
 
-// runThreadWireEnvelope/runThreadWireError mirror internal/gather's own
-// wireEnvelope/wireError types (that package's own doc comment explains why
-// this hand-decodes rather than importing pkg/scriptout) — a private copy
-// in this file rather than a shared type, per this repo's own per-package
-// "keep its own copy of this kind of guard/helper" precedent (see e.g.
-// composition_test.go's moduleRoot doc comment).
-type runThreadWireEnvelope struct {
-	Result json.RawMessage        `json:"result"`
-	Error  *runThreadWireErrorMsg `json:"error"`
-}
-
-type runThreadWireErrorMsg struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
 // runThreadShow is run thread's own injectable seam (mirroring
 // runResolveBeadPR's identical convention) for fetching a thread's current
 // state. Production execs `pg-connector thread show <id>` as a subprocess
@@ -549,33 +531,22 @@ type runThreadWireErrorMsg struct {
 // targetedCall). Tests override this var directly with a fake, so no real
 // pg-connector subprocess is ever needed on a test's $PATH.
 var runThreadShow = func(ctx context.Context, threadID string) (result threadShowResult, notFound bool, err error) {
-	res := connector.Run(ctx, cmdrun.Call{Name: "pg-connector", Args: []string{"thread", "show", threadID}, Timeout: connectorCallTimeout})
-	stdout := bytes.NewBuffer(res.Stdout)
-	if res.StartErr != nil || res.CtxErr != nil || res.Signal != "" {
-		return threadShowResult{}, false, fmt.Errorf("exec pg-connector thread show %s: %w", threadID, connector.ResultError(res))
+	cl := client.Client{Run: connector.Run, Timeout: connectorCallTimeout}
+	raw, err := cl.Get(ctx, client.GetRequest{Type: "thread", ID: threadID})
+	if err != nil {
+		if client.IsNotFound(err) {
+			return threadShowResult{}, true, nil
+		}
+		var ce *client.Error
+		if errors.As(err, &ce) && ce.Cause != nil {
+			return threadShowResult{}, false, fmt.Errorf("exec pg-connector thread show %s: %w", threadID, ce.Cause)
+		}
+		return threadShowResult{}, false, fmt.Errorf("pg-connector thread show %s: %w", threadID, err)
 	}
-	exitCode := res.Code
-
-	switch exitCode {
-	case 0:
-		var env runThreadWireEnvelope
-		if decErr := json.Unmarshal(stdout.Bytes(), &env); decErr != nil {
-			return threadShowResult{}, false, fmt.Errorf("decode pg-connector thread show %s stdout: %w", threadID, decErr)
-		}
-		if decErr := json.Unmarshal(env.Result, &result); decErr != nil {
-			return threadShowResult{}, false, fmt.Errorf("decode pg-connector thread show %s result: %w", threadID, decErr)
-		}
-		return result, false, nil
-	case 4:
-		return threadShowResult{}, true, nil
-	default:
-		msg := strings.TrimSpace(stdout.String())
-		var env runThreadWireEnvelope
-		if decErr := json.Unmarshal(stdout.Bytes(), &env); decErr == nil && env.Error != nil {
-			msg = env.Error.Code + ": " + env.Error.Message
-		}
-		return threadShowResult{}, false, fmt.Errorf("pg-connector thread show %s: exit %d: %s", threadID, exitCode, msg)
+	if decErr := json.Unmarshal(raw, &result); decErr != nil {
+		return threadShowResult{}, false, fmt.Errorf("decode pg-connector thread show %s result: %w", threadID, decErr)
 	}
+	return result, false, nil
 }
 
 func init() {

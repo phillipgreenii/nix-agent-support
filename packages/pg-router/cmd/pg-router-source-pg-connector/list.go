@@ -14,18 +14,10 @@ import (
 	"strings"
 
 	apievent "github.com/phillipgreenii/pg-router/api/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 
 	"github.com/spf13/cobra"
 )
-
-// listWire is the "list" (full, non---ids-only) wire response's shape
-// this file needs: the entities array. present_ids/sources are always
-// present too (same struct on pg-connector's side) but are harmless,
-// ignorable extra JSON for this particular call path — this subcommand
-// reads entities, never present_ids [design: section 6.1].
-type listWire struct {
-	Entities []json.RawMessage `json:"entities"`
-}
 
 // listEntity decodes the subset of an entity's own wire shape
 // (schema.PR/schema.Issue) this file needs. issue_type/metadata are
@@ -74,7 +66,7 @@ func newListCmd() *cobra.Command {
 			return err
 		}
 
-		var wire listWire
+		var wire client.ListOutcome[json.RawMessage]
 		if err := json.Unmarshal(out, &wire); err != nil {
 			fmt.Fprintln(cmd.ErrOrStderr(), err)
 			return errFailed

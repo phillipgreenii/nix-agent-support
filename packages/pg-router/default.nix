@@ -49,6 +49,9 @@ mkGoApp {
       members.routerFileset
       ../ccpool
       ../claude-transcript
+      # go.mod replaces ../pg-connector (the published client package the
+      # source-pg-connector member imports); the module must resolve here.
+      ../pg-connector
       # go.mod replaces these for the folded handlers member; the router's own
       # binary does not link them, but the module must resolve in the store copy.
       ../pg-claude-code-recorder

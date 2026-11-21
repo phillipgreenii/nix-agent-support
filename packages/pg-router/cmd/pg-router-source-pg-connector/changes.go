@@ -11,9 +11,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	apievent "github.com/phillipgreenii/pg-router/api/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 
 	"github.com/spf13/cobra"
 )
@@ -29,51 +31,6 @@ const emittedAtLayout = "2006-01-02T15:04:05.000Z"
 // retry-window id suffix carries (bead pg2-1ldvy: "12 hex of sha256").
 const retryIDHexLen = 12
 
-// changesWire mirrors pg-connector's own already-landed "changes" JSON
-// envelope (cmd/pg-connector/changes.go's changesWire) — decoded
-// generically since this adapter has no compile-time dependency on
-// packages/pg-connector [design: section 6.1].
-type changesWire struct {
-	Sources []changesSource `json:"sources"`
-	Changes []changesEntry  `json:"changes"`
-}
-
-// changesSource is one row of the "changes" wire response's sources[]
-// array. Backend/Status/Reason are needed here (building
-// metadata.degraded_sources/degraded_reasons below); Version/Truncated
-// are ignorable extra JSON for this call path.
-//
-// Reason (bead pg2-wa5uk) was previously left undecoded, so a degraded
-// backend's real cause (e.g. a rate-limit guard tripping) never reached
-// this adapter's own printed items — only the degraded backend's name
-// did, via degraded_sources.
-type changesSource struct {
-	Backend string `json:"backend"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason"`
-	// NextSeq is the scanned position of a source that owns its changes
-	// (the position changes-ack acknowledges). Absent for any other row.
-	NextSeq json.RawMessage `json:"next_seq"`
-}
-
-// changesEntry is one row of the "changes" wire response's changes[]
-// array.
-//
-// Seq, Kinds and Fields are the extended wire of a backend that owns its
-// changes: a sequence number, the change kinds (array of strings) and the
-// changed fields (array of {name, before, after} objects). Each is kept raw
-// and validated by decodeChangeExtras; absent or JSON null means "not
-// present". A row from a backend that does not own its changes carries none
-// of them. NONE of the three ever reaches the event-id digest (changeIdentity).
-type changesEntry struct {
-	Change string          `json:"change"`
-	Source string          `json:"source"`
-	Entity json.RawMessage `json:"entity"`
-	Seq    json.RawMessage `json:"seq"`
-	Kinds  json.RawMessage `json:"kinds"`
-	Fields json.RawMessage `json:"fields"`
-}
-
 // isAbsentRaw reports whether raw is missing or the JSON null.
 func isAbsentRaw(raw json.RawMessage) bool {
 	return len(raw) == 0 || string(bytes.TrimSpace(raw)) == "null"
@@ -85,14 +42,10 @@ func isAbsentRaw(raw json.RawMessage) bool {
 // from the result. A seq that is not a number, a kinds that is not an array of
 // strings, or a fields that is not an array is an error. The elements of
 // fields are not inspected and fields is kept as raw JSON, never re-encoded.
-func decodeChangeExtras(c changesEntry) (map[string]any, error) {
+func decodeChangeExtras(c client.Change) (map[string]any, error) {
 	extras := make(map[string]any, 3)
-	if !isAbsentRaw(c.Seq) {
-		var n float64
-		if err := json.Unmarshal(c.Seq, &n); err != nil {
-			return nil, fmt.Errorf("change %q: seq is not a number: %w", c.Change, err)
-		}
-		extras["seq"] = compactRaw(c.Seq)
+	if c.Seq != nil {
+		extras["seq"] = json.RawMessage(strconv.FormatInt(*c.Seq, 10))
 	}
 	if !isAbsentRaw(c.Kinds) {
 		var kinds []string
@@ -182,9 +135,9 @@ func compactRaw(raw json.RawMessage) json.RawMessage {
 //
 // changeDigestSeq is changeDigest with the --deferred-ack key: when seq is non-empty (--deferred-ack) it takes the place of emittedAt as
 // the last key.
-func changeDigestSeq(c changesEntry, id entityIdentity, emittedAt, seq string) (string, error) {
+func changeDigestSeq(c client.Change, id entityIdentity, emittedAt, seq string) (string, error) {
 	ident := changeIdentity{
-		Change:   c.Change,
+		Change:   string(c.Change),
 		Source:   c.Source,
 		EntityID: id.ID,
 		HeadSHA:  compactRaw(id.HeadSHA),
@@ -207,7 +160,7 @@ func changeDigestSeq(c changesEntry, id entityIdentity, emittedAt, seq string) (
 
 // changeDigest is changeDigestSeq without the seq key (a call without
 // --deferred-ack).
-func changeDigest(c changesEntry, id entityIdentity, emittedAt string) (string, error) {
+func changeDigest(c client.Change, id entityIdentity, emittedAt string) (string, error) {
 	return changeDigestSeq(c, id, emittedAt, "")
 }
 
@@ -265,7 +218,7 @@ func newChangesCmd() *cobra.Command {
 			return err
 		}
 
-		var wire changesWire
+		var wire client.ChangesOutcome
 		if err := json.Unmarshal(out, &wire); err != nil {
 			fmt.Fprintln(cmd.ErrOrStderr(), err)
 			return errFailed
@@ -284,7 +237,7 @@ func newChangesCmd() *cobra.Command {
 		degraded := make([]string, 0)
 		degradedReasons := make(map[string]string)
 		for _, s := range wire.Sources {
-			if s.Status == "degraded" {
+			if s.Status == client.SourceDegraded {
 				degraded = append(degraded, s.Backend)
 				if s.Reason != "" {
 					degradedReasons[s.Backend] = s.Reason
@@ -382,7 +335,7 @@ func newChangesCmd() *cobra.Command {
 				item.ExpiresAt = emitAt.Add(retryWindow).Format(time.RFC3339)
 			}
 			if deferredAck {
-				if isAbsentRaw(c.Seq) {
+				if c.Seq == nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: change %q of backend %q carries no seq, which --deferred-ack needs\n", c.Change, c.Source)
 					return errFailed
 				}
@@ -390,7 +343,7 @@ func newChangesCmd() *cobra.Command {
 					fmt.Fprintf(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: change of backend %q has no succeeded source row with a next_seq\n", c.Source)
 					return errFailed
 				}
-				item.Ack = &apievent.Ack{Lane: c.Source, Token: string(compactRaw(c.Seq))}
+				item.Ack = &apievent.Ack{Lane: c.Source, Token: changeSeqKey(c)}
 				lastOfLane[c.Source] = len(items)
 			}
 			items = append(items, item)

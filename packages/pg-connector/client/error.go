@@ -82,3 +82,10 @@ func newExitError(args []string, code int, stdout []byte) *Error {
 	e.Message = strings.TrimSpace(string(stdout))
 	return e
 }
+
+// NewExitError builds the *Error for a call that ended with exit code code and
+// printed stdout, reading error.code, message and reason from a well-formed
+// error envelope. It is for a caller that runs the process itself.
+func NewExitError(args []string, code int, stdout []byte) *Error {
+	return newExitError(args, code, stdout)
+}

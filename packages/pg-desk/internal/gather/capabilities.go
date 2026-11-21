@@ -102,12 +102,12 @@ func (g *Gatherer) Capabilities(ctx context.Context, entityType, backend string)
 				Watched bool `json:"watched"`
 			} `json:"queries"`
 		} `json:"backends"`
-		Error *wireError `json:"error"`
+		Error json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(res.stdout, &wire); err != nil {
 		return CapabilitiesAnswer{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
-	if wire.Error != nil {
+	if hasWireError(wire.Error) {
 		return CapabilitiesAnswer{}, exitError(args, res.exitCode, res.stdout)
 	}
 	out := CapabilitiesAnswer{}
