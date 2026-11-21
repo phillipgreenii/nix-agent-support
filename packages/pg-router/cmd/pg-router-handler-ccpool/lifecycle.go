@@ -1,14 +1,12 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"syscall"
 
@@ -117,10 +115,19 @@ func kickJanitor(cfgPath, roleFile string) error {
 	// waits for the child and captures its pipes, and this call must return at
 	// once, leave the child running in its own process group after this process
 	// exits, and never kill it (no context, no timeout).
-	cmd := exec.CommandContext(context.Background(), exe, "janitor", "--config", cfgPath, "--role-file", roleFile)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
+	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
 		return err
 	}
-	return cmd.Process.Release()
+	defer func() { _ = null.Close() }()
+	p, err := os.StartProcess(exe,
+		[]string{exe, "janitor", "--config", cfgPath, "--role-file", roleFile},
+		&os.ProcAttr{
+			Env: os.Environ(), Files: []*os.File{null, null, null},
+			Sys: &syscall.SysProcAttr{Setpgid: true},
+		})
+	if err != nil {
+		return err
+	}
+	return p.Release()
 }
