@@ -84,7 +84,7 @@ tests:
               severity: error
               repo: beta
 
-  - name: a hold that ended resumes alerting once the 10 minute window drains
+  - name: a hold that ended resumes alerting once the 30 minute window drains
     interval: 1m
     input_series:
       - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="alpha"}'
@@ -101,3 +101,24 @@ tests:
           - exp_labels:
               severity: error
               repo: alpha
+
+  # A host-wide scrape gap leaves the counter with no samples for a stretch of an active hold.
+  # increase() over a short window then returns no series and the suppression would drop out;
+  # the 30 minute hold window still reaches the samples taken before the gap. The counter has
+  # samples for minutes 0 to 20, none for minutes 21 to 50, then resumes. At minute 46 the
+  # stale gap has run past the 30 minutes plus the 5 minute wait, and a 10 minute hold
+  # window would hold no sample.
+  - name: a scrape gap during a hold keeps the repo quiet
+    interval: 1m
+    input_series:
+      - series: 'pg_repo_runner_tips_last_run_timestamp_seconds{repo="alpha"}'
+        values: "0+60x10"
+      - series: 'pg_router_requirement_blocked_seconds_total{role="repo-tip-source-alpha",resource="disk_usage",sole="true",steps_below="1"}'
+        values: "0+60x20 _x30 3000+60x49"
+    alert_rule_test:
+      - eval_time: 42m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts: []
+      - eval_time: 46m
+        alertname: pg-repo-runner-tips-stale
+        exp_alerts: []
