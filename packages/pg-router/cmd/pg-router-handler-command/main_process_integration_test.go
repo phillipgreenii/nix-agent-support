@@ -16,8 +16,8 @@ import (
 	"github.com/phillipgreenii/pg-router/api/participant"
 )
 
-// adapter starts the test binary as the adapter with a request on stdin.
-func adapter(t *testing.T, args []string, stdin string) (*exec.Cmd, *bytes.Buffer) {
+// runAdapter starts the test binary as the adapter with a request on stdin.
+func runAdapter(t *testing.T, args []string, stdin string) (*exec.Cmd, *bytes.Buffer) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), os.Args[0], args...)
 	// A private state directory: the adapter keeps its per-event dispatch locks
@@ -46,7 +46,7 @@ func TestProcess_DispatchAndValidateOverTheRealWire(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cmd, out := adapter(t, []string{c.sub}, c.req)
+			cmd, out := runAdapter(t, []string{c.sub}, c.req)
 			err := cmd.Run()
 			got := 0
 			if ee, ok := err.(*exec.ExitError); ok {
@@ -71,7 +71,7 @@ func TestProcess_TermKillsThePayloadGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "sleep.pid")
 	cfg := cmdConfig("/bin/sh", "-c", `sleep 600 & echo $! > "`+pidFile+`"; wait`)
 	req := request(t, eventWith(map[string]any{"id": "b-1"}), "r", cfg, true)
-	cmd, out := adapter(t, []string{"dispatch"}, req)
+	cmd, out := runAdapter(t, []string{"dispatch"}, req)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
