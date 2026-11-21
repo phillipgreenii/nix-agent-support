@@ -39,6 +39,19 @@ const (
 //     that produced the series.
 //   - telemetry_sdk_name, telemetry_sdk_version, telemetry_sdk_language:
 //     the OTel SDK that exported it.
+//   - service_name, service_namespace, service_instance_id, job: the
+//     emitter's service identity as the OTel/Prometheus pipeline stamps it
+//     (job is derived from service_name); it changes when a series is
+//     re-exported under a different resource and says nothing about what
+//     the alert rule is about (the rule uid and the rule's own labels do).
+//   - host_name, host_arch, os_type, os_description: the machine the
+//     emitter ran on.
+//
+// This is THE excluded-label list (together with escalation and
+// grafana_folder above); stripExcludedLabels applies it at match time to
+// stored primary and alias fingerprints, so a bead filed while a label was
+// still part of the fingerprint keeps matching, and a series that gains,
+// changes or drops any of these labels maps to the same bead.
 var volatileResourceLabels = map[string]bool{
 	"process_runtime_version":     true,
 	"process_runtime_name":        true,
@@ -49,6 +62,14 @@ var volatileResourceLabels = map[string]bool{
 	"telemetry_sdk_name":          true,
 	"telemetry_sdk_version":       true,
 	"telemetry_sdk_language":      true,
+	"service_name":                true,
+	"service_namespace":           true,
+	"service_instance_id":         true,
+	"job":                         true,
+	"host_name":                   true,
+	"host_arch":                   true,
+	"os_type":                     true,
+	"os_description":              true,
 }
 
 // excludedFromFingerprint reports whether a label is left out of the

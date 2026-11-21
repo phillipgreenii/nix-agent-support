@@ -20,9 +20,9 @@ func newAlertServer(t *testing.T, body string) *httptest.Server {
 func TestGrafanaAlertFingerprint(t *testing.T) {
 	got := grafanaAlertFingerprint("pg-router-liveness-down", map[string]string{
 		"instance": "host-a",
-		"job":      "pg-router",
+		"type":     "pr.changed",
 	})
-	want := "pg-router-liveness-down|instance=host-a,job=pg-router"
+	want := "pg-router-liveness-down|instance=host-a,type=pr.changed"
 	if got != want {
 		t.Fatalf("grafanaAlertFingerprint: got %q, want %q", got, want)
 	}
@@ -211,5 +211,38 @@ func TestStripExcludedLabelsVolatile(t *testing.T) {
 		if got := stripExcludedLabels(tc.in); got != tc.want {
 			t.Errorf("stripExcludedLabels(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// Label-set churn must map to the same bead: dropping every runtime and
+// resource label (as the live series did) yields the same fingerprint as
+// the series that carried them, and a stored fingerprint that still holds
+// them matches the current one at match time, as primary or as alias.
+func TestResourceLabelChurnMapsToSameBead(t *testing.T) {
+	identity := map[string]string{"repo": "r1", "role": "tip"}
+	with := map[string]string{
+		"repo": "r1", "role": "tip",
+		"process_runtime_name": "go", "process_runtime_version": "go1.26.8",
+		"otel_scope_name": "x", "service_name": "pg-repo-runner", "job": "pg-repo-runner",
+		"host_name": "h", "os_type": "darwin", "escalation": "human", "grafana_folder": "F",
+	}
+	fpBare := grafanaAlertFingerprint("rule", identity)
+	if fpWith := grafanaAlertFingerprint("rule", with); fpWith != fpBare {
+		t.Fatalf("resource labels changed the fingerprint: %q vs %q", fpWith, fpBare)
+	}
+	const stored = "rule|host_name=h,job=j,os_type=darwin,process_runtime_version=go1.26.8,repo=r1,role=tip,service_name=s"
+	for _, md := range []map[string]string{
+		{metaFingerprint: stored},
+		{metaFingerprint: "other", metaFingerprintAlias: "x;" + stored},
+	} {
+		existing := []connectorIssue{{ID: "b1", Metadata: md}}
+		m := matchExisting(finding{Fingerprint: fpBare}, existing)
+		if m == nil || m.ID != "b1" {
+			t.Fatalf("stored %v did not match %q", md, fpBare)
+		}
+	}
+	// Identity labels still discriminate.
+	if grafanaAlertFingerprint("rule", map[string]string{"repo": "r2", "role": "tip"}) == fpBare {
+		t.Fatal("repo label must stay part of identity")
 	}
 }
