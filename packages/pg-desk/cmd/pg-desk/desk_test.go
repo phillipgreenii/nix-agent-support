@@ -71,7 +71,7 @@ func TestResolvePRRefRejectsNonConfiguredRepo(t *testing.T) {
 			if repo != "" || id != "" {
 				t.Errorf("resolvePRRef(%q) returned (%q, %q) alongside an error, want empty", ref, repo, id)
 			}
-			for _, want := range []string{"o/r", "only configured repository"} {
+			for _, want := range []string{"o/r", "not configured"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not mention %q", err, want)
 				}
@@ -99,5 +99,66 @@ func TestResolvePRRefRejectsUnparseablePRRef(t *testing.T) {
 	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
 	if _, _, err := resolvePRRef(cfg, "not-a-pr-ref"); err == nil {
 		t.Fatal(`resolvePRRef("not-a-pr-ref"): error = nil, want an error`)
+	}
+}
+
+func twoRepoCfg() *config.Config {
+	return &config.Config{Repos: []config.RepoConfig{
+		{Remote: "ZR-Private/ziprecruiter"},
+		{Remote: "phillipgziprecruiter/pending-review-scratch"},
+	}}
+}
+
+// A <pr> naming a configured non-primary repository resolves against it; a
+// bare number resolves against the primary; an unconfigured one is rejected.
+func TestResolvePRRefTwoRepos(t *testing.T) {
+	cfg := twoRepoCfg()
+	cases := []struct{ ref, repo, id string }{
+		{"5", "ZR-Private/ziprecruiter", "ZR-Private/ziprecruiter#5"},
+		{"phillipgziprecruiter/PENDING-review-scratch#5", "phillipgziprecruiter/pending-review-scratch", "phillipgziprecruiter/pending-review-scratch#5"},
+		{"https://example.test/zr-private/ziprecruiter/pull/9", "ZR-Private/ziprecruiter", "ZR-Private/ziprecruiter#9"},
+	}
+	for _, tc := range cases {
+		repo, id, err := resolvePRRef(cfg, tc.ref)
+		if err != nil || repo != tc.repo || id != tc.id {
+			t.Errorf("resolvePRRef(%q) = (%q, %q, %v), want (%q, %q)", tc.ref, repo, id, err, tc.repo, tc.id)
+		}
+	}
+	if _, _, err := resolvePRRef(cfg, "other/repo#5"); err == nil || !strings.Contains(err.Error(), "ZR-Private/ziprecruiter") {
+		t.Errorf("unconfigured repo err = %v", err)
+	}
+}
+
+// --repo makes a non-primary repository primary, so a bare number resolves
+// against it; an unconfigured name is an error naming the flag.
+func TestSelectRepo(t *testing.T) {
+	cfg := twoRepoCfg()
+	same, err := selectRepo(cfg, "")
+	if err != nil || same != cfg {
+		t.Fatalf("no flag: (%v, %v)", same, err)
+	}
+	sel, err := selectRepo(cfg, "phillipgziprecruiter/pending-review-scratch")
+	if err != nil {
+		t.Fatalf("selectRepo: %v", err)
+	}
+	repo, id, err := resolvePRRef(sel, "3")
+	if err != nil || repo != "phillipgziprecruiter/pending-review-scratch" || id != "phillipgziprecruiter/pending-review-scratch#3" {
+		t.Fatalf("bare number under --repo = (%q, %q, %v)", repo, id, err)
+	}
+	if _, err := selectRepo(cfg, "nope/nope"); err == nil || !strings.Contains(err.Error(), "--repo") {
+		t.Fatalf("unconfigured --repo err = %v", err)
+	}
+}
+
+// A one-repository configuration behaves as before: --repo naming it is a
+// no-op and a bare number resolves against it.
+func TestSelectRepoSingleRepoUnchanged(t *testing.T) {
+	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
+	sel, err := selectRepo(cfg, "O/R")
+	if err != nil || sel != cfg {
+		t.Fatalf("selectRepo = (%v, %v), want the same config", sel, err)
+	}
+	if repo, id, err := resolvePRRef(sel, "4"); err != nil || repo != "o/r" || id != "o/r#4" {
+		t.Fatalf("resolvePRRef = (%q, %q, %v)", repo, id, err)
 	}
 }

@@ -37,8 +37,9 @@ CLI read. It carries no structured-JSON logging contract of its own (that contra
 
 ## Out of scope (Phase 9)
 
-`open` selects only within the single repository this phase supports; selecting across multiple
-repositories is out of scope.
+`open` selects only within one repository: the primary one, or the one `--repo` names (see
+[`config.md`](config.md), "Choosing a repository"); selecting across repositories in one call is out
+of scope.
 
 ## Typed `pg-desk <type> open [<id>]`
 

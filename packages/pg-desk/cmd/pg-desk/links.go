@@ -77,7 +77,7 @@ func execLinks(cmd *cobra.Command, args []string) error {
 
 	res, err := links.Resolve(ctx, links.Deps{
 		Store:             st,
-		Repo:              cfg.Repos[0].Remote,
+		Repo:              cfg.PrimaryRepo(),
 		Patterns:          cfg.TicketPatterns,
 		IssueURLTemplate:  cfg.Links.IssueURLTemplate,
 		CheckInterpreters: cfg.CheckInterpreters,

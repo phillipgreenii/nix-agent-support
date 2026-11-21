@@ -488,6 +488,10 @@ the rollback listing is bounded by the backfill driver's flip marker, not by thi
 - **INV-STORE-12.** <!-- uuid: e7ba0000-b19e-4502-8ca6-1ce4b0d3aa05 --> The lane-level mode, the flip time and a PR's lane state MUST be written only by a recorded run whose
   mode equals the configured `pr_lane.mode`; the flip time MUST be set once, by the first such `apply` run that
   finds the lane-level mode not yet `apply`.
+- **INV-STORE-13.** <!-- uuid: 5c8e2a47-1b69-4d03-a7f5-92e0d6b3c814 --> Every entity, interpretation, cross-reference, annotation and change-log row MUST be keyed by its
+  repository, so two repositories that hold the same entity id (for example the same pull-request number)
+  keep separate rows: a read, a write, an annotation or a deactivation for one repository MUST NOT be
+  visible to, or alter, the other's.
 
 ## Exit codes, telemetry, and logs
 

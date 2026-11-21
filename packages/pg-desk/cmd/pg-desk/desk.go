@@ -23,7 +23,7 @@ import (
 // every command below needs the identical seam and this packet authors all
 // of them together. Tests override these to inject a fixture config/store
 // without touching the real $PG_DESK_CONFIG / $XDG_STATE_HOME/pg-desk/store.db.
-var deskConfigLoad = func(ctx context.Context) (*config.Config, error) { return config.Load(ctx) }
+var deskConfigLoad = func(ctx context.Context) (*config.Config, error) { return loadConfigForRepo(ctx) }
 
 var deskStoreOpen = func() (*store.Store, error) { return store.Open(store.DefaultPath()) }
 
@@ -135,8 +135,8 @@ var prURLNumberRE = regexp.MustCompile(`/pull/(\d+)/?$`)
 // "/pull/123". Phase 9 supports exactly one configured repository
 // (docs/behavior/pg-desk/README.md's "Scope"), so the owner/repo portion of
 // the first two forms is not used here — resolvePRRef below always
-// resolves against cfg.Repos[0], and rejects a reference that explicitly
-// names a different repository.
+// resolves against the configured repository the reference names (the
+// primary one when it names none), and rejects an unconfigured one.
 func parsePRNumber(ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -175,9 +175,8 @@ func namedPRRepo(ref string) string {
 }
 
 // resolvePRRef resolves a <pr> command-line argument to (repo, entityID).
-// Phase 9 supports exactly one configured repository
-// (docs/behavior/pg-desk/README.md's "Scope"), so repo is always
-// cfg.Repos[0].Remote; resolving against the current working directory when
+// repo is the configured repository the
+// reference names, else cfg.PrimaryRepo() (which --repo selects); resolving against the current working directory when
 // no repo is configured at all (hide-unhide-wip.md's "or the current
 // working directory resolves one") is out of scope for this phase, since a
 // config with zero repos fails config.Load's own finalize() validation
@@ -197,7 +196,7 @@ func namedPRRepo(ref string) string {
 // input forms (bare number / OWNER/REPO#N / URL) the caller passed — the
 // owner/repo portion of the OWNER/REPO#N form is still not otherwise
 // consulted for resolution (see parsePRNumber's doc comment): resolvePRRef
-// always rebuilds the qualified id from cfg.Repos[0].Remote — but an
+// always rebuilds the qualified id from cfg.PrimaryRepo() — but an
 // explicit owner/repo that differs from the configured repository is
 // rejected with an explicit error, never silently remapped (pg2-5eus1).
 func resolvePRRef(cfg *config.Config, ref string) (repo, entityID string, err error) {
@@ -208,14 +207,18 @@ func resolvePRRef(cfg *config.Config, ref string) (repo, entityID string, err er
 	if err != nil {
 		return "", "", err
 	}
-	repo = cfg.Repos[0].Remote
-	// An explicit OWNER/REPO (from OWNER/REPO#N or a PR URL) that is not the
-	// configured repository MUST be rejected rather than silently resolved
-	// against cfg.Repos[0] — that would read (and may hydrate into the real
-	// store) a DIFFERENT repo's PR with the same number (pg2-5eus1). GitHub
-	// owner/repo names are case-insensitive.
-	if named := namedPRRepo(ref); named != "" && !strings.EqualFold(named, repo) {
-		return "", "", fmt.Errorf("PR reference %q names repository %q, but the only configured repository is %q (multi-repository references are not supported)", ref, named, repo)
+	repo = cfg.PrimaryRepo()
+	// An explicit OWNER/REPO (from OWNER/REPO#N or a PR URL) resolves against
+	// that repository when it is configured and MUST be rejected when it is
+	// not, rather than silently resolved against the primary one (that would
+	// read, and may hydrate into the real store, a DIFFERENT repo's PR with
+	// the same number). GitHub owner/repo names are case-insensitive.
+	if named := namedPRRepo(ref); named != "" {
+		configured, ok := cfg.ConfiguredRepo(named)
+		if !ok {
+			return "", "", fmt.Errorf("PR reference %q names repository %q, which is not configured (configured: %s)", ref, named, strings.Join(cfg.RepoRemotes(), ", "))
+		}
+		repo = configured
 	}
 	return repo, repo + "#" + n, nil
 }

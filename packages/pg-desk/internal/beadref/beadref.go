@@ -142,10 +142,7 @@ func (c *connectorIssueShower) Show(ctx context.Context, id string) (string, map
 // internal/sync's own identical helper exactly (design sections 7.3, 7.5:
 // "the workspace variable rule gather already follows").
 func (c *connectorIssueShower) issueBeadsDirEnv() []string {
-	if c.cfg == nil || len(c.cfg.Repos) == 0 {
-		return nil
-	}
-	dir := c.cfg.Repos[0].BeadsDir
+	dir := c.cfg.BeadsDirFor(c.cfg.PrimaryRepo())
 	if dir == "" {
 		return nil
 	}

@@ -39,7 +39,7 @@ func ResolveIssueBackend(ctx context.Context, cfg *config.Config, st *store.Stor
 	}
 	repo := ""
 	if len(cfg.Repos) > 0 {
-		repo = cfg.Repos[0].Remote
+		repo = cfg.PrimaryRepo()
 	}
 	row, found, err := st.GetEntity(ctx, repo, issueEntityType, id)
 	if err != nil {

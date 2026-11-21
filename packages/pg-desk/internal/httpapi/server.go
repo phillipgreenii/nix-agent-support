@@ -361,7 +361,7 @@ func evaluateAttention(ctx context.Context, st *store.Store, cfg *config.Config,
 	}
 	res, err := attention.Evaluate(ctx, attention.Inputs{
 		Store:  st,
-		Repo:   cfg.Repos[0].Remote,
+		Repo:   cfg.PrimaryRepo(),
 		Config: cfg,
 		Clock:  interpret.FixedClock(now),
 	})

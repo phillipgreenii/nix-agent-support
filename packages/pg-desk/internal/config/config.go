@@ -1332,3 +1332,77 @@ func (c *Config) RepoRemotes() []string {
 	}
 	return out
 }
+
+// repoIndex returns the index of the configured repository whose remote equals
+// name, ignoring case and surrounding whitespace, or -1.
+func (c *Config) repoIndex(name string) int {
+	if c == nil {
+		return -1
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return -1
+	}
+	for i, r := range c.Repos {
+		if strings.EqualFold(r.Remote, name) {
+			return i
+		}
+	}
+	return -1
+}
+
+// ConfiguredRepo returns the configured spelling of the repository remote
+// that equals name (case-insensitive, whitespace-trimmed), and whether one
+// does.
+func (c *Config) ConfiguredRepo(name string) (string, bool) {
+	i := c.repoIndex(name)
+	if i < 0 {
+		return "", false
+	}
+	return c.Repos[i].Remote, true
+}
+
+// WithPrimary returns a shallow copy of c in which the repository named by
+// name is first (the primary), so every Repos[0] read of the copy resolves
+// against it. The remaining repositories keep their order. An unconfigured
+// name is an error listing the configured remotes. Naming the primary
+// returns c itself.
+func (c *Config) WithPrimary(name string) (*Config, error) {
+	i := c.repoIndex(name)
+	if i < 0 {
+		return nil, fmt.Errorf("repository %q is not configured (configured: %s)", strings.TrimSpace(name), strings.Join(c.RepoRemotes(), ", "))
+	}
+	if i == 0 {
+		return c, nil
+	}
+	cp := *c
+	cp.Repos = make([]RepoConfig, 0, len(c.Repos))
+	cp.Repos = append(cp.Repos, c.Repos[i])
+	cp.Repos = append(cp.Repos, c.Repos[:i]...)
+	cp.Repos = append(cp.Repos, c.Repos[i+1:]...)
+	return &cp, nil
+}
+
+// RepoForEntity returns the repository a stored entity belongs to: for a
+// pull request whose id is OWNER/REPO#N and names a configured repository,
+// that repository (in its configured spelling); otherwise the primary
+// repository. Issues and threads belong to the primary repository.
+func (c *Config) RepoForEntity(entityType, entityID string) string {
+	if entityType == "pr" {
+		if i := strings.LastIndexByte(entityID, '#'); i > 0 {
+			if r, ok := c.ConfiguredRepo(entityID[:i]); ok {
+				return r
+			}
+		}
+	}
+	return c.PrimaryRepo()
+}
+
+// BeadsDirFor returns the beads_dir of the repository named by remote
+// (case-insensitive), or "" when it is unconfigured or sets none.
+func (c *Config) BeadsDirFor(remote string) string {
+	if i := c.repoIndex(remote); i >= 0 {
+		return c.Repos[i].BeadsDir
+	}
+	return ""
+}

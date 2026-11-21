@@ -83,7 +83,7 @@ func evaluateAttention(cmd *cobra.Command, verb string) (res attention.Result, s
 	if len(cfg.Repos) == 0 {
 		return attention.Result{}, nil, "", fmt.Errorf("%s: no repository configured", verb)
 	}
-	repo = cfg.Repos[0].Remote
+	repo = cfg.PrimaryRepo()
 	st, err = deskStoreOpenReadOnly()
 	if err != nil {
 		return attention.Result{}, nil, "", fmt.Errorf("%s: open store: %w", verb, err)

@@ -46,7 +46,7 @@ func (p *Pipeline) extractAndReplace(ctx context.Context, entityType, entityID s
 	if err != nil || !ok {
 		return err
 	}
-	return p.store.ReplaceDerivedXrefs(ctx, p.repo(), entityType, entityID, links)
+	return p.store.ReplaceDerivedXrefs(ctx, p.repoFor(entityType, entityID), entityType, entityID, links)
 }
 
 // deriveLinks runs the extractors of entityType in memory and returns the
@@ -58,7 +58,7 @@ func (p *Pipeline) deriveLinks(ctx context.Context, entityType, entityID string,
 	if len(exts) == 0 {
 		return nil, false, nil
 	}
-	repo := p.repo()
+	repo := p.repoFor(entityType, entityID)
 	links = []store.XrefLink{}
 	if !removed && len(payload) > 0 {
 		for _, e := range exts {

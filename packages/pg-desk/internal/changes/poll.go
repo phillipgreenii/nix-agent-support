@@ -156,11 +156,24 @@ func appendUnique(dst []string, vals ...string) []string {
 	return dst
 }
 
+// repo returns the primary repository's remote, the one issues and threads
+// belong to.
 func (e *Engine) repo() string {
-	if e.Cfg == nil || len(e.Cfg.Repos) == 0 {
+	if e.Cfg == nil {
 		return ""
 	}
-	return e.Cfg.Repos[0].Remote
+	return e.Cfg.PrimaryRepo()
+}
+
+// repoFor returns the repository a polled entity is stored under: for a pull
+// request, the configured repository its id names, else the primary one. A
+// watched query may list pull requests of several configured repositories, so
+// each is read and written under its own.
+func (e *Engine) repoFor(entityType, id string) string {
+	if e.Cfg == nil {
+		return ""
+	}
+	return e.Cfg.RepoForEntity(entityType, id)
 }
 
 // listComplete reports whether a query's listing may be trusted as the whole
@@ -263,7 +276,7 @@ func (e *Engine) applyMembershipCtx(ctx context.Context, entityType string, runs
 	// unwatched issue keeps the removal confirmation below.
 	if entityType == issueEntityType {
 		for id := range candidates {
-			row, found, err := e.Store.GetEntity(ctx, e.repo(), entityType, id)
+			row, found, err := e.Store.GetEntity(ctx, e.repoFor(entityType, id), entityType, id)
 			if err == nil && found && !row.Inactive && row.Watched != nil && *row.Watched {
 				delete(candidates, id)
 			}
@@ -336,7 +349,7 @@ func (e *Engine) applyMembershipCtx(ctx context.Context, entityType string, runs
 //   - the read fails or degrades: nothing is written and the error is
 //     returned, so the caller leaves membership untouched.
 func (e *Engine) confirmRemoval(ctx context.Context, entityType, id string) error {
-	row, found, err := e.Store.GetEntity(ctx, e.repo(), entityType, id)
+	row, found, err := e.Store.GetEntity(ctx, e.repoFor(entityType, id), entityType, id)
 	if err != nil {
 		return err
 	}
@@ -351,7 +364,7 @@ func (e *Engine) confirmRemoval(ctx context.Context, entityType, id string) erro
 	if res.NotFound {
 		return e.deactivate(ctx, entityType, id, removed)
 	}
-	row, found, err = e.Store.GetEntity(ctx, e.repo(), entityType, id)
+	row, found, err = e.Store.GetEntity(ctx, e.repoFor(entityType, id), entityType, id)
 	if err != nil {
 		return err
 	}
@@ -398,7 +411,7 @@ func (e *Engine) deactivate(ctx context.Context, entityType, id string, kinds []
 func (e *Engine) deactivateIf(ctx context.Context, entityType, id string, kinds []string, guard func(store.Entity) bool) error {
 	at := e.now().UTC().Format(time.RFC3339)
 	for attempt := 0; attempt < casAttempts; attempt++ {
-		row, found, err := e.Store.GetEntity(ctx, e.repo(), entityType, id)
+		row, found, err := e.Store.GetEntity(ctx, e.repoFor(entityType, id), entityType, id)
 		if err != nil {
 			return err
 		}
@@ -715,7 +728,7 @@ func (e *Engine) reconcileLocal(ctx context.Context, entityType string, st *poll
 func (e *Engine) reconcileOne(ctx context.Context, entityType, id string) error {
 	at := e.now().UTC().Format(time.RFC3339)
 	for attempt := 0; attempt < casAttempts; attempt++ {
-		row, found, err := e.Store.GetEntity(ctx, e.repo(), entityType, id)
+		row, found, err := e.Store.GetEntity(ctx, e.repoFor(entityType, id), entityType, id)
 		if err != nil {
 			return err
 		}

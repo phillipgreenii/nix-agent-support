@@ -34,6 +34,7 @@ logging contract of their own — only ordinary CLI error text on failure.
 
 ## Out of scope (Phase 9)
 
-`feedback list`/`feedback set` operate against the single repository this phase supports. A
+`feedback list`/`feedback set` operate against the primary repository, or the one `--repo` names (see
+[`config.md`](config.md), "Choosing a repository"). A
 disposition arising from a Jira- or Slack-linked thread is out of scope until Phase 13's
 cross-reference step exists.

@@ -62,7 +62,7 @@ type ReinterpretResult struct {
 //
 // Errors carry a stage tag (load_facts, interpret, store).
 func ReinterpretStored(ctx context.Context, st *store.Store, cfg *config.Config, clock interpret.Clock, entityType, entityID string, opts ReinterpretOptions) (ReinterpretResult, error) {
-	repo := repoOf(cfg)
+	repo := cfg.RepoForEntity(entityType, entityID)
 	if err := ctx.Err(); err != nil {
 		return ReinterpretResult{}, TagStage(StageLoadFacts, fmt.Errorf("pipeline: reinterpret %s %s: %w", entityType, entityID, err))
 	}

@@ -76,15 +76,19 @@ func prKey(digits, named, raw string, cfg *config.Config) (Key, error) {
 	if err != nil || n < 1 {
 		return Key{}, usageErr(keyRemedy, "%q is not a positive PR number", raw)
 	}
-	if cfg == nil || len(cfg.Repos) == 0 || strings.TrimSpace(cfg.Repos[0].Remote) == "" {
+	if cfg == nil || len(cfg.Repos) == 0 || strings.TrimSpace(cfg.PrimaryRepo()) == "" {
 		return Key{}, usageErr("set repos in the pg-desk config", "no repository is configured to resolve %q", raw)
 	}
-	repo := cfg.Repos[0].Remote
-	if named != "" && !strings.EqualFold(named, repo) {
-		return Key{}, usageErr(
-			"name the configured repository or give the bare number",
-			"PR reference %q names repository %q, but the only configured repository is %q", raw, named, repo,
-		)
+	repo := cfg.PrimaryRepo()
+	if named != "" {
+		configured, ok := cfg.ConfiguredRepo(named)
+		if !ok {
+			return Key{}, usageErr(
+				"name a configured repository or give the bare number",
+				"PR reference %q names repository %q, which is not configured (configured: %s)", raw, named, strings.Join(cfg.RepoRemotes(), ", "),
+			)
+		}
+		repo = configured
 	}
 	return Key{Type: entityTypePR, ID: repo + "#" + strconv.Itoa(n)}, nil
 }

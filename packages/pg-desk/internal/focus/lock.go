@@ -115,7 +115,7 @@ type LockDeps struct {
 
 func (d LockDeps) repo() string {
 	if d.Config != nil && len(d.Config.Repos) > 0 {
-		return d.Config.Repos[0].Remote
+		return d.Config.PrimaryRepo()
 	}
 	return ""
 }

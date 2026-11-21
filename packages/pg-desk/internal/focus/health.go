@@ -204,7 +204,7 @@ func computeHealth(ctx context.Context, st *store.Store, cfg *config.Config, now
 	if len(cfg.Repos) == 0 {
 		return Health{}, nil
 	}
-	repo := cfg.Repos[0].Remote
+	repo := cfg.PrimaryRepo()
 	in, err := loadInputs(ctx, st, cfg, repo, now)
 	if err != nil {
 		return Health{}, err

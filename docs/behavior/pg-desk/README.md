@@ -50,9 +50,10 @@ qualifier every time:**
   The project-health half stays deferred.
 - **Per-verb multi-repository resolution.** `repos[]` MAY hold several repositories (see
   [`config.md`](config.md), "Repositories"), and the store, `doctor` and the PR queries accept them.
-  A verb that does not name a repository resolves against the primary repository (the first entry,
-  or the cwd-resolved one); naming a non-primary repository in every verb is a realization gap
-  tracked until the per-verb resolution lands.
+  A verb that does not name a repository resolves against the primary repository (the first entry);
+  the global `--repo OWNER/REPO` flag, or a `<pr>` that names a configured repository, selects another
+  (see [`config.md`](config.md), "Choosing a repository"). Resolving a bare number from the current
+  working directory remains unsupported.
 
 Each doc below restates only the exclusions that apply to its own command family, as a pointer
 back here — not the full list.

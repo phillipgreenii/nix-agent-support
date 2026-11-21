@@ -39,8 +39,8 @@ For the triggering thread, `run thread`:
    sibling packet's own gather step already established — never a third, parallel extractor:
    - **A GitHub PR permalink** anywhere in the text (a new, purpose-built scanner — this text is
      free-form prose, unlike a `<pr>` command-line argument's own end-anchored shape). Resolves
-     DIRECTLY to a PR entity id, always against the one configured repository (Phase 9's
-     single-repository scope) regardless of which owner/repo the URL itself names.
+     DIRECTLY to a PR entity id, always against the run's repository (the primary one, or the one `--repo` names), regardless of
+     which owner/repo the URL itself names.
    - **A Jira ticket key** anywhere in the text, recognized by the SAME configured
      `ticket_patterns` list [`gather.md`](gather.md)'s ticket-key scan uses (never a hardcoded
      pattern, never a second parser). Resolves INDIRECTLY: a ticket key is not itself a PR, so it

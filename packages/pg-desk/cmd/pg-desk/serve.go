@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/httpapi"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/telemetry"
@@ -146,7 +145,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("serve: --addr and --port are mutually exclusive")
 	}
 
-	cfg, err := config.Load(cmd.Context())
+	cfg, err := loadConfigForRepo(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}

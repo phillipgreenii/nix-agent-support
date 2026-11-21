@@ -166,4 +166,6 @@ reported there, and `--verbose` includes it in the three-stage timeline.
 The ACTIVE half of thread cross-referencing — scanning a thread's own permalink/text for PR/issue
 references and writing the resulting xref rows — is [`run-thread.md`](run-thread.md), not gather;
 gather's own eighth input above is a passive read of links that command already wrote. Gather
-targets exactly one configured repository; multi-repository gather is out of scope.
+keys the cross-reference rows it writes and reads by the repository the pull request's id names when
+that is a configured repository, else the primary one (see [`config.md`](config.md), "Choosing a
+repository"); a ticket key is looked up in the `beads_dir` of that repository.

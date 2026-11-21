@@ -1349,3 +1349,66 @@ func TestConfig_PrimaryRepoNil(t *testing.T) {
 		t.Fatal("nil Config must have no repos")
 	}
 }
+
+func twoRepoConfig() *Config {
+	return &Config{Repos: []RepoConfig{
+		{Remote: "ZR-Private/ziprecruiter", BeadsDir: "/b/zr"},
+		{Remote: "phillipgziprecruiter/pending-review-scratch"},
+	}}
+}
+
+func TestConfig_WithPrimary(t *testing.T) {
+	c := twoRepoConfig()
+	same, err := c.WithPrimary(" zr-private/ZIPRECRUITER ")
+	if err != nil || same != c {
+		t.Fatalf("naming the primary must return the receiver, got %v, %v", same, err)
+	}
+	got, err := c.WithPrimary("PhillipgZiprecruiter/Pending-Review-Scratch")
+	if err != nil {
+		t.Fatalf("WithPrimary: %v", err)
+	}
+	if got.PrimaryRepo() != "phillipgziprecruiter/pending-review-scratch" {
+		t.Fatalf("primary = %q", got.PrimaryRepo())
+	}
+	if r := got.RepoRemotes(); len(r) != 2 || r[1] != "ZR-Private/ziprecruiter" {
+		t.Fatalf("remotes = %v", r)
+	}
+	if c.PrimaryRepo() != "ZR-Private/ziprecruiter" {
+		t.Fatal("WithPrimary must not mutate the receiver")
+	}
+	_, err = c.WithPrimary("other/repo")
+	if err == nil || !strings.Contains(err.Error(), "other/repo") || !strings.Contains(err.Error(), "ZR-Private/ziprecruiter") {
+		t.Fatalf("unconfigured name err = %v", err)
+	}
+}
+
+func TestConfig_RepoForEntity(t *testing.T) {
+	c := twoRepoConfig()
+	cases := []struct{ typ, id, want string }{
+		{"pr", "phillipgziprecruiter/PENDING-review-scratch#7", "phillipgziprecruiter/pending-review-scratch"},
+		{"pr", "ZR-Private/ziprecruiter#9", "ZR-Private/ziprecruiter"},
+		{"pr", "unknown/repo#9", "ZR-Private/ziprecruiter"},
+		{"pr", "9", "ZR-Private/ziprecruiter"},
+		{"issue", "phillipgziprecruiter/pending-review-scratch#7", "ZR-Private/ziprecruiter"},
+	}
+	for _, tc := range cases {
+		if got := c.RepoForEntity(tc.typ, tc.id); got != tc.want {
+			t.Errorf("RepoForEntity(%s,%s) = %q, want %q", tc.typ, tc.id, got, tc.want)
+		}
+	}
+	one := &Config{Repos: []RepoConfig{{Remote: "o/r"}}}
+	if one.RepoForEntity("pr", "x/y#1") != "o/r" {
+		t.Error("single repo: everything is the primary")
+	}
+	var nilCfg *Config
+	if nilCfg.RepoForEntity("pr", "x/y#1") != "" {
+		t.Error("nil config has no repo")
+	}
+}
+
+func TestConfig_BeadsDirFor(t *testing.T) {
+	c := twoRepoConfig()
+	if c.BeadsDirFor("zr-private/ziprecruiter") != "/b/zr" || c.BeadsDirFor("phillipgziprecruiter/pending-review-scratch") != "" || c.BeadsDirFor("x/y") != "" {
+		t.Fatal("BeadsDirFor mismatch")
+	}
+}

@@ -113,7 +113,7 @@ func focusViewContractLine(ctx context.Context, cfg *config.Config, st *store.St
 	}
 	repo := ""
 	if len(cfg.Repos) > 0 {
-		repo = cfg.Repos[0].Remote
+		repo = cfg.PrimaryRepo()
 	}
 	typ, id, found, err := focusProbeEntity(ctx, st, repo)
 	if err != nil {

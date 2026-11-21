@@ -585,14 +585,15 @@ func (g *Gatherer) gatherJiraXrefs(ctx context.Context, entityID string, show pr
 
 	fetched := make(map[string]json.RawMessage)
 	attempted := make(map[string]bool)
-	repo := g.repo()
+	repo := g.repoFor("pr", entityID)
+	beadsEnv := g.issueBeadsDirEnvFor(repo)
 
 	for _, fld := range fields {
 		keys := ticketkey.Parse(fld.text, "", "", patterns)
 		for _, key := range keys {
 			if !attempted[key] {
 				attempted[key] = true
-				raw, notFound, err := g.targetedCall(ctx, []string{"issue", "show", key}, g.issueBeadsDirEnv())
+				raw, notFound, err := g.targetedCall(ctx, []string{"issue", "show", key}, beadsEnv)
 				switch {
 				case err != nil:
 					f.degrade("issue show")
@@ -638,7 +639,7 @@ func (g *Gatherer) gatherLinkedThreads(ctx context.Context, entityID string, f *
 	if g.xrefs == nil {
 		return
 	}
-	xrefs, err := g.xrefs.ListXrefsByFrom(ctx, g.repo(), "pr", entityID, "thread")
+	xrefs, err := g.xrefs.ListXrefsByFrom(ctx, g.repoFor("pr", entityID), "pr", entityID, "thread")
 	if err != nil {
 		f.degrade("linked threads")
 		return
@@ -656,10 +657,19 @@ func (g *Gatherer) gatherLinkedThreads(ctx context.Context, entityID string, f *
 // SAME repo value the entity/interpretation tables and the pipeline's own
 // ListXrefsByTo lookup use.
 func (g *Gatherer) repo() string {
-	if g.cfg == nil || len(g.cfg.Repos) == 0 {
+	if g.cfg == nil {
 		return ""
 	}
-	return g.cfg.Repos[0].Remote
+	return g.cfg.PrimaryRepo()
+}
+
+// repoFor returns the repository a gathered entity is keyed by: the
+// configured repository a pull-request id names, else the primary one.
+func (g *Gatherer) repoFor(entityType, entityID string) string {
+	if g.cfg == nil {
+		return ""
+	}
+	return g.cfg.RepoForEntity(entityType, entityID)
 }
 
 // degrade records name as the failing input IFF nothing has degraded this
@@ -679,10 +689,24 @@ func (f *Facts) degrade(name string) {
 // beadsDirEnv convention exactly [Binding decisions;
 // docs/behavior/pg-desk/gather.md "Phase 9 inputs"].
 func (g *Gatherer) issueBeadsDirEnv() []string {
-	if len(g.cfg.Repos) == 0 {
+	if g.cfg == nil {
 		return nil
 	}
-	dir := g.cfg.Repos[0].BeadsDir
+	return beadsDirEnv(g.cfg.BeadsDirFor(g.cfg.PrimaryRepo()))
+}
+
+// issueBeadsDirEnvFor is issueBeadsDirEnv for the repository named by repo:
+// a ticket key found in a pull request of a non-primary repository is read
+// from that repository's beads_dir, and from the ambient BEADS_DIR when it
+// sets none.
+func (g *Gatherer) issueBeadsDirEnvFor(repo string) []string {
+	if g.cfg == nil {
+		return nil
+	}
+	return beadsDirEnv(g.cfg.BeadsDirFor(repo))
+}
+
+func beadsDirEnv(dir string) []string {
 	if dir == "" {
 		return nil
 	}

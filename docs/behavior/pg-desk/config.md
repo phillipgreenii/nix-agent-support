@@ -127,8 +127,30 @@ that wants it MUST declare that query watched.
 - A pull-request query is a search expression the deployment writes; to follow a second repository the
   deployment adds its `repo:OWNER/REPO` qualifier to the queries it wants, or declares a query for it,
   and the watched set (`watch.pr` queries) lists the same queries. pg-desk does not rewrite a query.
+- The poll, gather and pipeline stages key every pull-request row by the repository the pull request
+  belongs to (see "Choosing a repository"), so a watched query that lists pull requests of several
+  repositories stores each under its own repository.
 - `pg-desk doctor` prints a `repos:` line (the count, the primary and the others) when more than one
   repository is configured, and prints nothing extra for one.
+
+### Choosing a repository
+
+- **`--repo OWNER/REPO`** is a global flag of `pg-desk`, accepted by every verb. It makes the named
+  configured repository the primary one for that invocation: every read of "the repository" (the
+  verb's rows, its `beads_dir`, the focus and attention scopes) then uses it. The comparison is
+  case-insensitive and ignores surrounding whitespace. A name that is not a configured `repos[]`
+  remote is an error naming the flag, the value and the configured remotes, and the verb does nothing.
+  Without the flag the primary repository (the first entry) is used.
+- **A `<pr>` that names a repository** (`OWNER/REPO#N` or a PR URL) resolves against that repository
+  when it is configured, whichever repository is primary; a `<pr>` that names an unconfigured
+  repository MUST be rejected with an error naming it and the configured remotes. A bare number resolves
+  against the primary (or `--repo`) repository.
+- **The repository of a polled or hydrated pull request** is the one its id (`OWNER/REPO#N`) names,
+  when that is a configured remote (compared case-insensitively; the stored spelling is the
+  configured one); otherwise the primary repository. Issues and threads belong to the primary
+  repository.
+- With one configured repository every rule above reduces to the previous behavior; `--repo` naming
+  that repository is a no-op.
 
 The first additional repository used by tests is `phillipgziprecruiter/pending-review-scratch`
 (fixtures only; no test reaches GitHub).
@@ -162,6 +184,11 @@ The first additional repository used by tests is `phillipgziprecruiter/pending-r
   before multiple were supported; two entries whose remotes are equal ignoring case and surrounding
   whitespace MUST fail the load with an error naming both entries; and `doctor` MUST list every repository
   only when more than one is configured.
+- **INV-CONFIG-12.** <!-- uuid: 0d5b7c1e-8a34-4f26-b9c0-6e2f4a8d3b71 --> `--repo` MUST make the named configured repository primary for the invocation and MUST
+  reject a name that is not configured; a `<pr>` naming a configured repository MUST resolve against it
+  and one naming an unconfigured repository MUST be rejected; a pull request polled or hydrated under a
+  configuration with several repositories MUST be keyed by the repository its id names when that is
+  configured, and a one-repository configuration MUST behave as before.
 
 ## Telemetry and logs
 

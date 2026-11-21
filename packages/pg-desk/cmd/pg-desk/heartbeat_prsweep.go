@@ -85,7 +85,7 @@ func prSweep(ctx context.Context, cmd *cobra.Command, st *store.Store, maxRows i
 	if len(cfg.Repos) == 0 {
 		return out, errors.New("no repository configured")
 	}
-	repo := cfg.Repos[0].Remote
+	repo := cfg.PrimaryRepo()
 	if err := requireNewSchemaForTypedVerb(ctx, st); err != nil {
 		return out, err
 	}

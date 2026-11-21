@@ -294,12 +294,18 @@ const entityTypePR = "pr"
 
 // repo returns the single Phase-9 configured repository's remote, or ""
 // if none is configured — mirrors internal/gather's own
-// g.cfg.Repos[0]... convention (Phase 9 supports exactly one repo).
+// primary-repository convention (Phase 9 supports exactly one repo).
 func (p *Pipeline) repo() string {
-	if p.cfg == nil || len(p.cfg.Repos) == 0 {
+	return repoOf(p.cfg)
+}
+
+// repoFor returns the repository an entity's rows are keyed by: the
+// configured repository a pull-request id names, else the primary one.
+func (p *Pipeline) repoFor(entityType, entityID string) string {
+	if p.cfg == nil {
 		return ""
 	}
-	return p.cfg.Repos[0].Remote
+	return p.cfg.RepoForEntity(entityType, entityID)
 }
 
 // unstampedWarn limits the "writing through a handle with no stamp" warning
@@ -410,7 +416,7 @@ func WriteRunRecord(w io.Writer, now time.Time, d time.Duration, repo, path, ent
 func (p *Pipeline) logRunObs(path string, entityType, entityID string, change gather.ChangeKind, outcome, degraded string, runErr error, start time.Time) {
 	now := p.clock.Now()
 	for _, w := range []io.Writer{p.out, p.recordOut} {
-		WriteRunRecord(w, now, now.Sub(start), p.repo(), path, entityType, entityID, change, outcome, degraded, runErr)
+		WriteRunRecord(w, now, now.Sub(start), p.repoFor(entityType, entityID), path, entityType, entityID, change, outcome, degraded, runErr)
 	}
 }
 
@@ -438,8 +444,5 @@ func (p *Pipeline) printTimeline(timeline []stageEvent) {
 }
 
 func repoOf(cfg *config.Config) string {
-	if cfg == nil || len(cfg.Repos) == 0 {
-		return ""
-	}
-	return cfg.Repos[0].Remote
+	return cfg.PrimaryRepo()
 }

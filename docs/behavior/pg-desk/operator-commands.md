@@ -531,5 +531,5 @@ health model that `serve` exposes as the `pg_desk_focus_*` families (see [`serve
 - `doctor`'s stranded-cycle report is unchanged by Phase 10 — sync minting/reconciling
   agent-signal beads does not, on its own, give `doctor` a report to run; that report's own
   implementation remains this docket's later concern.
-- All six commands operate against the primary repository unless they name another (see
+- All six commands operate against the primary repository unless `--repo` or a qualified `<pr>` names another (see
   [`config.md`](config.md), "Repositories"). `doctor` lists every configured repository.

@@ -203,12 +203,12 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 	if result.Degraded != "" {
 		return EntityChangeResult{Degraded: result.Degraded}, nil
 	}
-	interpRow, interp, err := interpretEntity(p.repo(), p.cfg, p.clock, entityType, entityID, result)
+	interpRow, interp, err := interpretEntity(p.repoFor(entityType, entityID), p.cfg, p.clock, entityType, entityID, result)
 	if err != nil {
 		return EntityChangeResult{}, fmt.Errorf("pipeline: interpret %s %s: %w", entityType, entityID, err)
 	}
 
-	repo := p.repo()
+	repo := p.repoFor(entityType, entityID)
 	now := p.clock.Now().UTC()
 	at := now.Format(time.RFC3339)
 	factsJSON, headSHA := factsAndHead(result.Payload)

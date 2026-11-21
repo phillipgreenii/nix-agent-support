@@ -91,4 +91,6 @@ pg-router records a failed `run` only as "exit status 1", so a failure MUST be a
 
 ## Out of scope
 
-`repos[]` supports exactly one repository; multi-repository `run` is out of scope.
+`run` operates on one repository per invocation: the primary one, or the one `--repo` or a qualified
+`<pr>` names (see [`config.md`](config.md), "Choosing a repository"). The pipeline keys a pull
+request's rows by the repository its id names when that is configured.

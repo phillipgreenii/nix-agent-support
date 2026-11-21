@@ -60,9 +60,9 @@ direct annotation writes, not pipeline runs.
 
 ## Out of scope (Phase 9)
 
-Resolving `<pr>` against more than one configured repository is out of scope this phase. A `<pr>`
-that explicitly names a repository (`OWNER/REPO#N` or a PR URL) other than the one configured
-repository MUST be rejected with an explicit error, never resolved against the configured
-repository; this applies to every verb that resolves a `pr` id (`show`, `refresh`, `hide`,
+A `<pr>` that explicitly names a repository (`OWNER/REPO#N` or a PR URL) resolves against that
+repository when it is configured (see [`config.md`](config.md), "Choosing a repository"), and MUST be
+rejected with an explicit error naming it and the configured remotes when it is not, never resolved
+against another repository; this applies to every verb that resolves a `pr` id (`show`, `refresh`, `hide`,
 `unhide`, `wip`, `feedback`, and the like). The upstream draft-conversion side effect of `wip on` is an accepted loss for the whole window D15
 describes, not just this phase.

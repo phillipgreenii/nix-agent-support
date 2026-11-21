@@ -80,7 +80,7 @@ func focusKeyCompletions(cmd *cobra.Command, args []string, toComplete string, s
 		return nil
 	}
 	defer func() { _ = st.Close() }()
-	in, err := focus.Load(ctx, st, cfg, cfg.Repos[0].Remote, focusNow())
+	in, err := focus.Load(ctx, st, cfg, cfg.PrimaryRepo(), focusNow())
 	if err != nil {
 		return nil
 	}

@@ -96,7 +96,7 @@ func requireNewSchemaForTypedVerb(ctx context.Context, st *store.Store) error {
 
 // resolveTypedRef turns a command-line entity reference into the store key
 // (repo, id). For pr it is resolvePRRef; for issue and thread the id is ref
-// verbatim, under the single configured repository (the store keys every
+// verbatim, under the primary (or --repo selected) repository (the store keys every
 // entity type under it).
 func resolveTypedRef(cfg *config.Config, entityType, ref string) (repo, id string, err error) {
 	if cfg == nil || len(cfg.Repos) == 0 {
@@ -105,5 +105,5 @@ func resolveTypedRef(cfg *config.Config, entityType, ref string) (repo, id strin
 	if entityType == entityTypePR {
 		return resolvePRRef(cfg, ref)
 	}
-	return cfg.Repos[0].Remote, ref, nil
+	return cfg.PrimaryRepo(), ref, nil
 }

@@ -140,7 +140,7 @@ func printInterpretationCatchUp(ctx context.Context, w io.Writer, st *store.Stor
 		fmt.Fprintln(w, "interpretations behind: unknown (configuration unavailable)")
 	default:
 		stamp := runningStamp(cfg)
-		repo := cfg.Repos[0].Remote
+		repo := cfg.PrimaryRepo()
 		st.SetInterpStamp(stamp)
 		behind, known, err := st.InterpretationsBehind(ctx, repo, 0)
 		if err != nil {

@@ -86,7 +86,7 @@ func runReinterpret(cmd *cobra.Command, ref string, open, dryRun, verbose bool) 
 	if len(cfg.Repos) == 0 {
 		return errors.New("reinterpret: no repository configured")
 	}
-	repo := cfg.Repos[0].Remote
+	repo := cfg.PrimaryRepo()
 	var id string
 	if !open {
 		if _, id, err = resolveTypedRef(cfg, entityTypePR, ref); err != nil {

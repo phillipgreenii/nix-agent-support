@@ -35,7 +35,7 @@ var runF runFlags
 // runConfigLoad and runStoreOpen are package-level vars so
 // tests can inject a fixture config/store without touching the real
 // $PG_DESK_CONFIG / $XDG_STATE_HOME/pg-desk/store.db.
-var runConfigLoad = func(ctx context.Context) (*config.Config, error) { return config.Load(ctx) }
+var runConfigLoad = func(ctx context.Context) (*config.Config, error) { return loadConfigForRepo(ctx) }
 
 var runStoreOpen = func() (*store.Store, error) { return store.Open(store.DefaultPath()) }
 
@@ -373,7 +373,7 @@ func resolveJiraBackend(ctx context.Context, cfg *config.Config, st *store.Store
 	return cfg.AgentTrackerBackend, nil
 }
 
-// runRepo returns the single Phase-9 configured repository's remote, or ""
+// runRepo returns the primary configured repository's remote, or ""
 // if none is configured — mirrors internal/pipeline's own identical
 // p.repo() helper and internal/gather's own identical g.repo() helper
 // (each package keeps its own private copy rather than a shared one, per
@@ -384,7 +384,7 @@ func runRepo(cfg *config.Config) string {
 	if cfg == nil || len(cfg.Repos) == 0 {
 		return ""
 	}
-	return cfg.Repos[0].Remote
+	return cfg.PrimaryRepo()
 }
 
 // exitDecline is the exit code of a deliberate pre-accept decline: the

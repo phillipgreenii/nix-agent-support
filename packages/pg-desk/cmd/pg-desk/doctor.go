@@ -120,8 +120,8 @@ const doctorWorkBeadsQuery = "work-beads"
 // internal/sync's issueClient do (PG_CONNECTOR_ISSUE_BEADS_DIR).
 var doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
 	call := cmdrun.Call{Name: "pg-connector", Args: []string{"issue", "list", "--query", doctorWorkBeadsQuery}, Timeout: connectorCallTimeout}
-	if cfg != nil && len(cfg.Repos) > 0 && cfg.Repos[0].BeadsDir != "" {
-		call.Env = []string{"PG_CONNECTOR_ISSUE_BEADS_DIR=" + cfg.Repos[0].BeadsDir}
+	if dir := cfg.BeadsDirFor(cfg.PrimaryRepo()); dir != "" {
+		call.Env = []string{"PG_CONNECTOR_ISSUE_BEADS_DIR=" + dir}
 	}
 	res := connector.Run(ctx, call)
 	if res.StartErr == nil && res.CtxErr == nil && res.Signal == "" {

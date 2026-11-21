@@ -42,7 +42,7 @@ func gatherFocus(ctx context.Context, env *focusEnv) (*focusGather, error) {
 	if len(env.Cfg.Repos) == 0 {
 		return nil, focusUsageError("focus: no repository configured", "set repos in the pg-desk config")
 	}
-	g := &focusGather{env: env, repo: env.Cfg.Repos[0].Remote, loc: env.Cfg.FocusTimeZone()}
+	g := &focusGather{env: env, repo: env.Cfg.PrimaryRepo(), loc: env.Cfg.FocusTimeZone()}
 	in, err := focus.Load(ctx, env.Store, env.Cfg, g.repo, env.Now)
 	if err != nil {
 		return nil, focusTotalError("focus: read the store: "+err.Error(), "check the pg-desk store, then re-run")
