@@ -44,7 +44,8 @@ var heartbeatRunLedgerShow = func(ctx context.Context) ([]byte, error) {
 // meta.last_heartbeat's own staleness bound (packet 7's serve).
 //
 // After the probe and before the source fetch record it runs a bounded
-// interpretation catch-up (heartbeat_catchup.go) that never fails the heartbeat.
+// interpretation catch-up (heartbeat_catchup.go) and a bounded PR age sweep
+// (heartbeat_prsweep.go); neither fails the heartbeat.
 //
 // The liveness stamp is written first and never depends on the connector:
 // a pg-connector that is absent, slow or answering garbage costs only the
@@ -67,6 +68,7 @@ var heartbeatCmd = &cobra.Command{
 		}
 		probeOwningSources(cmd)
 		runCatchUp(cmd, st, start)
+		runPRSweep(cmd, st, start)
 		return recordSourceFetches(cmd, st)
 	},
 }

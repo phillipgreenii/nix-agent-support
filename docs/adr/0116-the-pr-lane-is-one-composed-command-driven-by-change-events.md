@@ -155,7 +155,10 @@ These were recommendations of the design's author, accepted by approving the des
   `pg2-9eec8` holds the follow-up and is deferred until the stateful connector redesigns land and the
   operator names a consuming rule.
 - No reconcile and no sweep: if the daemon misses a change, nothing re-asserts it (risk R5). The
-  stale-anchor, hydrate dead-man, store-aside and no-watched-PRs alerts are the detectors.
+  stale-anchor, hydrate dead-man, store-aside and no-watched-PRs alerts are the detectors. Amended
+  2026-11-21 (agent decision, reversible): the old-hydration alert showed the gap is real for quiet PRs
+  with an open anchor, so the heartbeat re-hydrates exactly those, past `sweep.max_age`, in bounded
+  batches (`changes.md`, "PR age sweep for open anchors"). Nothing else is swept.
 - History: while the lookup read the whole all-status set on every run, a fixed ceiling
   (`work_items_ceiling`) WILL have been reached as closed items accumulate. The per-PR query removes
   that growth, and the ceiling and its alert (`pg-desk-pr-lookup-ceiling`) were retired

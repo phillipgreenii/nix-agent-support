@@ -433,6 +433,11 @@ catch-up is still running, and never changes the heartbeat's exit code: a config
 be loaded, an unreadable store or a catch-up error is at most one line on stderr. It writes nothing
 when nothing is behind. The liveness stamp and the source fetch record never depend on it.
 
+After the catch-up it runs a second bounded step, the PR age sweep for open anchors (see [`changes.md`](changes.md),
+"PR age sweep for open anchors"): it re-hydrates at most 3 open-anchor PRs per heartbeat whose last hydration is older
+than `sweep.max_age`, under the same rules (a budget of at most 10 seconds cut to what the period leaves, non-`dev`
+build, a lock, never a change to the exit code).
+
 Exit codes: `0` on success; `1` when the store cannot be written (`heartbeat`) or read
 (`heartbeat-item`).
 

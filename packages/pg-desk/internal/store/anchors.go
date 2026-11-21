@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -54,55 +55,9 @@ type PRAnchors struct {
 // callers check SchemaVersion first and treat an older store as "no data",
 // never as an empty view. A read failure is returned, never folded into zero.
 func (s *Store) CountPRAnchors(ctx context.Context, now time.Time) (PRAnchors, error) {
-	prFactsCol, prIndexedBy, err := s.prStateSource(ctx)
+	prs, err := s.loadAnchorPRs(ctx)
 	if err != nil {
 		return PRAnchors{}, err
-	}
-	rows, err := s.sql.QueryContext(
-		ctx,
-		`SELECT x.to_id, a.facts,
-		        COALESCE(p.`+prFactsCol+`, ''), p.entity_id IS NOT NULL,
-		        COALESCE(p.hydrated_at, p.first_seen_at, p.as_of, ''),
-		        COALESCE((SELECT h.value FROM annotation h
-		                   WHERE h.repo = a.repo AND h.entity_type = 'pr'
-		                     AND h.entity_id = x.to_id AND h.key = ?), '')
-		   FROM entity a
-		   JOIN xref x ON x.repo = a.repo AND x.from_type = 'issue'
-		              AND x.from_id = a.entity_id AND x.to_type = 'pr'
-		              AND x.relation = 'work'
-		   LEFT JOIN entity p `+prIndexedBy+` ON p.repo = a.repo AND p.entity_type = 'pr'
-		                     AND p.entity_id = x.to_id
-		  WHERE a.entity_type = 'issue' AND a.active = 1`,
-		AnnotationHidden,
-	)
-	if err != nil {
-		return PRAnchors{}, fmt.Errorf("store: count pr anchors: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	type prState struct {
-		hidden, closed, present bool
-		since                   string
-	}
-	prs := map[string]prState{}
-	for rows.Next() {
-		var prID, anchorFacts, prFacts, since, hidden string
-		var present bool
-		if err := rows.Scan(&prID, &anchorFacts, &prFacts, &present, &since, &hidden); err != nil {
-			return PRAnchors{}, fmt.Errorf("store: count pr anchors: scan: %w", err)
-		}
-		if !isOpenAnchor(anchorFacts) {
-			continue
-		}
-		prs[prID] = prState{
-			hidden:  isHiddenAnnotation(hidden),
-			closed:  present && factsSayClosed(prFacts),
-			present: present,
-			since:   since,
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return PRAnchors{}, fmt.Errorf("store: count pr anchors: %w", err)
 	}
 
 	var out PRAnchors
@@ -132,6 +87,128 @@ func (s *Store) CountPRAnchors(ctx context.Context, now time.Time) (PRAnchors, e
 		}
 	}
 	return out, nil
+}
+
+// anchorPR is one PR with an open anchor, as the store shows it.
+type anchorPR struct {
+	hidden, closed, present bool
+	// since is the PR row's last hydration, else its first-seen time, else
+	// its as_of ("" when the row is absent).
+	since string
+	// attempt is the PR row's read_attempt_at ("" when never set or the column
+	// is absent).
+	attempt string
+}
+
+// loadAnchorPRs reads every PR that has at least one open anchor, keyed by PR
+// id. CountPRAnchors and SweepPRAnchors both read it, so the gauge and the
+// sweep see the same population.
+func (s *Store) loadAnchorPRs(ctx context.Context) (map[string]anchorPR, error) {
+	prFactsCol, prIndexedBy, err := s.prStateSource(ctx)
+	if err != nil {
+		return nil, err
+	}
+	have, err := s.tableColumns(ctx, "entity")
+	if err != nil {
+		return nil, err
+	}
+	attemptCol := `''`
+	if have["read_attempt_at"] {
+		attemptCol = `COALESCE(p.read_attempt_at, '')`
+	}
+	rows, err := s.sql.QueryContext(
+		ctx,
+		`SELECT x.to_id, a.facts,
+		        COALESCE(p.`+prFactsCol+`, ''), p.entity_id IS NOT NULL,
+		        COALESCE(p.hydrated_at, p.first_seen_at, p.as_of, ''),
+		        COALESCE((SELECT h.value FROM annotation h
+		                   WHERE h.repo = a.repo AND h.entity_type = 'pr'
+		                     AND h.entity_id = x.to_id AND h.key = ?), ''),
+		        `+attemptCol+`
+		   FROM entity a
+		   JOIN xref x ON x.repo = a.repo AND x.from_type = 'issue'
+		              AND x.from_id = a.entity_id AND x.to_type = 'pr'
+		              AND x.relation = 'work'
+		   LEFT JOIN entity p `+prIndexedBy+` ON p.repo = a.repo AND p.entity_type = 'pr'
+		                     AND p.entity_id = x.to_id
+		  WHERE a.entity_type = 'issue' AND a.active = 1`,
+		AnnotationHidden,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: count pr anchors: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	prs := map[string]anchorPR{}
+	for rows.Next() {
+		var prID, anchorFacts, prFacts, since, hidden, attempt string
+		var present bool
+		if err := rows.Scan(&prID, &anchorFacts, &prFacts, &present, &since, &hidden, &attempt); err != nil {
+			return nil, fmt.Errorf("store: count pr anchors: scan: %w", err)
+		}
+		if !isOpenAnchor(anchorFacts) {
+			continue
+		}
+		prs[prID] = anchorPR{
+			hidden:  isHiddenAnnotation(hidden),
+			closed:  present && factsSayClosed(prFacts),
+			present: present,
+			since:   since,
+			attempt: attempt,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: count pr anchors: %w", err)
+	}
+	return prs, nil
+}
+
+// SweepPRAnchors returns up to limit ids of the PRs the age sweep should
+// re-hydrate at now: the PRs CountPRAnchors counts in OldestHydrationAgeSeconds
+// (an open anchor, not hidden, a stored row that still says open) whose last
+// hydration is older than maxAge, oldest first (ties by id). A PR whose
+// read_attempt_at is newer than retryAfter ago is skipped, so a PR that keeps
+// failing to hydrate does not hold the front of the queue; the caller writes
+// the attempt time.
+func (s *Store) SweepPRAnchors(ctx context.Context, now time.Time, maxAge, retryAfter time.Duration, limit int) ([]string, error) {
+	prs, err := s.loadAnchorPRs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	type cand struct {
+		id    string
+		since time.Time
+	}
+	var due []cand
+	for id, p := range prs {
+		if p.hidden || !p.present || p.closed {
+			continue
+		}
+		since, perr := time.Parse(time.RFC3339, p.since)
+		if perr == nil && now.Sub(since) <= maxAge {
+			continue
+		}
+		if p.attempt != "" {
+			if at, aerr := time.Parse(time.RFC3339Nano, p.attempt); aerr == nil && now.Sub(at) < retryAfter {
+				continue
+			}
+		}
+		due = append(due, cand{id, since})
+	}
+	sort.Slice(due, func(i, j int) bool {
+		if !due[i].since.Equal(due[j].since) {
+			return due[i].since.Before(due[j].since)
+		}
+		return due[i].id < due[j].id
+	})
+	if limit >= 0 && len(due) > limit {
+		due = due[:limit]
+	}
+	ids := make([]string, len(due))
+	for i, c := range due {
+		ids[i] = c.id
+	}
+	return ids, nil
 }
 
 // isOpenAnchor reports whether a stored issue's facts describe an anchor

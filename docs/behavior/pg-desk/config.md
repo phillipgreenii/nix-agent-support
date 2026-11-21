@@ -88,7 +88,7 @@ These keys and rules are what the deployment configures for that.
 - **No `sweep.*` for `issue`.** The `issue` flow no longer reads the `sweep.*` keys, because it runs
   neither sweep tier. They apply to `thread` only (the daemon feeds `pr`; the legacy sync `sync:` keys and the
   `pg-desk reconcile` and `sweep` verbs that read them are deleted), with their meaning in
-  [`changes.md`](changes.md). `sweep.reconcile_age` stays because the thread local tier reads it.
+  [`changes.md`](changes.md). `sweep.reconcile_age` stays because the thread local tier reads it. `sweep.max_age` is also read by the heartbeat's PR age sweep for open anchors ([`changes.md`](changes.md), "PR age sweep for open anchors").
 - **`hydration.orphan_max_per_poll`** (home-module option `hydration.orphanMaxPerPoll`, positive
   integer) bounds how many orphans are read by id in one poll. An orphan is a watched, still-open issue
   of a backend with no change feed that no watched query lists any longer (a one-off watch, or an issue

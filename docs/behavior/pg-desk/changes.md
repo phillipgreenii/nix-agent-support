@@ -621,6 +621,32 @@ is never re-hydrated on a clock; counting it as due once it is older than the sw
 every daily focus draft incomplete for a backlog nothing works off. A PR the store lists that was never
 hydrated is reported by its own series (`pg_desk_pr_unhydrated`), not by this one.
 
+## PR age sweep for open anchors
+
+The daemon feeds the PR lane with change events only, so a quiet PR is never re-read on its own. A lost or
+failed hydration of a PR's `merged` or `closed` state then leaves the store saying `open` while the PR's
+anchor work item stays open, and nothing would ever correct it. pg-desk therefore runs one narrow age sweep
+for `pr`, and only for that population:
+
+- **Population.** The PRs the open-anchor gauge ages (`pg_desk_pr_open_anchor_oldest_hydration_age_seconds`):
+  not hidden, with at least one open anchor, whose stored row still says open. No other PR is swept.
+- **Age.** A PR in that population whose last hydration (else its first-seen time) is older than
+  `sweep.max_age` MUST be re-hydrated, oldest first. The sweep MUST NOT use any other age setting, and it
+  does not read `sweep.max_per_poll` or the hydration budget.
+- **Where it runs.** As a bounded step of `pg-desk heartbeat`, after the interpretation catch-up. It MUST NOT
+  make a heartbeat late or missed: it re-hydrates at most 3 PRs per heartbeat, within what the heartbeat
+  period leaves (at most 10 seconds), takes a per-store lock and skips when another sweep holds it, skips on a
+  dev build, and never fails the heartbeat (a problem is one stderr line).
+- **How it hydrates.** Through the same path as `pg-desk pr refresh` (kind `changed`, not `sweep`), so an
+  unchanged PR head is still re-read. A failed or degraded read writes nothing and keeps the previous
+  snapshot. The sweep stamps the PR's read-attempt time before each read, and a PR attempted within the last
+  30 minutes is skipped, so one PR that keeps failing does not hold the front of the queue.
+- **Effect.** A successful hydration moves `hydrated_at`, so the gauge falls under `sweep.max_age` for a
+  healthy store and the `pg-desk-pr-anchor-hydration-old` alert (7 days) fires only when the sweep itself is
+  failing.
+- **Not counted as backlog.** The due backlog of `pr` stays 0 (see "Due backlog"): this sweep is not a
+  per-entity-type tier and adds no series.
+
 ## Issue-dependency hydration (`hydration.read_issue_deps`)
 
 `hydration.read_issue_deps` (boolean, default `false`; home-module option `hydration.readIssueDeps`)
