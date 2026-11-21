@@ -111,10 +111,11 @@ func kickJanitor(cfgPath, roleFile string) error {
 	if err != nil {
 		return err
 	}
-	// Not routed through x/cmdrun: the janitor is detached on purpose. cmdrun.Exec
-	// waits for the child and captures its pipes, and this call must return at
-	// once, leave the child running in its own process group after this process
-	// exits, and never kill it (no context, no timeout).
+	// Not routed through x/cmdrun: a detached, deliberately unbounded
+	// fire-and-forget spawn is intended here. x/cmdrun.Exec always waits for the
+	// child and captures its pipes, and this call must return at once, leave the
+	// child running in its own process group after this process exits, and never
+	// kill it (no context, no timeout).
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return err

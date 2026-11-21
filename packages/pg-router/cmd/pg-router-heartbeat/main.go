@@ -72,6 +72,12 @@ func runNotify(argv []string, timeout, waitDelay time.Duration) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	// Deliberate exception to the x/cmdrun rule: heartbeat is the out-of-stack
+	// dead-man switch and imports the standard library only (members.json
+	// stdlibOnly; boundary_test.go TestMemberBoundary rule 4; SD-3 rule 4 of
+	// docs/superpowers/specs/2026-11-18-pg-apps-published-contracts-design.md).
+	// The call is bounded by context.WithTimeout, cmd.Cancel (SIGTERM) and
+	// cmd.WaitDelay below.
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = waitDelay
