@@ -342,7 +342,10 @@ func TestIsolate_concurrentIsolateCallsStayAnchoredToRepo(t *testing.T) {
 	preexisting := filepath.Join(repo, ".worktrees", "preexisting")
 	gitTest(t, repo, "worktree", "add", preexisting, "-b", "drain/preexisting", "main")
 
-	const n = 12
+	// Four goroutines are enough to interleave Isolate's git calls against the
+	// misdirecting core.worktree; each call costs about ten real git spawns, so
+	// a larger fan-out only multiplied the test's CPU.
+	const n = 4
 	beads := make([]string, n)
 	for i := range beads {
 		beads[i] = fmt.Sprintf("pg2-conc%d", i)
