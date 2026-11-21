@@ -32,6 +32,10 @@ const (
 	// record per (event, role). It is kept while the event is held and dropped
 	// with it on eviction and by compaction. An older binary ignores it.
 	opFailed opKind = "failed"
+	// opReopen is written when a duplicate hit on a retained, still-unsettled lane
+	// event re-opens attempts for the handlers that have not accepted it (the
+	// fan-out re-open): At and ExpiresAt are the event's new attempt window.
+	opReopen opKind = "reopen"
 	// The three legacy record kinds of the removed gate mechanism: a replay
 	// ignores them and compaction drops them (reporting an active gate once).
 	opGateSet     opKind = "gate_set"

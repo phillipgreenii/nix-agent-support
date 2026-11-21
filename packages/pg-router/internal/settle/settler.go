@@ -4,7 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 )
+
+// DefaultHoldLimit is the hold limit used when a query's own is unset.
+const DefaultHoldLimit = 24 * time.Hour
 
 // Runner runs one query's settle invocation for a lane and token. A non-nil
 // error is a failed report (non-zero exit or timeout).
@@ -21,6 +25,12 @@ type Settler struct {
 	run    Runner
 	onFail func(query string)
 
+	// holdLimit gives a query's ack_hold_limit (nil: the default), now the clock
+	// (nil: time.Now) and onAbandon is told each abandoned event (may be nil).
+	holdLimit func(query string) time.Duration
+	now       func() time.Time
+	onAbandon func(query, eventType string)
+
 	mu    sync.Mutex
 	lanes map[string]*laneRun
 	wg    sync.WaitGroup
@@ -36,6 +46,34 @@ type laneRun struct {
 func NewSettler(ctx context.Context, ledger *Ledger, run Runner, onFail func(query string)) *Settler {
 	return &Settler{ctx: ctx, ledger: ledger, run: run, onFail: onFail, lanes: map[string]*laneRun{}}
 }
+
+// ConfigureHold sets how the hold limit is applied: limit gives a query's
+// ack_hold_limit (nil or non-positive: DefaultHoldLimit), now the clock (nil:
+// time.Now) and onAbandon is called once per abandoned event (may be nil). Call
+// it before the Settler is shared.
+func (s *Settler) ConfigureHold(limit func(query string) time.Duration, now func() time.Time, onAbandon func(query, eventType string)) {
+	s.holdLimit, s.now, s.onAbandon = limit, now, onAbandon
+}
+
+func (s *Settler) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+func (s *Settler) limitFor(query string) time.Duration {
+	if s.holdLimit != nil {
+		if d := s.holdLimit(query); d > 0 {
+			return d
+		}
+	}
+	return DefaultHoldLimit
+}
+
+// FrontierAges reports each lane's age of its oldest unsettled event (the
+// frontier-age gauge), computed at scrape time.
+func (s *Settler) FrontierAges() []LaneAge { return s.ledger.Ages(s.clock()) }
 
 // Ledger returns the ledger the Settler evaluates.
 func (s *Settler) Ledger() *Ledger { return s.ledger }
@@ -90,7 +128,25 @@ func (s *Settler) Restart(isSettled func(id string) bool) {
 // orderly shutdown).
 func (s *Settler) Wait() { s.wg.Wait() }
 
+// abandonLane applies the hold limit to one lane: each unsettled event first seen
+// longer ago than the limit is abandoned (counted, its id logged) and treated as
+// settled for the frontier, so the frontier moves to the next unsettled event.
+func (s *Settler) abandonLane(query, lane string) {
+	gone, err := s.ledger.Abandon(query, lane, s.limitFor(query), s.clock())
+	if err != nil {
+		slog.Error("settle: persisting the ledger failed", "query", query, "lane", lane, "err", err)
+	}
+	for _, a := range gone {
+		slog.Warn("settle: abandoned an event past the hold limit; its lane frontier moves past it",
+			"query", query, "lane", lane, "eventId", a.ID, "type", a.Type, "holdLimit", s.limitFor(query).String())
+		if s.onAbandon != nil {
+			s.onAbandon(query, a.Type)
+		}
+	}
+}
+
 func (s *Settler) evaluateLane(query, lane string) {
+	s.abandonLane(query, lane)
 	k := laneKey(query, lane)
 	s.mu.Lock()
 	lr := s.lanes[k]

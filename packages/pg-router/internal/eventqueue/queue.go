@@ -444,6 +444,9 @@ type depthCell struct {
 type Queue struct {
 	// acceptHook is WithAcceptHook's callback; nil when unset.
 	acceptHook func(eventID string)
+	// laneHeld is WithLaneRetention's callback; nil when unset. It is called
+	// under q.mu and MUST NOT call back into the queue.
+	laneHeld func(eventID string) bool
 	// mu guards every mutable field below.
 	//
 	// LOCK-ORDER INVARIANT (Task 2.3, pg2-84o3m.22; review-digest perf-F11):
@@ -626,6 +629,57 @@ func WithSleeper(after func(time.Duration) <-chan time.Time) Option {
 // settlement: every listener that matches it has accepted it. It is the queue's
 // half of the settlement report; fn MUST NOT block.
 func WithAcceptHook(fn func(eventID string)) Option { return func(q *Queue) { q.acceptHook = fn } }
+
+// WithLaneRetention registers held, which reports whether an event's lane
+// frontier has not yet passed it. An accepted event that carries an ack lane for
+// which held is true keeps its id in the retained id set (INV-EVT-3 lane
+// retention) even once its own attempts are complete, so the source's re-offer
+// while the frontier is held is absorbed. held runs under q.mu and MUST NOT call
+// back into the queue.
+func WithLaneRetention(held func(eventID string) bool) Option {
+	return func(q *Queue) { q.laneHeld = held }
+}
+
+// laneHeldLocked reports whether e's id is held by lane retention. Caller holds q.mu.
+func (q *Queue) laneHeldLocked(e *entry) bool {
+	return e.evt.AckLane != "" && q.laneHeld != nil && q.laneHeld(e.evt.ID)
+}
+
+// reopenLocked is the fan-out re-open (INV-EVT-3 amendment): a duplicate hit on a
+// retained, still-unsettled lane event gives each handler that has NOT accepted
+// it a new attempt window (at and expiresAt of the duplicate emit, or, when the
+// duplicate's own window is already over, a window of the original length
+// starting now). A handler that accepted it is not re-run: its accepted marker
+// stays. Clearing a settled marker never creates a second outstanding offer,
+// since a listener with an offer in flight is skipped by phase 1 of Dispatch.
+// The re-open is recorded durably (opReopen) before the in-memory change; a
+// failed write leaves the entry as it was. Caller holds q.mu.
+func (q *Queue) reopenLocked(e *entry, dup Event, now time.Time) {
+	if e.evt.AckLane == "" || q.ackSettledLocked(e) {
+		return
+	}
+	at, exp := dup.At, dup.ExpiresAt
+	if !exp.After(now) {
+		window := e.evt.ExpiresAt.Sub(e.evt.At)
+		if window <= 0 {
+			return
+		}
+		at, exp = now, now.Add(window)
+	}
+	if q.admitLocked() != nil {
+		return
+	}
+	if err := q.appendLocked(Record{Op: opReopen, EventID: e.evt.ID, At: at, ExpiresAt: exp}); err != nil {
+		slog.Error("eventqueue: reopen-append failed; the duplicate is absorbed without re-opening", "eventId", e.evt.ID, "err", err)
+		return
+	}
+	e.evt.At, e.evt.ExpiresAt = at, exp
+	for lid := range e.settled {
+		if !e.accepted[lid] {
+			delete(e.settled, lid)
+		}
+	}
+}
 
 // ackSettledLocked reports whether nothing more is owed to e for the settlement
 // report: every currently-bound listener that matches it has accepted it (an
@@ -815,6 +869,10 @@ func (q *Queue) replay() error {
 				q.publishCellLocked("", e.evt.Type, e.evt.Type)
 			}
 			q.entries[e.evt.ID] = e
+		case opReopen:
+			if e, ok := q.entries[r.EventID]; ok {
+				e.evt.At, e.evt.ExpiresAt = r.At, r.ExpiresAt
+			}
 		case opAccept:
 			if e, ok := q.entries[r.EventID]; ok {
 				e.accepted[r.ListenerID] = true
@@ -944,6 +1002,7 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 	}
 	if e, ok := q.entries[evt.ID]; ok {
 		if q.retainedLocked(e, now) {
+			q.reopenLocked(e, evt, now)
 			unlock()
 			q.obs.OnDeduped(evt.Type)
 			return Deduped, nil // still-retained duplicate id (INV-EVT-3)
@@ -1036,6 +1095,9 @@ func (q *Queue) dropFromOrder(id string) {
 func (q *Queue) retainedLocked(e *entry, now time.Time) bool {
 	if !e.evt.Expired(now) {
 		return true
+	}
+	if q.laneHeldLocked(e) {
+		return true // lane retention (INV-EVT-3): the lane's frontier has not passed it
 	}
 	if e.evt.NotYetEligible(now) {
 		// expiresAt bounds a gated event (ADR 0121 D3): one whose window closed
@@ -1547,7 +1609,9 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 			q.declined.Add(1)
 			*signals = append(*signals, dispatchSignal{kind: signalDeclined, evtType: p.evt.Type, listener: lid, reason: p.result.Decline, detail: p.result.DeclineDetail})
 		}
-		if p.lastAttempt {
+		if p.lastAttempt && !e.evt.ExpiresAt.After(p.evt.ExpiresAt) {
+			// (An attempt whose window the fan-out re-open extended while it was
+			// outstanding is not the last one: the new window owes another.)
 			e.settled[lid] = true
 			p.ls.resetBackoff() // nothing left to back off from once settled
 		} else {
@@ -1887,6 +1951,9 @@ func (q *Queue) runOfferOnce(p pendingOffer) (next pendingOffer, chained bool) {
 func (q *Queue) maybeEvict(e *entry) (Record, bool) {
 	if !q.evictWhenAllAccept && !q.earlyEvictTypes[e.evt.Type] {
 		return Record{}, false
+	}
+	if q.laneHeldLocked(e) {
+		return Record{}, false // its id stays in the retained set until the frontier passes it
 	}
 	for _, ls := range q.listeners {
 		if ls.l.Matches(e.evt) && !e.accepted[ls.l.ID()] {

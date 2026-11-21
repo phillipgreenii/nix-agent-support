@@ -336,13 +336,32 @@ func BootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 				}
 				return fmt.Errorf("settle: unknown query %q", qname)
 			}, emitter.OnSettleFailure)
+			settler.ConfigureHold(func(qname string) time.Duration {
+				for _, s := range cfg.Queries {
+					if s.Name == qname {
+						_, hl, _ := query.SettleOf(s.Query)
+						return hl
+					}
+				}
+				return 0
+			}, nil, emitter.OnAckAbandoned)
+			emitter.SetFrontierAges(func() []metrics.FrontierAge {
+				ages := settler.FrontierAges()
+				out := make([]metrics.FrontierAge, len(ages))
+				for i, a := range ages {
+					out[i] = metrics.FrontierAge{Query: a.Query, Lane: a.Lane, Age: a.Age}
+				}
+				return out
+			})
 			o.Settler = settler
 			break
 		}
 	}
 	var ackHook eventqueue.Option = func(*eventqueue.Queue) {}
 	if settler != nil {
-		ackHook = eventqueue.WithAcceptHook(settler.OnEventSettled)
+		accept := eventqueue.WithAcceptHook(settler.OnEventSettled)
+		retain := eventqueue.WithLaneRetention(settler.Ledger().Held)
+		ackHook = func(q *eventqueue.Queue) { accept(q); retain(q) }
 	}
 	q, err = eventqueue.New(store, ackHook, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithLevelSource(levelProj.Snapshot), eventqueue.WithRegistry(cfg.Resources.Registry()), eventqueue.WithStartStagger(cfg.Levels.StartStagger), eventqueue.WithLevelObserver(emitter),
 		// Compact queue.jsonl down to live state: once at startup (before the queue

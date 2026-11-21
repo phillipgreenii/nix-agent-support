@@ -812,7 +812,7 @@ func recordAckPoll(st *settle.Settler, source string, evts []event.Event, now ti
 		if _, ok := byLane[e.Ack.Lane]; !ok {
 			order = append(order, e.Ack.Lane)
 		}
-		byLane[e.Ack.Lane] = append(byLane[e.Ack.Lane], settle.Item{ID: e.ID, Token: e.Ack.Token})
+		byLane[e.Ack.Lane] = append(byLane[e.Ack.Lane], settle.Item{ID: e.ID, Token: e.Ack.Token, Type: e.Type})
 	}
 	for _, lane := range order {
 		if err := st.Ledger().Poll(source, lane, byLane[lane], now); err != nil {

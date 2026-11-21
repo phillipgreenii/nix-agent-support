@@ -97,7 +97,7 @@ func TestSettlerReportsFrontierAndRetriesAfterFailure(t *testing.T) {
 	var calls []call
 	failNext := true
 	fails := 0
-	s := NewSettler(context.Background(), l, func(_ context.Context, q, lane, tok string) error {
+	s := newTestSettler(context.Background(), l, func(_ context.Context, q, lane, tok string) error {
 		mu.Lock()
 		defer mu.Unlock()
 		calls = append(calls, call{q, lane, tok})
@@ -134,7 +134,7 @@ func TestSettlerOneInFlightPerLaneAndCoalesces(t *testing.T) {
 	var mu sync.Mutex
 	var toks []string
 	inFlight, maxInFlight := 0, 0
-	s := NewSettler(context.Background(), l, func(_ context.Context, _, _, tok string) error {
+	s := newTestSettler(context.Background(), l, func(_ context.Context, _, _, tok string) error {
 		mu.Lock()
 		inFlight++
 		if inFlight > maxInFlight {
@@ -173,7 +173,7 @@ func TestRestartReadsSettlementFromQueueAndResends(t *testing.T) {
 	// Crash point: the queue recorded e1's acceptance, the ledger never did.
 	l2, _ := OpenLedger(path)
 	var calls []call
-	s := NewSettler(context.Background(), l2, func(_ context.Context, q, lane, tok string) error {
+	s := newTestSettler(context.Background(), l2, func(_ context.Context, q, lane, tok string) error {
 		calls = append(calls, call{q, lane, tok})
 		return nil
 	}, nil)
@@ -185,7 +185,7 @@ func TestRestartReadsSettlementFromQueueAndResends(t *testing.T) {
 	// Crash after the ledger write but before the report: a new process resends.
 	l3, _ := OpenLedger(path)
 	var again []call
-	s3 := NewSettler(context.Background(), l3, func(_ context.Context, q, lane, tok string) error {
+	s3 := newTestSettler(context.Background(), l3, func(_ context.Context, q, lane, tok string) error {
 		again = append(again, call{q, lane, tok})
 		return nil
 	}, nil)

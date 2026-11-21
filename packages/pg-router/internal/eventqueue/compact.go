@@ -266,6 +266,10 @@ func (f *logFold) apply(r Record) {
 			}
 			e.retries[r.ListenerID] = r.RetryCount
 		}
+	case opReopen:
+		if e, ok := f.events[r.EventID]; ok {
+			e.enq.At, e.enq.ExpiresAt = r.At, r.ExpiresAt
+		}
 	case opFailed:
 		if e, ok := f.events[r.EventID]; ok {
 			if e.failed == nil {

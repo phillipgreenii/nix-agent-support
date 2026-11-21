@@ -306,6 +306,14 @@ const (
 	// source that exited non-zero or timed out, per query. The report is retried
 	// at the next frontier evaluation (exported as pg_router_source_settle_failures_total).
 	MetricSourceSettleFailures = "pg_router_source_settle_failures"
+	// MetricSourceAckAbandoned counts an event of a cursor-feed source's lane
+	// abandoned by the hold limit (labelled query, type): a bounded, visible loss
+	// (exported as pg_router_source_ack_abandoned_total).
+	MetricSourceAckAbandoned = "pg_router_source_ack_abandoned"
+	// MetricSourceFrontierAge is, per query and lane, the age in seconds of the
+	// oldest unsettled event of the lane; 0 for a lane with none
+	// (pg_router_source_frontier_age_seconds).
+	MetricSourceFrontierAge = "pg_router_source_frontier_age"
 	// MetricDeduped counts a duplicate event id the core absorbed because
 	// de-duplication already covers it (INV-EVT-3, bead pg2-cz31d), per type.
 	// It is a BRAND-NEW counter (not a promotion of any pre-existing field —
@@ -524,6 +532,8 @@ type Emitter struct {
 	sourceFailures   metric.Int64Counter
 	sourceBackoff    metric.Int64Counter
 	settleFailures   metric.Int64Counter
+	ackAbandoned     metric.Int64Counter
+	frontierAges     atomic.Pointer[func() []FrontierAge]
 	ticksSkipped     metric.Int64Counter
 	loadBackoff      atomic.Int64
 	deduped          metric.Int64Counter
@@ -912,6 +922,14 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	if err != nil {
 		return nil, err
 	}
+	ackAbandoned, err := m.Int64Counter(
+		MetricSourceAckAbandoned,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("events of a cursor-feed source abandoned by the hold limit, per query and event type"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	sourceBackoff, err := m.Int64Counter(
 		MetricSourceBackoff,
 		metric.WithUnit("{attempt}"),
@@ -1249,6 +1267,22 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	e.sourceFailures = sourceFailures
 	e.sourceBackoff = sourceBackoff
 	e.settleFailures = settleFailures
+	e.ackAbandoned = ackAbandoned
+	if _, err := m.Float64ObservableGauge(
+		MetricSourceFrontierAge,
+		metric.WithUnit("s"),
+		metric.WithDescription("age of the oldest unsettled event of a cursor-feed source's lane, 0 when none"),
+		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+			if fn := e.frontierAges.Load(); fn != nil {
+				for _, a := range (*fn)() {
+					o.Observe(a.Age.Seconds(), metric.WithAttributes(attribute.String("query", a.Query), attribute.String("lane", a.Lane)))
+				}
+			}
+			return nil
+		}),
+	); err != nil {
+		return nil, err
+	}
 	e.ticksSkipped = ticksSkipped
 	if _, err := m.Int64ObservableGauge(
 		MetricProducerLoadBackoff,
@@ -2100,6 +2134,28 @@ func (e *Emitter) OnSourceFailure(source string, err error) {
 		attribute.String("source", source),
 		attribute.String("reason", ClassifySourceFailure(err)),
 	))
+}
+
+// FrontierAge is one lane's frontier-age reading.
+type FrontierAge struct {
+	Query string
+	Lane  string
+	Age   time.Duration
+}
+
+// SetFrontierAges installs the source of the frontier-age gauge, read at scrape
+// time (nil clears it).
+func (e *Emitter) SetFrontierAges(fn func() []FrontierAge) {
+	if fn == nil {
+		e.frontierAges.Store(nil)
+		return
+	}
+	e.frontierAges.Store(&fn)
+}
+
+// OnAckAbandoned counts one event of query's lane abandoned by the hold limit.
+func (e *Emitter) OnAckAbandoned(query, eventType string) {
+	e.ackAbandoned.Add(context.Background(), 1, metric.WithAttributes(attribute.String("query", query), attribute.String("type", eventType)))
 }
 
 // OnSettleFailure counts one failed settle invocation for query.

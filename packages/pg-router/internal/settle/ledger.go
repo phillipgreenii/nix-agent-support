@@ -27,12 +27,16 @@ type Entry struct {
 	Token     string    `json:"token"`
 	FirstSeen time.Time `json:"firstSeen"`
 	Settled   bool      `json:"settled,omitempty"`
+	// Type is the event type, kept only to label the abandonment counter.
+	Type string `json:"type,omitempty"`
 }
 
 // Item is one event of a poll: its id and token, in the order the source emitted.
 type Item struct {
 	ID    string
 	Token string
+	// Type is the event type (the abandonment counter's label).
+	Type string
 }
 
 type lane struct {
@@ -46,6 +50,38 @@ type Ledger struct {
 	mu    sync.Mutex
 	path  string
 	lanes map[string]*lane
+	// held is the set of event ids whose lane frontier has not passed them: the
+	// id of an event still listed with an unsettled entry at or before it. It is
+	// derived from lanes (rebuilt on every change and on load), never persisted.
+	held map[string]bool
+}
+
+// rebuildHeldLocked recomputes held from lanes. Caller holds l.mu.
+func (l *Ledger) rebuildHeldLocked() {
+	h := map[string]bool{}
+	for _, x := range l.lanes {
+		blocked := false
+		for _, e := range x.Entries {
+			if !e.Settled {
+				blocked = true
+			}
+			if blocked {
+				h[e.ID] = true
+			}
+		}
+	}
+	l.held = h
+}
+
+// Held reports whether id is listed by a lane whose frontier has not passed it
+// (INV-EVT-3 lane retention): an unsettled entry sits at or before it. An id the
+// ledger does not list (never listed, or dropped by a newer poll because the
+// source's cursor moved past it) is not held. Safe to call under the queue lock:
+// the ledger never calls back into the queue.
+func (l *Ledger) Held(id string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.held[id]
 }
 
 func laneKey(query, laneName string) string { return query + "\x00" + laneName }
@@ -53,7 +89,7 @@ func laneKey(query, laneName string) string { return query + "\x00" + laneName }
 // OpenLedger loads the ledger persisted at path (a missing file is an empty
 // ledger). An empty path gives an in-memory ledger.
 func OpenLedger(path string) (*Ledger, error) {
-	l := &Ledger{path: path, lanes: map[string]*lane{}}
+	l := &Ledger{path: path, lanes: map[string]*lane{}, held: map[string]bool{}}
 	if path == "" {
 		return l, nil
 	}
@@ -71,6 +107,7 @@ func OpenLedger(path string) (*Ledger, error) {
 	for _, x := range ls {
 		l.lanes[laneKey(x.Query, x.Lane)] = x
 	}
+	l.rebuildHeldLocked()
 	return l, nil
 }
 
@@ -138,13 +175,14 @@ func (l *Ledger) Poll(query, laneName string, items []Item, now time.Time) error
 			continue // a duplicate id in one poll is one event
 		}
 		seen[it.ID] = true
-		e := Entry{ID: it.ID, Token: it.Token, FirstSeen: now}
+		e := Entry{ID: it.ID, Token: it.Token, FirstSeen: now, Type: it.Type}
 		if o, ok := old[it.ID]; ok {
 			e.FirstSeen, e.Settled = o.FirstSeen, o.Settled
 		}
 		entries = append(entries, e)
 	}
 	l.lanes[k] = &lane{Query: query, Lane: laneName, Entries: entries}
+	l.rebuildHeldLocked()
 	return l.saveLocked()
 }
 
@@ -165,6 +203,7 @@ func (l *Ledger) MarkSettled(id string) (bool, error) {
 	if !changed {
 		return false, nil
 	}
+	l.rebuildHeldLocked()
 	return true, l.saveLocked()
 }
 
@@ -242,4 +281,72 @@ func (l *Ledger) Entries(query, laneName string) []Entry {
 		return nil
 	}
 	return append([]Entry(nil), x.Entries...)
+}
+
+// Abandoned is one event the hold limit gave up on.
+type Abandoned struct {
+	ID   string
+	Type string
+}
+
+// Abandon settles, for the frontier, every unsettled entry of the lane first
+// seen more than limit before now (the hold limit: measured from the first
+// moment the core saw the id on the lane, whether it was ingested or refused at
+// ingest). It returns the entries abandoned, in list order. Every over-limit
+// entry is abandoned in one call; each remaining one keeps its own age.
+func (l *Ledger) Abandon(query, laneName string, limit time.Duration, now time.Time) ([]Abandoned, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	x := l.lanes[laneKey(query, laneName)]
+	if x == nil {
+		return nil, nil
+	}
+	var out []Abandoned
+	for i := range x.Entries {
+		e := &x.Entries[i]
+		if !e.Settled && now.Sub(e.FirstSeen) > limit {
+			e.Settled = true
+			out = append(out, Abandoned{ID: e.ID, Type: e.Type})
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	l.rebuildHeldLocked()
+	return out, l.saveLocked()
+}
+
+// LaneAge is the age of the oldest unsettled event of one lane.
+type LaneAge struct {
+	Query string
+	Lane  string
+	// Age is zero when the lane has no unsettled event.
+	Age time.Duration
+}
+
+// Ages reports, for every lane, the age (now minus first-seen) of its oldest
+// unsettled event.
+func (l *Ledger) Ages(now time.Time) []LaneAge {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]LaneAge, 0, len(l.lanes))
+	for _, x := range l.lanes {
+		var age time.Duration
+		for _, e := range x.Entries {
+			if e.Settled {
+				continue
+			}
+			if a := now.Sub(e.FirstSeen); a > age {
+				age = a
+			}
+		}
+		out = append(out, LaneAge{Query: x.Query, Lane: x.Lane, Age: age})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Query != out[j].Query {
+			return out[i].Query < out[j].Query
+		}
+		return out[i].Lane < out[j].Lane
+	})
+	return out
 }
