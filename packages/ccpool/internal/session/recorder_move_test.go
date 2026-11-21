@@ -16,6 +16,8 @@ type feedTranscript struct {
 	fakeTranscript
 	appeared bool
 	markErr  error
+	// markBlocks makes Mark wait for its context, like a recorder that never answers.
+	markBlocks bool
 	// markErrAfter, when set, fails every Mark after the first (the post-window probe).
 	markErrAfter error
 	waitErr      error
@@ -24,7 +26,11 @@ type feedTranscript struct {
 	marked       *bool
 }
 
-func (f feedTranscript) Mark(context.Context) (string, error) {
+func (f feedTranscript) Mark(ctx context.Context) (string, error) {
+	if f.markBlocks {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
 	if f.marked != nil {
 		*f.marked = true
 	}
@@ -262,5 +268,26 @@ func TestSend_confirmIngest_hookActivityBeatsAnEmptyFeed(t *testing.T) {
 				t.Fatalf("SendWithConfirm = %v; want nil (a hook fired after delivery)", err)
 			}
 		})
+	}
+}
+
+// A recorder that never answers the pre-delivery Mark must not hold delivery
+// past the short Mark budget: the prompt is delivered and the verdict is unknown.
+func TestSend_confirmIngest_blockedMarkDeliversWithinTheMarkBudget(t *testing.T) {
+	old := markBudget
+	markBudget = 50 * time.Millisecond
+	t.Cleanup(func() { markBudget = old })
+	tm := &sendTmux{live: true}
+	s := feedService(t, feedTranscript{markBlocks: true}, tm)
+	start := time.Now()
+	_, err := s.SendWithConfirm(context.Background(), "a", "do it", ModeNoWait, time.Second)
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("SendWithConfirm took %s with the recorder down; the Mark budget is 50ms", took)
+	}
+	if !errors.Is(err, ErrIngestUnknown) {
+		t.Fatalf("err = %v; want ErrIngestUnknown", err)
+	}
+	if len(tm.pasted) != 1 {
+		t.Errorf("pasted = %q; want the prompt delivered once", tm.pasted)
 	}
 }

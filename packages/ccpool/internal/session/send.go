@@ -48,6 +48,20 @@ func (s *Service) Send(ctx context.Context, externalID, prompt string, mode Mode
 // window, not the poll granularity.
 const confirmIngestPoll = 250 * time.Millisecond
 
+// markBudget is the longest a feed-position Mark (before delivery, or the probe
+// after a silent window) may take. The recorder is only the witness, so a Mark
+// is best-effort: a dead recorder must not delay delivery by the recorder
+// client's full retry budget. It is a variable so a test can shorten it.
+var markBudget = 5 * time.Second
+
+// markBounded takes the feed position within markBudget (or the caller's earlier
+// deadline).
+func markBounded(ctx context.Context, fw FeedWaiter) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, markBudget)
+	defer cancel()
+	return fw.Mark(ctx)
+}
+
 // SendWithConfirm is Send with a post-delivery ingestion guard. When window > 0
 // and mode is a fire-and-forget mode (ModeNoWait/ModeQueue), after delivering the
 // prompt it polls the session transcript for a first model turn; if none appears
@@ -70,7 +84,7 @@ func (s *Service) SendWithConfirm(ctx context.Context, externalID, prompt string
 		var markErr error
 		fw, feed := s.d.Transcript.(FeedWaiter)
 		if feed && window > 0 && (mode == ModeNoWait || mode == ModeQueue) {
-			if mark, markErr = fw.Mark(ctx); markErr != nil {
+			if mark, markErr = markBounded(ctx, fw); markErr != nil {
 				feed = false
 			}
 		} else {
@@ -155,7 +169,7 @@ func (s *Service) confirmIngestedFeed(ctx context.Context, fw FeedWaiter, extern
 		// A window that passes with no record proves "not ingested" only if the
 		// recorder is itself answering; a recorder that lags or is down looks the
 		// same. Probe it (a fresh feed position) before giving the verdict.
-		if _, perr := fw.Mark(ctx); perr != nil {
+		if _, perr := markBounded(ctx, fw); perr != nil {
 			return fmt.Errorf("%w: no record within %s and the recorder did not answer afterwards: %v", ErrIngestUnknown, window, perr)
 		}
 		return ErrPromptNotIngested
