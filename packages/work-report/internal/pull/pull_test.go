@@ -1048,3 +1048,92 @@ func TestUnavailableDegradedSourceThatFailsTheRetryEndsDegradedAfterOneRetry(t *
 		t.Errorf("ExitCode = %d CouldNotRun = %v; want 2/false", res.ExitCode(), res.CouldNotRun)
 	}
 }
+
+func commitDoc(truncated bool, enriched bool, summary string) string {
+	labels := []string{"repo:r"}
+	fields := map[string]any{"sha": "abc"}
+	if enriched {
+		labels = append(labels, "branch:main")
+		fields["insertions"], fields["deletions"] = 3, 1
+	}
+	item, _ := json.Marshal(map[string]any{"source": "git", "item": map[string]any{
+		"id": "c1", "kind": "commit", "entity_type": "commit", "entity_id": "abc",
+		"occurred_at": "2026-03-02T10:00:00Z", "summary": summary, "labels": labels, "fields": fields,
+	}})
+	row, _ := json.Marshal(map[string]any{"source": "git", "status": "succeeded", "count": 1, "truncated": truncated})
+	return listDoc([]string{string(row)}, string(item))
+}
+
+func latestCommit(t *testing.T, e *env) store.Entry {
+	t.Helper()
+	es := queryAll(t, e.st)
+	if len(es) != 1 {
+		t.Fatalf("entries = %d; want 1", len(es))
+	}
+	return es[0]
+}
+
+func TestTruncatedPullKeepsEnrichedStoredCopy(t *testing.T) {
+	e := newEnv(t, config.Config{})
+	conn.Use(t, listRoute(commitDoc(false, true, "s"), 0))
+	run(t, e, pull.Opts{})
+	conn.Use(t, listRoute(commitDoc(true, false, "s"), 0))
+	res := run(t, e, pull.Opts{Now: now.Add(time.Hour)})
+	if r := rowsBySource(res)["git"]; r.Count != 0 || r.Unchanged != 1 || r.Status != pull.StatusDegraded {
+		t.Errorf("truncated row = %+v; want degraded, 0 stored, 1 unchanged", r)
+	}
+	if n := len(latestCommit(t, e).Labels); n != 3 {
+		t.Errorf("labels = %d; want the enriched copy kept", n)
+	}
+}
+
+func TestTruncatedPullStillVersionsOtherChanges(t *testing.T) {
+	e := newEnv(t, config.Config{})
+	conn.Use(t, listRoute(commitDoc(false, true, "s"), 0))
+	run(t, e, pull.Opts{})
+	conn.Use(t, listRoute(commitDoc(true, false, "changed"), 0))
+	res := run(t, e, pull.Opts{Now: now.Add(time.Hour)})
+	if r := rowsBySource(res)["git"]; r.Count != 1 {
+		t.Errorf("row = %+v; want a new version", r)
+	}
+	if got := latestCommit(t, e); got.Summary != "changed" {
+		t.Errorf("summary = %q; want changed", got.Summary)
+	}
+}
+
+func TestNonTruncatedPullOverwritesWithEnriched(t *testing.T) {
+	e := newEnv(t, config.Config{})
+	conn.Use(t, listRoute(commitDoc(true, false, "s"), 0))
+	run(t, e, pull.Opts{})
+	conn.Use(t, listRoute(commitDoc(false, true, "s"), 0))
+	res := run(t, e, pull.Opts{Now: now.Add(time.Hour)})
+	if r := rowsBySource(res)["git"]; r.Count != 1 || r.Status != pull.StatusSucceeded {
+		t.Errorf("row = %+v; want one new enriched version", r)
+	}
+	if n := len(latestCommit(t, e).Labels); n != 3 {
+		t.Errorf("labels = %d; want enriched", n)
+	}
+}
+
+func TestNonTruncatedPullStoresUnenrichedOverEnriched(t *testing.T) {
+	e := newEnv(t, config.Config{})
+	conn.Use(t, listRoute(commitDoc(false, true, "s"), 0))
+	run(t, e, pull.Opts{})
+	conn.Use(t, listRoute(commitDoc(false, false, "s"), 0))
+	res := run(t, e, pull.Opts{Now: now.Add(time.Hour)})
+	if r := rowsBySource(res)["git"]; r.Count != 1 {
+		t.Errorf("row = %+v; want a new version (non-truncated pull is unchanged behavior)", r)
+	}
+}
+
+func TestTruncatedFirstSightingStoresUnenriched(t *testing.T) {
+	e := newEnv(t, config.Config{})
+	conn.Use(t, listRoute(commitDoc(true, false, "s"), 0))
+	res := run(t, e, pull.Opts{})
+	if r := rowsBySource(res)["git"]; r.Count != 1 {
+		t.Errorf("row = %+v; want stored", r)
+	}
+	if n := len(latestCommit(t, e).Labels); n != 2 {
+		t.Errorf("labels = %d; want the unenriched item", n)
+	}
+}

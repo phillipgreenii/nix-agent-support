@@ -504,7 +504,13 @@ func (r *run) ingestRow(ctx context.Context, wr wireRow, items []wireItem) Outco
 			row.Rejected++
 			continue
 		}
-		res, err := r.d.Store.Append(ctx, e, r.o.Now)
+		// A truncated source may return commits without enrichment (branch
+		// labels, line counts); never replace an enriched stored copy with it.
+		appendFn := r.d.Store.Append
+		if wr.Truncated {
+			appendFn = r.d.Store.AppendKeepEnriched
+		}
+		res, err := appendFn(ctx, e, r.o.Now)
 		switch {
 		case errors.Is(err, store.ErrLocked):
 			r.lock(err)

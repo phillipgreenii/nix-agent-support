@@ -61,6 +61,14 @@ numbers are legal.
   count), degraded (with a reason, and a count when entries were stored despite it), or disabled
   — never merged into one pass/fail result. A source that stored some entries and rejected others
   for schema reasons (`INV-TYPE-1`) is succeeded, with the rejections reported, not degraded.
+- **`INV-ENRICH-1`** <!-- uuid: 82b310b9-c87d-446f-bf12-119d3b74ca70 --> — A pull reported **truncated** MAY return an
+  entry without the enrichment a complete pull carries (its `branch:` labels and its `insertions`
+  and `deletions` fields). When the latest stored entry for that identifier differs from the
+  returned entry ONLY by carrying that enrichment, the pull MUST keep the stored entry and write
+  no new version (the entry counts as unchanged), so a truncated pull never replaces enriched
+  data with an unenriched copy. An entry that differs in any other way is a new version as usual
+  (`INV-LATEST-1`); an entry seen for the first time is stored as returned; a pull that is not
+  truncated stores what the source returned, enriched or not.
 - **`INV-PLUGIN-1`** <!-- uuid: e4b92fcc-177a-45a6-b270-5d1260d08e43 --> — `INTF-INGEST` is a
   uniform contract: adding a new source instance MUST NOT require a caller-visible change to any
   existing source's behavior. The named source catalog (`INTF-INGEST`) is illustrative of what

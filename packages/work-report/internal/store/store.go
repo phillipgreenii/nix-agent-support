@@ -244,6 +244,74 @@ func contentHash(e Entry, labels []string) (string, error) {
 // The hash is computed here (e.ContentHash is ignored); IngestedAt is set to
 // now. Labels are sorted and de-duplicated before hashing and storing.
 func (s *Store) Append(ctx context.Context, e Entry, now time.Time) (AppendResult, error) {
+	return s.append(ctx, e, now, false)
+}
+
+// AppendKeepEnriched is Append for an entry observed from a truncated pull,
+// where the source may have returned the entry without its enrichment (the
+// "branch:" labels and the insertions and deletions fields). When the latest
+// stored entry for e.ID differs from e ONLY by carrying that enrichment, the
+// stored entry is kept and Unchanged is returned; any other difference, and a
+// first sighting, is appended exactly as Append would.
+func (s *Store) AppendKeepEnriched(ctx context.Context, e Entry, now time.Time) (AppendResult, error) {
+	return s.append(ctx, e, now, true)
+}
+
+// enrichmentFields are the top-level Fields keys a source may omit when its
+// enrichment ran out of time.
+var enrichmentFields = []string{"insertions", "deletions"}
+
+// enrichmentLabelPrefix marks the labels that are enrichment.
+const enrichmentLabelPrefix = "branch:"
+
+// stripEnrichment returns the stored labels and fields without enrichment.
+func stripEnrichment(labels []string, fields string) ([]string, json.RawMessage, error) {
+	kept := make([]string, 0, len(labels))
+	for _, l := range labels {
+		if !strings.HasPrefix(l, enrichmentLabelPrefix) {
+			kept = append(kept, l)
+		}
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(fields), &m); err != nil {
+		// not an object: nothing to strip.
+		return kept, json.RawMessage(fields), nil
+	}
+	for _, k := range enrichmentFields {
+		delete(m, k)
+	}
+	b, err := json.Marshal(m)
+	return kept, b, err
+}
+
+// enrichmentOnly reports whether e (hashed with labels) equals the stored
+// latest row once the stored row's enrichment is removed. A stored row with no
+// enrichment never matches, because then it would differ from e in the very
+// way that made e a new version.
+func enrichmentOnly(e Entry, labels, storedLabels []string, storedFields, storedType, storedSummary, storedURL, storedOccurred string) (bool, error) {
+	kl, kf, err := stripEnrichment(storedLabels, storedFields)
+	if err != nil {
+		return false, err
+	}
+	twin := Entry{
+		Type: storedType, OccurredAt: e.OccurredAt, Summary: storedSummary,
+		URL: storedURL, Fields: kf,
+	}
+	if storedOccurred != formatTime(e.OccurredAt) {
+		return false, nil
+	}
+	want, err := contentHash(twin, normalizeLabels(kl))
+	if err != nil {
+		return false, err
+	}
+	got, err := contentHash(e, labels)
+	if err != nil {
+		return false, err
+	}
+	return want == got, nil
+}
+
+func (s *Store) append(ctx context.Context, e Entry, now time.Time, keepEnriched bool) (AppendResult, error) {
 	if e.ID == "" {
 		return Appended, errors.New("store: append: entry id is empty")
 	}
@@ -274,6 +342,27 @@ func (s *Store) Append(ctx context.Context, e Entry, now time.Time) (AppendResul
 		return Unchanged, nil
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return Appended, fmt.Errorf("store: append %s: %w", e.ID, mapErr(err))
+	case err == nil && keepEnriched:
+		var typ, occurred, summary, url, lj, fj string
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT type, occurred_at, summary, url, labels, fields FROM entry_latest WHERE id = ?`, e.ID,
+		).Scan(&typ, &occurred, &summary, &url, &lj, &fj); err != nil {
+			return Appended, fmt.Errorf("store: append %s: %w", e.ID, mapErr(err))
+		}
+		var stored []string
+		if err := json.Unmarshal([]byte(lj), &stored); err != nil {
+			return Appended, fmt.Errorf("store: append %s: stored labels: %w", e.ID, err)
+		}
+		if typ == e.Type {
+			same, err := enrichmentOnly(e, labels, stored, fj, typ, summary, url, occurred)
+			if err != nil {
+				return Appended, fmt.Errorf("store: append %s: %w", e.ID, err)
+			}
+			if same {
+				return Unchanged, nil
+			}
+		}
 	}
 
 	res, err := tx.ExecContext(ctx,
