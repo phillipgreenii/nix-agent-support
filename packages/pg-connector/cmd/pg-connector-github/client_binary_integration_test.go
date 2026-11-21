@@ -188,8 +188,8 @@ func (r clientResult) errorBody(t *testing.T) scriptout.Error {
 	return *resp.Error
 }
 
-// daemon is an in-process daemon: the real shell, socket server and router.
-type daemon struct {
+// inProcDaemon is an in-process daemon: the real shell, socket server and router.
+type inProcDaemon struct {
 	router *router.Router
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -217,7 +217,7 @@ func (d recordingDispatcher) Dispatch(ctx context.Context, c router.Call) script
 
 // startDaemonAt serves a router with a "list" op (and nothing else) on
 // socketPath, which the caller's config names.
-func startDaemonAt(t *testing.T, stateDir, socketPath string, o daemonOpts) *daemon {
+func startDaemonAt(t *testing.T, stateDir, socketPath string, o daemonOpts) *inProcDaemon {
 	t.Helper()
 	r := router.New(router.Options{Instances: []string{"pr", "ci"}, CheckConfig: func(block json.RawMessage) error {
 		return config.CheckBlock(&config.Config{Path: "/the/daemon/config.json", Hash: "daemon-hash"}, block)
@@ -230,7 +230,7 @@ func startDaemonAt(t *testing.T, stateDir, socketPath string, o daemonOpts) *dae
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	d := &daemon{router: r, cancel: cancel, done: make(chan struct{})}
+	d := &inProcDaemon{router: r, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(d.done)
 		var dispatcher socket.Dispatcher = r
