@@ -116,7 +116,8 @@ categorize`/`feedback_set` ops) landed there too but were retired, along with th
 
 One other set owns elements this set's implementation implements, and the rows below declare them:
 the GitHub backend's own set ([github](github/README.md)). The Jira backend's sibling set
-([jira](jira/README.md)) owns no element cited here. It owns the read-answer provenance
+([jira](jira/README.md)) owns the umbrella-to-backend wire protocol its implementation
+implements (`INTF-JIRA-WIRE`). The GitHub set owns the read-answer provenance
 (`INV-GH-FRESH-8`), the budget governor's hard cap, priority classes, background share and limit
 handling (`INV-GH-BUDGET-1`, `INV-GH-BUDGET-2`, `INV-GH-BUDGET-3`, `INV-GH-BUDGET-5`), and the
 operator verbs that explain and refresh a stale entity and that inspect whether a PR is tracked or watched (`INV-GH-DIAG-2`, `INV-GH-DIAG-3`, `INV-GH-DIAG-4`). The
@@ -164,3 +165,4 @@ implementation has not yet built, one row per gap.
 | `INV-GH-CHG-10`    | a CI change is a change of the PR, logged as a ci_changed row of a watched PR                                                                  | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior/github` | [6fd08ee5-7cc9-4fae-af67-162f7dd0e35c](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/github/invariants.md) |
 | `INV-JIRA-FRESH-2` | show and list are answered from the store, with a local hit when every needed group is inside its window                                       | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior/jira`   | [6fa914d5-f5da-46a6-8787-6f4017431f33](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/jira/invariants.md)   |
 | `INV-JIRA-ERR-1`   | every failure is answered from the parent's seven-value taxonomy and the backend introduces no new code                                        | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior/jira`   | [34336488-2891-4ed9-acd0-cf2412a183d0](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/jira/invariants.md)   |
+| `INTF-JIRA-WIRE`   | the umbrella to Jira-backend wire protocol: one op request in, one result or taxonomy-coded error out                                          | `phillipgreenii-nix-agent-support · packages/pg-connector/docs/behavior/jira`   | [54ddbd8a-b0f4-405e-9c99-188d40d3c423](https://github.com/phillipgreenii/nix-agent-support/blob/main/packages/pg-connector/docs/behavior/jira/interfaces.md)   |
