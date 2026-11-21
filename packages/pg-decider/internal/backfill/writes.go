@@ -211,18 +211,16 @@ func WriteFlipMarker(ctx context.Context, o FlipMarkerOptions) (Marker, error) {
 	if o.BeadsDir != "" {
 		env = append(env, "PG_CONNECTOR_ISSUE_BEADS_DIR="+o.BeadsDir)
 	}
-	res := run(ctx, Call{Name: conn, Args: args, Env: env})
-	if res.StartErr != nil || res.Code != 0 {
-		return m, fmt.Errorf("%w: %s", ErrEpicComment, firstLine(string(res.Stderr)+string(res.Stdout)+errText(res.StartErr)))
+	var stderr []byte
+	spy := func(ctx context.Context, c Call) Result {
+		r := run(ctx, c)
+		stderr = r.Stderr
+		return r
+	}
+	if _, err := connectorClient(spy, conn, "", env).Targeted(ctx, args...); err != nil {
+		return m, fmt.Errorf("%w: %s", ErrEpicComment, firstLine(string(stderr)+err.Error()))
 	}
 	return m, nil
-}
-
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }
 
 // PrintWrites prints the by-timestamp listing: one line per write, the bound first.

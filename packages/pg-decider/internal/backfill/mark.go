@@ -3,11 +3,14 @@ package backfill
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 )
 
 // The marking step of the cutover (PR lane refactor design 6.3, "Tracking and
@@ -94,15 +97,6 @@ type MarkResult struct {
 	CheckError string
 	Line       string
 	Code       int
-}
-
-// markEnvelope is the part of a pg-connector JSON answer the step reads.
-type markEnvelope struct {
-	Result json.RawMessage `json:"result"`
-	Error  *struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
 }
 
 type inspectAnswer struct {
@@ -233,13 +227,12 @@ func MarkWatched(ctx context.Context, o MarkOptions) (*MarkResult, error) {
 		if o.PRBackend != "" {
 			args = append(args, "--backend", o.PRBackend)
 		}
-		cr := o.Runner(ctx, Call{Name: o.Connector, Args: args, Env: o.Env, Dir: o.Dir})
-		code, detail := connectorOutcome(cr)
+		_, code, detail, startErr := o.targeted(ctx, args)
 		switch {
 		case ctx.Err() != nil:
 			stop("interrupted")
-		case cr.StartErr != nil:
-			stop("cannot start " + o.Connector + ": " + firstLine(cr.StartErr.Error()))
+		case startErr != nil:
+			stop("cannot start " + o.Connector + ": " + firstLine(startErr.Error()))
 		case code == "unauthenticated":
 			fail(pr, "mark", detail)
 			stop("unauthenticated: " + pr + " could not be read")
@@ -320,19 +313,18 @@ func (o *MarkOptions) countCheck(ctx context.Context, res *MarkResult, stop func
 		if o.PRBackend != "" {
 			args = append(args, "--backend", o.PRBackend)
 		}
-		cr := o.Runner(ctx, Call{Name: o.Connector, Args: args, Env: o.Env, Dir: o.Dir})
-		if cr.StartErr != nil {
-			stop("cannot start " + o.Connector + ": " + firstLine(cr.StartErr.Error()))
+		out, _, detail, startErr := o.targeted(ctx, args)
+		if startErr != nil {
+			stop("cannot start " + o.Connector + ": " + firstLine(startErr.Error()))
 			return
 		}
-		if _, detail := connectorOutcome(cr); detail != "" {
+		if detail != "" {
 			res.CheckError = "the inspection failed: " + detail
 			return
 		}
-		var env markEnvelope
 		var ans inspectAnswer
-		if err := json.Unmarshal([]byte(cr.Stdout), &env); err != nil || json.Unmarshal(env.Result, &ans) != nil {
-			res.CheckError = "the inspection answer is not readable: " + firstLine(string(cr.Stdout))
+		if json.Unmarshal(out, &ans) != nil {
+			res.CheckError = "the inspection answer is not readable: " + firstLine(string(out))
 			return
 		}
 		res.Watched += ans.Counts.Watched
@@ -351,17 +343,32 @@ func (o *MarkOptions) countCheck(ctx context.Context, res *MarkResult, stop func
 	}
 }
 
-// connectorOutcome reads one pg-connector JSON answer: the error code and a
-// description of the failure, both "" for a success.
-func connectorOutcome(cr Result) (code, detail string) {
-	var env markEnvelope
-	if err := json.Unmarshal([]byte(cr.Stdout), &env); err == nil && env.Error != nil {
-		return env.Error.Code, env.Error.Code + ": " + env.Error.Message
+// targeted runs one single-backend pg-connector verb through the published
+// client. It returns the answer's result on success; on failure it returns the
+// wire error code and a description of the failure (both "" for a success), or
+// the start error when the child never started.
+func (o *MarkOptions) targeted(ctx context.Context, args []string) (result json.RawMessage, code, detail string, startErr error) {
+	var stderr []byte
+	run := func(ctx context.Context, c Call) Result {
+		r := o.Runner(ctx, c)
+		stderr, startErr = r.Stderr, r.StartErr
+		return r
 	}
-	if cr.Code != 0 {
-		return "", fmt.Sprintf("exit %d: %s", cr.Code, firstLine(string(cr.Stderr)+"\n"+string(cr.Stdout)))
+	out, err := connectorClient(run, o.Connector, o.Dir, o.Env).Targeted(ctx, args...)
+	if err == nil {
+		return out, "", "", nil
 	}
-	return "", ""
+	if startErr != nil {
+		return nil, "", "", startErr
+	}
+	var ce *client.Error
+	if !errors.As(err, &ce) {
+		return nil, "", err.Error(), nil
+	}
+	if ce.Code != "" {
+		return nil, ce.Code, ce.Code + ": " + ce.Message, nil
+	}
+	return nil, "", fmt.Sprintf("exit %d: %s", ce.ExitCode, firstLine(string(stderr)+"\n"+ce.Message)), nil
 }
 
 // finishMark renders the last line and picks the exit code.

@@ -177,9 +177,9 @@ func TestSearchJudgment(t *testing.T) {
 			r.Code = 3
 			return r
 		}(), ExitHydrateTransient, false, true},
-		{"exit 2 with a healthy beads row is trusted", func() Result {
+		{"exit 5 (degraded) with a healthy beads row is trusted", func() Result {
 			r := searchAnswer(beadsRow("succeeded", 0)+","+other, "")
-			r.Code = 2
+			r.Code = 5
 			return r
 		}(), ExitHydrateNotFound, true, false},
 	}

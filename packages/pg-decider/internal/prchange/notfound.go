@@ -1,9 +1,13 @@
 package prchange
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+	"github.com/phillipgreenii/x/cmdrun"
 
 	"github.com/phillipgreenii/pg-decider/internal/apply"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
@@ -31,12 +35,29 @@ const beadsDirEnv = "PG_CONNECTOR_ISSUE_BEADS_DIR"
 // that PR's anchor.
 func EscalationTitle(id string) string { return "pr not found: " + id }
 
-func (r *run) connectorCall(args ...string) Result {
-	c := Call{Name: "pg-connector", Args: args}
+// connector runs one pg-connector verb through the published client and the
+// run's Runner; named is the argv the failure line quotes. It returns the verb's raw answer and, when the call failed, a
+// failure line worded from the last child's result.
+func (r *run) connector(args, named []string, verb func(client.Client, []string) (json.RawMessage, error)) (json.RawMessage, string) {
+	var last Result
+	c := client.Client{Run: func(_ context.Context, call cmdrun.Call) cmdrun.Result {
+		last = r.call(call)
+		return last
+	}}
 	if r.o.Config.BeadsDir != "" {
 		c.Env = []string{beadsDirEnv + "=" + r.o.Config.BeadsDir}
 	}
-	return r.call(c)
+	out, err := verb(c, args)
+	if err != nil {
+		return nil, callFailure("pg-connector", named, last)
+	}
+	return out, ""
+}
+
+func (r *run) targeted(args, named []string) (json.RawMessage, string) {
+	return r.connector(args, named, func(c client.Client, a []string) (json.RawMessage, error) {
+		return c.Targeted(r.ctx, a...)
+	})
 }
 
 func (r *run) backendFlag() []string {
@@ -135,31 +156,24 @@ func (r *run) openAnchor() (anchorID string, open bool, class, detail string) {
 		return "", false, "", ""
 	}
 	args := append([]string{"issue", "show", a.ID, "--fresh"}, r.backendFlag()...)
-	live := r.connectorCall(args...)
-	if live.StartErr != nil || signaled(live) || live.Code != 0 {
-		return "", false, ClassTransient, callFailure("pg-connector", args, live)
+	live, failure := r.targeted(args, args)
+	if failure != "" {
+		return "", false, ClassTransient, failure
 	}
-	var w struct {
-		Result struct {
-			State string `json:"state"`
-		} `json:"result"`
+	var st struct {
+		State string `json:"state"`
 	}
-	if err := json.Unmarshal(live.Stdout, &w); err != nil || w.Result.State == "" {
+	if err := json.Unmarshal(live, &st); err != nil || st.State == "" {
 		return "", false, ClassTransient, fmt.Sprintf("pg-connector %s answered no state for the anchor", strings.Join(args, " "))
 	}
-	return a.ID, !strings.EqualFold(w.Result.State, "closed"), "", ""
+	return a.ID, !strings.EqualFold(st.State, "closed"), "", ""
 }
 
-type searchSource struct {
-	Source string `json:"source"`
-	Status string `json:"status"`
-	Count  int    `json:"count"`
-	Reason string `json:"reason"`
-}
-
+// searchOutcome is `pg-connector search`'s answer: the published per-source
+// rows and the hit groups (the client holds no search type).
 type searchOutcome struct {
-	Sources []searchSource `json:"sources"`
-	Groups  []struct {
+	client.FanOutOutcome
+	Groups []struct {
 		Source  string `json:"source"`
 		Results []struct {
 			ID     string `json:"id"`
@@ -180,15 +194,18 @@ type searchOutcome struct {
 // equals the escalation's title exactly.
 func (r *run) findEscalation(title string) (id string, found bool, class, detail string) {
 	args := []string{"search", title}
-	res := r.connectorCall(args...)
-	if res.StartErr != nil || signaled(res) {
-		return "", false, ClassTransient, callFailure("pg-connector", args, res)
+	// search prints its outcome on exit 0 (all healthy) and 5 (some degraded);
+	// the rows say which. Any other exit (none healthy included) is a failure,
+	// which is also a transient class.
+	raw, failure := r.connector(args, args, func(c client.Client, a []string) (json.RawMessage, error) {
+		return c.FanOutStdout(r.ctx, a...)
+	})
+	if failure != "" {
+		return "", false, ClassTransient, failure
 	}
-	// search prints its outcome on exit 0 (all healthy), 2 (some degraded) and 3
-	// (none healthy); the rows say which, so the exit code is not read.
 	var out searchOutcome
-	if err := json.Unmarshal(res.Stdout, &out); err != nil {
-		return "", false, ClassTransient, callFailure("pg-connector", args, res)
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", false, ClassTransient, fmt.Sprintf("pg-connector %s: the answer is not readable: %s", strings.Join(args, " "), firstLine(string(raw)))
 	}
 	beads := 0
 	for _, s := range out.Sources {
@@ -197,7 +214,7 @@ func (r *run) findEscalation(title string) (id string, found bool, class, detail
 		}
 		beads++
 		switch {
-		case s.Status != "succeeded":
+		case s.Status != client.SourceSucceeded:
 			return "", false, ClassTransient, fmt.Sprintf("the search of %s is %s (%s), so the lookup cannot be trusted", s.Source, s.Status, s.Reason)
 		case s.Count >= SearchCap:
 			return "", false, ClassTransient, fmt.Sprintf("the search of %s reached its %d-hit cap, so the escalation could be in the part cut off", s.Source, SearchCap)
@@ -230,17 +247,15 @@ func (r *run) createEscalation(title, anchorID, refreshDetail string) (id, class
 		"--labels", strings.Join(apply.MintedBy([]string{"human"}), ","), "--parent", anchorID,
 	}
 	args = append(args, r.backendFlag()...)
-	res := r.connectorCall(args...)
-	if res.StartErr != nil || signaled(res) || res.Code != 0 {
-		return "", ClassTransient, callFailure("pg-connector", args[:2], res)
+	res, failure := r.targeted(args, args[:2])
+	if failure != "" {
+		return "", ClassTransient, failure
 	}
-	var w struct {
-		Result struct {
-			ID string `json:"id"`
-		} `json:"result"`
+	var created struct {
+		ID string `json:"id"`
 	}
-	if err := json.Unmarshal(res.Stdout, &w); err != nil || w.Result.ID == "" {
+	if err := json.Unmarshal(res, &created); err != nil || created.ID == "" {
 		return "", ClassTransient, "pg-connector issue create returned no id"
 	}
-	return w.Result.ID, "", ""
+	return created.ID, "", ""
 }

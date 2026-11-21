@@ -114,7 +114,10 @@ func TestTheFlipMarkerAcceptsAnExplicitTimeEarlierThanItsWritingTime(t *testing.
 func TestTheFlipMarkerCommentsOnTheEpicBeadAndTheRunRecordIsAuthoritative(t *testing.T) {
 	p := tmpRecord(t)
 	var calls []Call
-	run := func(_ context.Context, c Call) Result { calls = append(calls, c); return Result{} }
+	run := func(_ context.Context, c Call) Result {
+		calls = append(calls, c)
+		return Result{Stdout: []byte(`{"result":{}}`)}
+	}
 	_, err := WriteFlipMarker(context.Background(), FlipMarkerOptions{RunRecord: p, EpicBead: "pg2-6mo45", Backend: "pg2", BeadsDir: "/w/pg2", Runner: run})
 	if err != nil {
 		t.Fatal(err)

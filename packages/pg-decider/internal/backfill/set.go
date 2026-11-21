@@ -12,6 +12,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // SetContract identifies the shape and version of the persisted backfill set.
@@ -226,12 +229,10 @@ func Enumerate(ctx context.Context, o EnumerateOptions) (*Set, error) {
 	if o.Now != nil {
 		now = o.Now
 	}
-	call := func(env []string, args ...string) (Result, error) {
-		res := run(ctx, Call{Name: conn, Args: args, Env: append(append([]string{}, o.Env...), env...), Dir: o.Dir})
-		if res.StartErr != nil {
-			return res, fmt.Errorf("cannot start %s: %w", conn, res.StartErr)
-		}
-		return res, nil
+	call := func(env []string, args ...string) (json.RawMessage, error) {
+		c := connectorClient(run, conn, o.Dir, append(append([]string{}, o.Env...), env...))
+		out, err := c.FanOutStdout(ctx, args...)
+		return out, connectorErr(conn, err)
 	}
 
 	s := &Set{
@@ -265,17 +266,7 @@ func Enumerate(ctx context.Context, o EnumerateOptions) (*Set, error) {
 	if err != nil {
 		return nil, err
 	}
-	var issues struct {
-		Entities []struct {
-			ID        string            `json:"id"`
-			Title     string            `json:"title"`
-			State     string            `json:"state"`
-			IssueType string            `json:"issue_type"`
-			Metadata  map[string]string `json:"metadata"`
-		} `json:"entities"`
-		Sources   []sourceRow `json:"sources"`
-		Truncated bool        `json:"truncated"`
-	}
+	var issues client.ListOutcome[anchorEntity]
 	if err := decodeListing(res, "issue list --query "+o.AnchorsQuery, &issues); err != nil {
 		return nil, err
 	}
@@ -315,11 +306,7 @@ func Enumerate(ctx context.Context, o EnumerateOptions) (*Set, error) {
 		if err != nil {
 			return nil, err
 		}
-		var prs struct {
-			PresentIDs []string    `json:"present_ids"`
-			Sources    []sourceRow `json:"sources"`
-			Truncated  bool        `json:"truncated"`
-		}
+		var prs client.ListOutcome[json.RawMessage]
 		if err := decodeListing(res, "pr list --query "+name, &prs); err != nil {
 			return nil, err
 		}
@@ -378,31 +365,56 @@ func containsStr(xs []string, s string) bool {
 	return false
 }
 
-type sourceRow struct {
-	Source string `json:"source"`
-	Status string `json:"status"`
-	Reason string `json:"reason"`
+// anchorEntity is the part of a tracker issue the enumeration reads.
+type anchorEntity struct {
+	ID        string            `json:"id"`
+	Title     string            `json:"title"`
+	State     string            `json:"state"`
+	IssueType string            `json:"issue_type"`
+	Metadata  map[string]string `json:"metadata"`
 }
 
-// decodeListing reads a connector listing. A listing whose stdout is not JSON, or
-// whose exit code is non-zero with no usable sources, is an error carrying the
-// connector's own words.
-func decodeListing(res Result, what string, into any) error {
-	if err := json.Unmarshal([]byte(res.Stdout), into); err != nil {
-		return fmt.Errorf("pg-connector %s: exit %d and no readable answer: %s", what, res.Code, firstLine(string(res.Stderr)+string(res.Stdout)))
+// connectorClient is the published pg-connector client running through run in
+// dir with env added to the call's environment.
+func connectorClient(run Runner, conn, dir string, env []string) client.Client {
+	return client.Client{
+		Binary: conn,
+		Env:    env,
+		Run: func(ctx context.Context, c cmdrun.Call) cmdrun.Result {
+			c.Dir = dir
+			return run(ctx, c)
+		},
+	}
+}
+
+// connectorErr words a client failure for this package: a child that never
+// started names the program, any other failure is the client's own error.
+func connectorErr(conn string, err error) error {
+	var ce *client.Error
+	if errors.As(err, &ce) && ce.ExitCode == -1 && ce.Cause != nil {
+		return fmt.Errorf("cannot start %s: %w", conn, ce.Cause)
+	}
+	return err
+}
+
+// decodeListing reads a connector listing's stdout. A listing whose stdout is
+// not JSON is an error carrying what the connector printed.
+func decodeListing(out json.RawMessage, what string, into any) error {
+	if err := json.Unmarshal(out, into); err != nil {
+		return fmt.Errorf("pg-connector %s: no readable answer: %s", what, firstLine(string(out)))
 	}
 	return nil
 }
 
 // checkSources fails closed unless at least one source succeeded, none degraded,
 // and the listing was not truncated: a partial listing is never a backfill set.
-func checkSources(what string, rows []sourceRow, truncated bool) error {
+func checkSources(what string, rows []client.SourceResult, truncated bool) error {
 	ok := 0
 	for _, r := range rows {
 		switch r.Status {
-		case "succeeded":
+		case client.SourceSucceeded:
 			ok++
-		case "disabled":
+		case client.SourceDisabled:
 		default:
 			return fmt.Errorf("pg-connector %s: source %s is %s (%s): the listing is incomplete", what, r.Source, r.Status, r.Reason)
 		}
