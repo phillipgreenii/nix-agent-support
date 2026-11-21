@@ -14,7 +14,11 @@ setup() {
 @test "land recipe names the repo with --repo" {
   grep -qF 'pg-git-lander land <branch> --repo <repo-root> --source-worktree <worktree> --json' "$SKILL"
   grep -qF -- '--wait 20m' "$SKILL"
-  grep -qF 'pg-git-lander land "$FB" --repo "$CC" --source-worktree "$WT" --wait 20m --json' "$SKILL"
+  grep -qF 'bgrun pgl-land-<repo-name>-<branch-slug> -- pg-git-lander land <branch> --repo <CC-literal-path> --source-worktree <WT-literal-path> --wait 20m --json' "$SKILL"
+  grep -qF 'bgwait pgl-land-<repo-name>-<branch-slug> --timeout 540' "$SKILL"
+  grep -qF '**Literal paths only.**' "$SKILL"
+  if grep -qF 'OLD_PRIMARY=$(' "$SKILL"; then return 1; fi
+  if grep -qF 'bgrun "pgl-land-$(basename' "$SKILL"; then return 1; fi
   grep -qF 'pg-git-lander land FB --repo CC --source-worktree WT --wait 20m --json' "$SKILL"
 }
 

@@ -95,10 +95,31 @@ in the foreground and never polling with `sleep`, `date`, `tail` or repeated
 `bgcheck`:
 
 ```bash
-OLD_PRIMARY=$(git -C "$CC" rev-parse "$PRIMARY")
-bgrun "pgl-land-$(basename "$CC")-$FB" -- pg-git-lander land "$FB" --repo "$CC" --source-worktree "$WT" --wait 20m --json
-bgwait "pgl-land-$(basename "$CC")-$FB" --timeout 540   # Bash timeout: 600000; exit 2 = still running, call it again
+git -C <CC-literal-path> rev-parse <PRIMARY>
 ```
+
+Keep that tip as `OLD_PRIMARY`, then start the land, one command per Bash call:
+
+```bash
+bgrun pgl-land-<repo-name>-<branch-slug> -- pg-git-lander land <branch> --repo <CC-literal-path> --source-worktree <WT-literal-path> --wait 20m --json
+```
+
+```bash
+bgwait pgl-land-<repo-name>-<branch-slug> --timeout 540
+```
+
+(Bash `timeout: 600000` on the `bgwait`; exit 2 = still running, call it again.)
+
+**Literal paths only.** Every command above MUST be a single bare command whose
+arguments are literal text: the caller MUST substitute the real absolute paths,
+branch and job name before issuing it, with no `VAR=` prefix, no `;` or `&&`
+chain, no variable expansion (`"$CC"`) and no command substitution
+(`$(basename ...)`) in the command text. A `dontAsk` session has no allowlist
+match for such a compound (the approver returns no verdict and the role grant
+`Bash(bgrun:*)` matches only a command that starts with `bgrun`), so it rejects
+the call and the finished work gets escalated instead of landed. The `"$CC"`,
+`"$WT"` and `"$FB"` shorthands elsewhere in this document are notation for the
+literal values, not text to type.
 
 `bgwait` prints `DONE exit=<N>` (the true exit code of the tool) and the log tail,
 which holds the outcome JSON. Branch on the exit code and the outcome, never on

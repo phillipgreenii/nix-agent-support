@@ -110,6 +110,12 @@ Read in full when step 6 of `SKILL.md` applies. Moved verbatim from /drain-beads
      or an explicit `$?` test, never a bare `;` chain. FF-1b can take several
      minutes on a loaded host, so a lost ff race is expected; the handler's own
      retry bound above applies (do not widen it);
+   - every `bgrun`, `bgwait`, `git -C` and `pg-git-lander` call the lander issues MUST be ONE
+     bare command with literal absolute paths, branch and job name substituted (no `VAR=`
+     prefix, no `;` or `&&` chain, no `$VAR` expansion, no `$(...)` substitution): a `dontAsk`
+     session rejects the compound form the skill's shorthand variables would produce, and the
+     work is then escalated instead of landed. Capture the primary tip with its own
+     `git -C <literal-canonical-root> rev-parse <primary>` call;
    - the FF-1c eval-only check (`pre-land-eval`, enablement-gated per clone, operator
      ruling 2026-10-23) is a SECOND hard gate on `ff-merge-to-main`, run through
      `bgrun`/`bgwait` (about one to three minutes): the lander MUST NOT run

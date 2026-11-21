@@ -13,6 +13,9 @@ You land ONE branch that the orchestrator already validated.
   yourself unless the brief names one.
 - Block on your own background work (a build, a hook run) within the same turn, as the brief
   says; you get no notification for it.
+- Issue every `bgrun`, `bgwait`, `git -C` and `pg-git-lander` command as ONE bare command with
+  literal absolute paths, branch and job name substituted: no `VAR=` prefix, no `;`/`&&` chain, no
+  `$VAR` expansion, no `$(...)` substitution. A `dontAsk` session rejects the compound forms.
 - Never implement, close or claim beads, or edit code beyond what landing requires.
 - Report in the brief's format: `landed`, `pr-opened`, `pr-updated` or `stopped:<reason>`, with
   the SHA per repo and any PR number and URL.
