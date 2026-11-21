@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/item"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/settle"
 )
 
 // DispatchContext is one (role, item) dispatch, DERIVED from an event.Event at
@@ -632,6 +633,14 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 		return runLevelSource(ctx, env, s, lv, obs, activityObs, rpt, now)
 	}
 	rpt.LastTick[s.Name] = now()
+	// A cursor-feed source (a query that declares settle) has its settlement
+	// frontier re-evaluated on EVERY trigger of the query, success or failure:
+	// that is where a failed report is retried.
+	_, _, hasSettle := query.SettleOf(s.Query)
+	useAck := hasSettle && env.Settler != nil
+	if useAck {
+		defer env.Settler.Evaluate(s.Name)
+	}
 	fb := s.Query.FailureBackoff()
 	var evts []event.Event
 	var err error
@@ -714,12 +723,20 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			return fmt.Errorf("produce %s: %w", s.Name, serr)
 		}
 	}
+	if useAck {
+		recordAckPoll(env.Settler, s.Name, evts, now())
+	}
 	for _, e := range evts {
 		if !declared.Declares(e.Type) {
 			rpt.Rejected[s.Name]++
 			continue
 		}
-		if _, err := q.Enqueue(ToQueueEvent(e)); err != nil {
+		qe := ToQueueEvent(e)
+		ackHeld := useAck && e.Ack != nil
+		if ackHeld {
+			qe.AckLane, qe.AckToken = e.Ack.Lane, e.Ack.Token
+		}
+		if _, err := q.Enqueue(qe); err != nil {
 			if _, refused := eventqueue.RejectReason(err); refused {
 				// The log is at its hard limit or unwritable (bead pg2-5d3ui): the
 				// event was NOT queued and the queue told its RejectObserver. This
@@ -735,6 +752,15 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			return fmt.Errorf("enqueue %s: %w", s.Name, err)
 		}
 		rpt.Emitted[s.Name]++
+		if ackHeld && q.AckSettled(e.ID) {
+			// Nothing is owed to it already (no handler matches, or an
+			// earlier delivery was fully accepted): settled.
+			// Mark only; the deferred frontier evaluation reports once for the
+			// whole reply.
+			if _, merr := env.Settler.Ledger().MarkSettled(e.ID); merr != nil {
+				slog.Error("discover: persisting the settlement ledger failed", "source", s.Name, "err", merr)
+			}
+		}
 	}
 	if activityObs != nil {
 		activityObs.OnSourceProduced(s.Name, rpt.Emitted[s.Name], rpt.Rejected[s.Name])
@@ -768,4 +794,29 @@ func QueriesForRole(sources query.SourceSet, role roles.Role) query.SourceSet {
 		}
 	}
 	return out
+}
+
+// recordAckPoll replaces the ledger list of every lane the successful reply
+// named, each in emission order. Every listed event is unsettled until proven
+// otherwise, including one the core goes on to refuse at ingest, so the
+// frontier can neither pass it nor lose it. A lane the reply did not name is
+// not polled (its list is kept), and so is a reply of events without a usable
+// ack: an ack that is not an object of two non-empty strings never reaches here.
+func recordAckPoll(st *settle.Settler, source string, evts []event.Event, now time.Time) {
+	byLane := map[string][]settle.Item{}
+	var order []string
+	for _, e := range evts {
+		if e.Ack == nil {
+			continue
+		}
+		if _, ok := byLane[e.Ack.Lane]; !ok {
+			order = append(order, e.Ack.Lane)
+		}
+		byLane[e.Ack.Lane] = append(byLane[e.Ack.Lane], settle.Item{ID: e.ID, Token: e.Ack.Token})
+	}
+	for _, lane := range order {
+		if err := st.Ledger().Poll(source, lane, byLane[lane], now); err != nil {
+			slog.Error("discover: persisting the settlement ledger failed", "source", source, "lane", lane, "err", err)
+		}
+	}
 }

@@ -442,6 +442,8 @@ type depthCell struct {
 // Queue is the durable, ordered, de-duped, retention-bounded event queue
 // (ADR 0031, expiry bound amended by DEC-EVENT-1). It is safe for concurrent use.
 type Queue struct {
+	// acceptHook is WithAcceptHook's callback; nil when unset.
+	acceptHook func(eventID string)
 	// mu guards every mutable field below.
 	//
 	// LOCK-ORDER INVARIANT (Task 2.3, pg2-84o3m.22; review-digest perf-F11):
@@ -617,6 +619,36 @@ func WithClock(now func() time.Time) Option { return func(q *Queue) { q.now = no
 // time.After caused under a mock clock).
 func WithSleeper(after func(time.Duration) <-chan time.Time) Option {
 	return func(q *Queue) { q.after = after }
+}
+
+// WithAcceptHook registers fn to be called (outside q.mu) with the id of an
+// event that carries an ack handle each time an accept completes that event's
+// settlement: every listener that matches it has accepted it. It is the queue's
+// half of the settlement report; fn MUST NOT block.
+func WithAcceptHook(fn func(eventID string)) Option { return func(q *Queue) { q.acceptHook = fn } }
+
+// ackSettledLocked reports whether nothing more is owed to e for the settlement
+// report: every currently-bound listener that matches it has accepted it (an
+// event no listener matches is vacuously settled, INV-DISP-3). An event that
+// expired with a matching listener never having accepted it is NOT settled.
+// Caller holds q.mu.
+func (q *Queue) ackSettledLocked(e *entry) bool {
+	for _, ls := range q.listeners {
+		if ls.l.Matches(e.evt) && !e.accepted[ls.l.ID()] {
+			return false
+		}
+	}
+	return true
+}
+
+// AckSettled reports whether the retained event id is settled for the
+// settlement report (see ackSettledLocked). An id the queue no longer holds, or
+// never held (an event refused at ingest), reports false.
+func (q *Queue) AckSettled(id string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e, ok := q.entries[id]
+	return ok && q.ackSettledLocked(e)
 }
 
 // WithObserver installs a metrics Observer (INV-OBS-1).
@@ -1176,6 +1208,9 @@ type dispatchSignal struct {
 	// timing is the accepted dispatch's timeline (signalAccept only; bead
 	// pg2-n7da9), delivered to a TimingObserver right after OnAccept.
 	timing DispatchTiming
+	// ackSettled is true when the accepted event carries an ack handle and this
+	// accept completed its settlement (every matching listener accepted).
+	ackSettled bool
 }
 
 // fanOut delivers each queued signal to q.obs, in the order phase 3 recorded
@@ -1186,6 +1221,9 @@ func (q *Queue) fanOut(sigs []dispatchSignal) {
 		switch s.kind {
 		case signalAccept:
 			q.obs.OnAccept(s.eventID, s.listener)
+			if s.ackSettled && q.acceptHook != nil {
+				q.acceptHook(s.eventID)
+			}
 			if to, ok := q.obs.(TimingObserver); ok {
 				to.OnAcceptTiming(s.timing)
 			}
@@ -1569,7 +1607,7 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 	*signals = append(*signals, dispatchSignal{kind: signalAccept, eventID: p.evt.ID, listener: lid, timing: DispatchTiming{
 		EventID: p.evt.ID, EventType: p.evt.Type, ListenerID: lid,
 		EnqueuedAt: p.evt.At, StartedAt: startedAt, SettledAt: settledAt,
-	}})
+	}, ackSettled: e.evt.AckLane != "" && q.ackSettledLocked(e)})
 	rec, didEvict := q.maybeEvict(e)
 	return rec, didEvict, true
 }

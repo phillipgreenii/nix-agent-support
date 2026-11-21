@@ -37,6 +37,17 @@ type Event struct {
 	Source     string         // emitting query name (provenance / observability)
 	EmittedAt  time.Time      // for TTL (Q4) and ordering
 	Attributes map[string]any // extra, type-specific fields for trigger strategies
+	// Ack is the OPTIONAL acknowledgement handle a cursor-feed source stamps on
+	// an event: opaque lane and token strings the core never interprets. Nil for
+	// every event without one.
+	Ack *Ack
+}
+
+// Ack is a source's handle for the settlement report: the lane (one independent
+// ordered feed of a query) and the token (the event's position in it).
+type Ack struct {
+	Lane  string
+	Token string
 }
 
 // FingerprintID derives the stable dedup id for an item-carrying event

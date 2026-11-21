@@ -26,6 +26,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/orchestrator"
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/settle"
 
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
@@ -317,7 +318,33 @@ func BootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	levelProjRef.Store(levelProj)
 	// The pull observer counts pulls and failures per sensor.
 	o.LevelPullObserver = emitter
-	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithLevelSource(levelProj.Snapshot), eventqueue.WithRegistry(cfg.Resources.Registry()), eventqueue.WithStartStagger(cfg.Levels.StartStagger), eventqueue.WithLevelObserver(emitter),
+	// Settlement report of cursor-feed sources: only built when some query
+	// declares settle, so a deployment without one writes no ledger file.
+	var settler *settle.Settler
+	for _, src := range cfg.Queries {
+		if _, _, ok := query.SettleOf(src.Query); ok {
+			ledger, lerr := settle.OpenLedger(filepath.Join(cfg.LogDir, "ack-ledger.json"))
+			if lerr != nil {
+				_ = store.Close()
+				return nil, nil, nil, nil, fmt.Errorf("open settlement ledger: %w", lerr)
+			}
+			settler = settle.NewSettler(ctx, ledger, func(rctx context.Context, qname, lane, token string) error {
+				for _, s := range cfg.Queries {
+					if s.Name == qname {
+						return query.RunSettle(rctx, query.Env{RepoRoot: o.Cfg.RepoRoot, Cmd: o.Cmd}, s.Query, lane, token)
+					}
+				}
+				return fmt.Errorf("settle: unknown query %q", qname)
+			}, emitter.OnSettleFailure)
+			o.Settler = settler
+			break
+		}
+	}
+	var ackHook eventqueue.Option = func(*eventqueue.Queue) {}
+	if settler != nil {
+		ackHook = eventqueue.WithAcceptHook(settler.OnEventSettled)
+	}
+	q, err = eventqueue.New(store, ackHook, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithEarlyEvictionTypes(cfg.EarlyEvictionTypes...), eventqueue.WithLevelSource(levelProj.Snapshot), eventqueue.WithRegistry(cfg.Resources.Registry()), eventqueue.WithStartStagger(cfg.Levels.StartStagger), eventqueue.WithLevelObserver(emitter),
 		// Compact queue.jsonl down to live state: once at startup (before the queue
 		// replays it or accepts an event) and, at runtime, whenever it outgrows
 		// cfg.CompactThresholdBytes (bead pg2-8e0m6).
@@ -458,6 +485,11 @@ func BootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// Every role's compiled requirement, and each polled query's consumers, go to
 	// the queue's level admission.
 	o.RegisterLevels(q)
+	// Rebuild each cursor-feed lane's settlement from the durable queue and
+	// ledger and re-send the report; every listener is registered by now.
+	if settler != nil {
+		settler.Restart(q.AckSettled)
+	}
 	// The queue is built and every enabled role is registered: from the next
 	// collect the queue-bound gauges report (see queueRef above).
 	queueRef.Store(q)

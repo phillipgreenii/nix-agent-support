@@ -234,6 +234,12 @@ type queryTOML struct {
 	// for a git-credential sensor). Absent: the process gets the base
 	// environment only, never the router's own.
 	EnvAllow []string `toml:"env_allow"`
+	// Settle is a cursor-feed source's settle command (argv), run as the query's
+	// own command is with --lane/--through appended. AckHoldLimit bounds how long
+	// the core holds a lane's frontier behind an unsettled event (default 24h,
+	// must be > 0, and is rejected on a query that declares no settle).
+	Settle       []string  `toml:"settle"`
+	AckHoldLimit *duration `toml:"ack_hold_limit"`
 	// Metadata is a timer query's static metadata, copied unchanged into every
 	// tick's item. Decoded as any so a non-string value is reported by our own
 	// error, not the TOML decoder's.
@@ -831,6 +837,10 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	if qt.LevelSource != "" && qt.Type != "command" {
 		return nil, fmt.Errorf("level_source applies only to a command query; a %q query cannot answer with level records", qt.Type)
 	}
+	ackHold, err := buildAckSettle(qt)
+	if err != nil {
+		return nil, err
+	}
 	tmeta, err := buildTimerMetadata(qt)
 	if err != nil {
 		return nil, err
@@ -845,6 +855,8 @@ func (r *Registry) buildQuery(md toml.MetaData, qt queryTOML, c Config) (query.Q
 	}
 	if cq, ok := q.(query.CommandQuery); ok {
 		cq.EnvAllow = append([]string(nil), qt.EnvAllow...)
+		cq.Settle = append([]string(nil), qt.Settle...)
+		cq.AckHoldLimit = ackHold
 		return cq, nil
 	}
 	return q, nil
@@ -975,4 +987,37 @@ func checkUndecodedKeys(md toml.MetaData, tables ...string) error {
 		return fmt.Errorf("unknown key(s) %s", strings.Join(bad, ", "))
 	}
 	return nil
+}
+
+// DefaultAckHoldLimit is the hold limit of a query that declares settle and no
+// ack_hold_limit.
+const DefaultAckHoldLimit = 24 * time.Hour
+
+// buildAckSettle validates a query's settle and ack_hold_limit keys and returns
+// the effective hold limit (zero when the query declares no settle). Choice: an
+// ack_hold_limit on a query without settle is REJECTED, because it could never
+// take effect and a silently ignored key hides a misconfiguration.
+func buildAckSettle(qt queryTOML) (time.Duration, error) {
+	if len(qt.Settle) == 0 {
+		if qt.Settle != nil {
+			return 0, fmt.Errorf("settle: must not be an empty command")
+		}
+		if qt.AckHoldLimit != nil {
+			return 0, fmt.Errorf("ack_hold_limit applies only to a query that declares settle")
+		}
+		return 0, nil
+	}
+	if qt.Type != "command" {
+		return 0, fmt.Errorf("settle applies only to a command query; a %q query has no command to run", qt.Type)
+	}
+	if qt.Settle[0] == "" {
+		return 0, fmt.Errorf("settle: the command must not be empty")
+	}
+	if qt.AckHoldLimit == nil {
+		return DefaultAckHoldLimit, nil
+	}
+	if qt.AckHoldLimit.D <= 0 {
+		return 0, fmt.Errorf("ack_hold_limit must be > 0, got %s", qt.AckHoldLimit.D)
+	}
+	return qt.AckHoldLimit.D, nil
 }

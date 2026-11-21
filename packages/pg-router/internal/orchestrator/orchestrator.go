@@ -52,6 +52,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/report"
 	"github.com/phillipgreenii/pg-router/internal/roles"
+	"github.com/phillipgreenii/pg-router/internal/settle"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
 
@@ -90,6 +91,9 @@ type Orchestrator struct {
 	// own safe-no-op doc. cmd/pg-router's bootCore is the one production
 	// site that wires a live activityObserver in here.
 	SourceActivityObserver discover.SourceActivityObserver
+	// Settler is the settlement-report machinery of cursor-feed sources (a query
+	// that declares settle). nil (the default) disables it entirely.
+	Settler *settle.Settler
 	// Bindings is the CONFIGURED role-binding set (core.NewBindings over every
 	// role's Binds, INCLUDING a role disabled for this run — INV-DISP-3's
 	// configuration-wide view). bootCore sets this from the SAME value it passes
@@ -284,7 +288,7 @@ func (o *Orchestrator) commander() query.Commander {
 
 // queryEnv builds the capability bag passed to each role's query.
 func (o *Orchestrator) queryEnv() query.Env {
-	return query.Env{RepoRoot: o.Cfg.RepoRoot, Cmd: o.commander()}
+	return query.Env{RepoRoot: o.Cfg.RepoRoot, Cmd: o.commander(), Settler: o.Settler}
 }
 
 // ProduceTick fires the configured query set once against q — the

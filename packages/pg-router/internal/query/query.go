@@ -31,6 +31,7 @@ import (
 	"github.com/phillipgreenii/pg-router/api/status"
 	"github.com/phillipgreenii/pg-router/internal/event"
 	"github.com/phillipgreenii/pg-router/internal/item"
+	"github.com/phillipgreenii/pg-router/internal/settle"
 	"github.com/phillipgreenii/x/cmdrun"
 )
 
@@ -67,6 +68,10 @@ type EnvCommander interface {
 type Env struct {
 	RepoRoot string
 	Cmd      Commander
+	// Settler is the settlement-report machinery of cursor-feed sources
+	// (internal/settle); nil disables it, and a query that declares no settle
+	// never touches it.
+	Settler *settle.Settler
 }
 
 // Query is a producer of typed events. The critical inversion (design M2): Run
@@ -339,6 +344,7 @@ type wireEvent struct {
 	At        string         `json:"at,omitempty"`
 	ExpiresAt string         `json:"expiresAt,omitempty"`
 	Payload   map[string]any `json:"payload"`
+	Ack       any            `json:"ack,omitempty"`
 }
 
 // querySchemaVersion is the wire envelope version this client stamps on
@@ -414,7 +420,7 @@ func (q ParticipantQuery) Run(ctx context.Context, env Env) ([]event.Event, erro
 // framing). at/expiresAt ride onto Attributes, mirroring CommandQuery.Run's
 // own handling of a command source's optional at/expiresAt fields.
 func eventFromWire(we wireEvent) event.Event {
-	evt := event.Event{ID: we.ID, Type: we.Type, Item: itemFromWirePayload(we.Payload)}
+	evt := event.Event{ID: we.ID, Type: we.Type, Item: itemFromWirePayload(we.Payload), Ack: ackFromAny(we.Ack)}
 	attrs := make(map[string]any, 2)
 	if we.At != "" {
 		if t, err := time.Parse(time.RFC3339, we.At); err == nil {

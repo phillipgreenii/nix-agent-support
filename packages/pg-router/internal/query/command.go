@@ -35,6 +35,64 @@ type CommandQuery struct {
 	// The process always starts from the minimal base environment, so a
 	// variable that is not listed is not passed.
 	EnvAllow []string `toml:"-"`
+	// Settle is the query's settle command (a cursor-feed source's settlement
+	// report), run exactly as Argv is, with --lane <lane> --through <token>
+	// appended. Empty for every other query. AckHoldLimit is the query's hold
+	// limit (config validated > 0; only meaningful with Settle).
+	Settle       []string      `toml:"-"`
+	AckHoldLimit time.Duration `toml:"-"`
+}
+
+// SettleOf returns the settle command and hold limit of a command query that
+// declares one.
+func SettleOf(q Query) (argv []string, holdLimit time.Duration, ok bool) {
+	var cq CommandQuery
+	switch v := q.(type) {
+	case CommandQuery:
+		cq = v
+	case *CommandQuery:
+		cq = *v
+	default:
+		return nil, 0, false
+	}
+	if len(cq.Settle) == 0 {
+		return nil, 0, false
+	}
+	return append([]string(nil), cq.Settle...), cq.AckHoldLimit, true
+}
+
+// RunSettle runs q's settle command for one lane, reporting token as the
+// frontier. It runs the command exactly as the query's own command is run (same
+// commander, same minimal base environment plus env_allow) with
+// `--lane <lane> --through <token>` appended.
+func RunSettle(ctx context.Context, env Env, q Query, lane, token string) error {
+	var cq CommandQuery
+	switch v := q.(type) {
+	case CommandQuery:
+		cq = v
+	case *CommandQuery:
+		cq = *v
+	default:
+		return fmt.Errorf("settle: %T is not a command query", q)
+	}
+	if len(cq.Settle) == 0 {
+		return errors.New("settle: query declares no settle command")
+	}
+	argv := append(append([]string(nil), cq.Settle...), "--lane", lane, "--through", token)
+	cmd := env.Cmd
+	if cmd == nil {
+		cmd = OSCommander{}
+	}
+	var err error
+	if ec, ok := cmd.(EnvCommander); ok {
+		_, err = ec.RunEnv(ctx, argv, cq.runEnv())
+	} else {
+		_, err = cmd.Run(ctx, argv)
+	}
+	if err != nil {
+		return fmt.Errorf("settle %v: %w", argv, err)
+	}
+	return nil
 }
 
 // CommandOf returns the command line of a command query (a copy of its argv: a
@@ -154,6 +212,25 @@ type rawItem struct {
 	At        string         `json:"at,omitempty"`
 	ExpiresAt string         `json:"expiresAt,omitempty"`
 	Emit      string         `json:"emit,omitempty"`
+	// Ack is the optional acknowledgement handle: an object with exactly two
+	// non-empty string fields, lane and token. Decoded loosely so a malformed
+	// one only means the event carries no handle, never a parse failure.
+	Ack any `json:"ack,omitempty"`
+}
+
+// ackFromAny reads an ack handle from a decoded JSON value, nil unless it is an
+// object whose lane and token are both non-empty strings.
+func ackFromAny(v any) *event.Ack {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	lane, _ := m["lane"].(string)
+	token, _ := m["token"].(string)
+	if lane == "" || token == "" {
+		return nil
+	}
+	return &event.Ack{Lane: lane, Token: token}
 }
 
 func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
@@ -214,6 +291,7 @@ func (q CommandQuery) Run(ctx context.Context, env Env) ([]event.Event, error) {
 			emitType = r.Emit
 		}
 		evt := event.NewItemEvent(emitType, "", item.Item{ID: r.ID, Type: r.Type, Title: r.Title, Metadata: r.Metadata})
+		evt.Ack = ackFromAny(r.Ack)
 		if r.At != "" || r.ExpiresAt != "" {
 			attrs := make(map[string]any, 2)
 			if r.At != "" {

@@ -55,6 +55,14 @@ type Event struct {
 	// a binding declares a matchable path (INV-DISP-1). The core neither reads
 	// nor validates it beyond "is an object".
 	Payload map[string]any
+	// AckLane and AckToken are the OPTIONAL acknowledgement handle a cursor-feed
+	// source stamped on the event (the INTF-SOURCE `ack` object): two opaque
+	// strings the core never interprets. Both empty means no handle. They are
+	// kept durably with the queued event (Record) but are NOT part of the wire
+	// event shape: a handler is never shown them, and an event that entered by
+	// ingest-event, a push inject or a redrive carries neither.
+	AckLane  string
+	AckToken string
 }
 
 // ErrInvalidEvent is returned by Validate for a structurally invalid event.

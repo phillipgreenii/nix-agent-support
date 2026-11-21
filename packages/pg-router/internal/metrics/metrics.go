@@ -302,6 +302,10 @@ const (
 	// pg-router-source-failure-rate; the warning rule pg-router-source-backoff
 	// reads this counter instead. Exposed as pg_router_source_backoff_total.
 	MetricSourceBackoff = "pg_router_source_backoff"
+	// MetricSourceSettleFailures counts a settle invocation of a cursor-feed
+	// source that exited non-zero or timed out, per query. The report is retried
+	// at the next frontier evaluation (exported as pg_router_source_settle_failures_total).
+	MetricSourceSettleFailures = "pg_router_source_settle_failures"
 	// MetricDeduped counts a duplicate event id the core absorbed because
 	// de-duplication already covers it (INV-EVT-3, bead pg2-cz31d), per type.
 	// It is a BRAND-NEW counter (not a promotion of any pre-existing field —
@@ -519,6 +523,7 @@ type Emitter struct {
 	supervisors      metric.Int64Gauge
 	sourceFailures   metric.Int64Counter
 	sourceBackoff    metric.Int64Counter
+	settleFailures   metric.Int64Counter
 	ticksSkipped     metric.Int64Counter
 	loadBackoff      atomic.Int64
 	deduped          metric.Int64Counter
@@ -899,6 +904,14 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	if err != nil {
 		return nil, err
 	}
+	settleFailures, err := m.Int64Counter(
+		MetricSourceSettleFailures,
+		metric.WithUnit("{failure}"),
+		metric.WithDescription("settle invocations of a cursor-feed source that exited non-zero or timed out, per query"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	sourceBackoff, err := m.Int64Counter(
 		MetricSourceBackoff,
 		metric.WithUnit("{attempt}"),
@@ -1235,6 +1248,7 @@ func New(ctx context.Context, mp metric.MeterProvider, depthFn func() map[string
 	e.supervisors = supervisors
 	e.sourceFailures = sourceFailures
 	e.sourceBackoff = sourceBackoff
+	e.settleFailures = settleFailures
 	e.ticksSkipped = ticksSkipped
 	if _, err := m.Int64ObservableGauge(
 		MetricProducerLoadBackoff,
@@ -2086,6 +2100,11 @@ func (e *Emitter) OnSourceFailure(source string, err error) {
 		attribute.String("source", source),
 		attribute.String("reason", ClassifySourceFailure(err)),
 	))
+}
+
+// OnSettleFailure counts one failed settle invocation for query.
+func (e *Emitter) OnSettleFailure(query string) {
+	e.settleFailures.Add(context.Background(), 1, metric.WithAttributes(attribute.String("query", query)))
 }
 
 // RecordThroughput increments the throughput counter, per type and role, for an event

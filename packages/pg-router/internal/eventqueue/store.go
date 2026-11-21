@@ -92,6 +92,10 @@ type Record struct {
 	NotBefore     time.Time      `json:"notBefore,omitzero"`
 	Generation    int            `json:"generation,omitempty"`
 	Payload       map[string]any `json:"payload,omitempty"`
+	// AckLane and AckToken are an enqueued event's acknowledgement handle
+	// (enqueue records only); absent on a record written by an older binary.
+	AckLane  string `json:"ackLane,omitempty"`
+	AckToken string `json:"ackToken,omitempty"`
 	// Accept fields. ListenerID names the accepting listener. At (shared with the
 	// enqueue/gate field above) is, on an accept record, the instant the accept was
 	// settled, and StartedAt the instant that listener's offer began (the instant it
@@ -216,6 +220,8 @@ func recordFromEvent(e Event, enqueuedAt time.Time) Record {
 		NotBefore:     e.NotBefore,
 		Generation:    e.Generation,
 		Payload:       e.Payload,
+		AckLane:       e.AckLane,
+		AckToken:      e.AckToken,
 	}
 }
 
@@ -230,6 +236,8 @@ func (r Record) event() Event {
 		NotBefore:     r.NotBefore,
 		Generation:    r.Generation,
 		Payload:       r.Payload,
+		AckLane:       r.AckLane,
+		AckToken:      r.AckToken,
 	}
 }
 
