@@ -42,8 +42,8 @@ func (f *fake) env(k *int) apply.Env {
 	return apply.Env{Runner: f.runner(), Config: cfg, Clock: time.Now, Stderr: &bytes.Buffer{}}
 }
 
-func viewWith(state map[string]string, links ...view.Link) *view.View {
-	v := &view.View{Type: "pr", ID: entity, Links: links}
+func viewWith(state map[string]string, links ...view.LinkedEntity) *view.DeskView {
+	v := &view.DeskView{Type: "pr", ID: entity, Links: links}
 	if state != nil {
 		v.Annotations.Decider = map[string]map[string]string{"pr-decider": state}
 	}
@@ -62,7 +62,7 @@ func annot(key, value string) string {
 	return fmt.Sprintf("pg-desk pr annotate %s --key decider.pr-decider.%s --value %s --origin decider:pr-decider --actor pg-decider", entity, key, value)
 }
 
-func finish(t *testing.T, f *fake, k *int, v *view.View, evs ...apply.Event) error {
+func finish(t *testing.T, f *fake, k *int, v *view.DeskView, evs ...apply.Event) error {
 	t.Helper()
 	h := New(v, "pr", entity)
 	return h.Finish(context.Background(), f.env(k), evs)
@@ -281,7 +281,7 @@ func TestAnEscalatedRuleWithNoEventIsReset(t *testing.T) {
 func TestTheEscalationIsParentedUnderTheAnchorWhenOneExists(t *testing.T) {
 	r := "r.fail"
 	k := 1
-	anchor := view.Link{
+	anchor := view.LinkedEntity{
 		Type: "issue", ID: "wb-anchor", State: "open", Title: entity + ": Add retry",
 		Metadata: map[string]string{"dedup_key": "pr:" + entity + ":anchor"},
 	}

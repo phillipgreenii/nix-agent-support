@@ -28,7 +28,7 @@ func recordWrites(t *testing.T, actions []action.Action, stdout string, exit str
 	var recs []execRec
 	origDecide, origRun := decideFn, applyRunner
 	t.Cleanup(func() { decideFn, applyRunner = origDecide, origRun })
-	decideFn = func(_ *view.View, _ string, _ *config.Config) action.PlanResult {
+	decideFn = func(_ *view.DeskView, _ string, _ *config.Config) action.PlanResult {
 		return action.PlanResult{Actions: actions, Skipped: []action.Skip{}}
 	}
 	code, _ := strconv.Atoi(exit)
@@ -100,7 +100,7 @@ func TestApplyFromItemReadsTheViewExactlyOnceAndNeverDecidesFromTheKind(t *testi
 	decides := 0
 	recordWrites(t, nil, `{"result":{}}`, "0")
 	innerDecide := decideFn
-	decideFn = func(v *view.View, typ string, cfg *config.Config) action.PlanResult {
+	decideFn = func(v *view.DeskView, typ string, cfg *config.Config) action.PlanResult {
 		decides++
 		return innerDecide(v, typ, cfg)
 	}

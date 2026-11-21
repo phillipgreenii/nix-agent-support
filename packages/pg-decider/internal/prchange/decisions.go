@@ -196,7 +196,7 @@ func ruleOutcomes(mode string, pre *action.PlanResult, counters *metrics.Line) [
 }
 
 // adoptionOutcome summarizes what the adoption rules did for the PR.
-func adoptionOutcome(mode string, v *view.View, pre *action.PlanResult, counters *metrics.Line) *AdoptionRecord {
+func adoptionOutcome(mode string, v *view.DeskView, pre *action.PlanResult, counters *metrics.Line) *AdoptionRecord {
 	ix := workitem.BuildIndex(v)
 	adoptable := map[string]string{}
 	for _, ad := range ix.Adoptable() {

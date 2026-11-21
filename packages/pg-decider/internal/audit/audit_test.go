@@ -165,7 +165,7 @@ func runMixed(t *testing.T, f *fake, cfg *config.Config, it *item.Routed) (apply
 	env := envFor(f, cfg)
 	res := apply.Run(context.Background(), apply.Input{
 		Type: "pr", ID: "acme/widgets#42",
-		View:    &view.View{Type: "pr", ID: "acme/widgets#42"},
+		View:    &view.DeskView{Type: "pr", ID: "acme/widgets#42"},
 		Actions: mixedActions(), Item: it, Env: env, Hooks: []apply.Hook{New()},
 	})
 	return res, env.Stderr.(*bytes.Buffer).String()
@@ -314,7 +314,7 @@ func TestSkippedStaleFocusHoldPostsNoComment(t *testing.T) {
 	}
 	f := newFake(t, respond)
 	res := apply.Run(context.Background(), apply.Input{
-		Type: "pr", ID: "acme/widgets#42", View: &view.View{Type: "pr", ID: "acme/widgets#42"},
+		Type: "pr", ID: "acme/widgets#42", View: &view.DeskView{Type: "pr", ID: "acme/widgets#42"},
 		Actions: []action.Action{hold}, Env: envFor(f, nil), Hooks: []apply.Hook{New()},
 	})
 	if len(res.Events) != 1 || res.Events[0].Outcome != apply.OutcomeSkippedStale || res.ExitCode != 0 {

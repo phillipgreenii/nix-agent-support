@@ -21,8 +21,8 @@ const (
 	nodeID = "PR_node_42"
 )
 
-func prView() *view.View {
-	return &view.View{Type: "pr", ID: prID, Snapshot: view.PRSnapshot{ID: prID, NodeID: nodeID}}
+func prView() *view.DeskView {
+	return &view.DeskView{Type: "pr", ID: prID, Snapshot: view.PRSnapshot{ID: prID, NodeID: nodeID}}
 }
 
 func str(s string) *string { return &s }

@@ -58,13 +58,13 @@ func JSONWithLookup(w io.Writer, res action.PlanResult, lk *Lookup) error {
 
 // Text prints the design 7.2 form: a header line, a "linked work:" line, an
 // "actions:" block and a "skipped:" block (each block may be empty).
-func Text(w io.Writer, v *view.View, res action.PlanResult) error {
+func Text(w io.Writer, v *view.DeskView, res action.PlanResult) error {
 	return TextWithLookup(w, v, res, nil)
 }
 
 // TextWithLookup is Text plus, when lk is not nil, a "lookup:" line after the
 // "linked work:" line naming the listing size.
-func TextWithLookup(w io.Writer, v *view.View, res action.PlanResult, lk *Lookup) error {
+func TextWithLookup(w io.Writer, v *view.DeskView, res action.PlanResult, lk *Lookup) error {
 	var sb strings.Builder
 	sb.WriteString(Header(v) + "\n")
 	sb.WriteString("linked work: " + linkedWork(v) + "\n")
@@ -96,7 +96,7 @@ func TextWithLookup(w io.Writer, v *view.View, res action.PlanResult, lk *Lookup
 // ci= is the snapshot's checks_rollup; conflict= is yes when mergeable is
 // CONFLICTING. Only PR views carry a snapshot, so other types print just the
 // type, id and relationship.
-func Header(v *view.View) string {
+func Header(v *view.DeskView) string {
 	id := fmt.Sprintf("%s %s", v.Type, v.ID)
 	rel := orDash(v.Decorations.Relationship)
 	if v.Type != "pr" {
@@ -121,7 +121,7 @@ func Header(v *view.View) string {
 
 // linkedWork summarizes the work items linked from the view, grouped by kind
 // in contract order: "<kind> (<state>[, detail])".
-func linkedWork(v *view.View) string {
+func linkedWork(v *view.DeskView) string {
 	ix := workitem.BuildIndex(v)
 	var parts []string
 	for _, k := range workitem.Kinds() {

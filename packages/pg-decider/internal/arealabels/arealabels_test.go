@@ -39,7 +39,7 @@ func loadCfg(t *testing.T) *config.Config {
 
 type link map[string]any
 
-func mkView(t *testing.T, title, branch string, links ...link) *view.View {
+func mkView(t *testing.T, title, branch string, links ...link) *view.DeskView {
 	t.Helper()
 	if links == nil {
 		links = []link{}

@@ -45,7 +45,7 @@ func suiteFocusLinks(entityID, anchorID string) []map[string]any {
 // reads the focus bead by design (its skip carries the bead's id and state,
 // and a view that shows no selection holds an open bead), so the invariant
 // under test is about every OTHER rule.
-func suitePlanBytes(t *testing.T, v *view.View) (js, text []byte) {
+func suitePlanBytes(t *testing.T, v *view.DeskView) (js, text []byte) {
 	t.Helper()
 	res := suiteDecide(v)
 	skipped, actions := res.Skipped[:0:0], res.Actions[:0:0]

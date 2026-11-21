@@ -202,7 +202,7 @@ func reviewSkip(reason string, facts map[string]any) decide.Result {
 	return decide.Result{Skip: &action.Skip{Reason: reason, Facts: facts}}
 }
 
-func reviewItemMetadata(v *view.View, head string) map[string]string {
+func reviewItemMetadata(v *view.DeskView, head string) map[string]string {
 	return map[string]string{
 		"repo":      v.Snapshot.Repo,
 		"pr_number": strconv.Itoa(v.Snapshot.Number),
@@ -238,7 +238,7 @@ func reviewCreate(in decide.Input, items []workitem.Item, head string, forced bo
 // own key (id or node_id form), and keeps the whole key when the item is
 // already at the head. The apply step re-reads the item live first and drops
 // the write when a claim landed in the meantime (facts.transition).
-func reviewRefresh(it workitem.Item, items []workitem.Item, v *view.View, head string, forced bool) action.Action {
+func reviewRefresh(it workitem.Item, items []workitem.Item, v *view.DeskView, head string, forced bool) action.Action {
 	target := it.ID
 	md := reviewItemMetadata(v, head)
 	ref := workitem.EntityRefFrom(v)
@@ -275,7 +275,7 @@ func reviewRefresh(it workitem.Item, items []workitem.Item, v *view.View, head s
 // annotations.force_review_sha from the raw view (string or null), falling
 // back to the current head when the view carries none. internal/view does not
 // decode the member, so it is read from View.Raw here.
-func reviewForceSHA(v *view.View, head string) string {
+func reviewForceSHA(v *view.DeskView, head string) string {
 	var raw struct {
 		Annotations struct {
 			ForceReviewSHA *string `json:"force_review_sha"`
@@ -292,7 +292,7 @@ func reviewForceSHA(v *view.View, head string) string {
 // reviewConsume records the consumed SHA, then clears the flag. Both require
 // every earlier action of this rule to have been applied, and the clear is
 // last, so a failed run leaves the flag in place and is safe to repeat.
-func reviewConsume(v *view.View, head string) []action.Action {
+func reviewConsume(v *view.DeskView, head string) []action.Action {
 	sha := reviewForceSHA(v, head)
 	recKey, clrKey := reviewAnnotationConsumed, reviewAnnotationForce
 	return []action.Action{

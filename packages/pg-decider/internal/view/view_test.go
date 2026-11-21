@@ -93,7 +93,7 @@ func TestParseNotYetLandedMembers(t *testing.T) {
 	if l.Title != "Fix the docs build" {
 		t.Fatalf("link title: %+v", l)
 	}
-	// Scalar metadata values are rendered as their JSON text.
+	// Link metadata is the contract's string map.
 	if l.Metadata["seq"] != "3" || l.Metadata["flag"] != "true" || l.Metadata["kind"] != "docs" {
 		t.Fatalf("link metadata: %+v", l.Metadata)
 	}
@@ -233,7 +233,7 @@ func TestViewParsesFocusSelected(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := v.Annotations.FocusSelected
+			got := v.FocusSelected
 			if got != c.want {
 				t.Fatalf("FocusSelected = %+v, want %+v", got, c.want)
 			}
@@ -302,7 +302,7 @@ func TestViewParsesGoldenIssueView(t *testing.T) {
 		v.IssueSnapshot.Metadata["dedup_key"] == "" {
 		t.Fatalf("IssueSnapshot = %+v", v.IssueSnapshot)
 	}
-	if fs := v.Annotations.FocusSelected; !fs.Present || fs.Set {
+	if fs := v.FocusSelected; !fs.Present || fs.Set {
 		t.Fatalf("golden focus_selected must be a present null, got %+v", fs)
 	}
 }

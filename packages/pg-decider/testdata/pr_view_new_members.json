@@ -35,7 +35,7 @@
       "id": "bd-9",
       "relation": "work",
       "title": "Fix the docs build",
-      "metadata": { "seq": 3, "flag": true, "kind": "docs" },
+      "metadata": { "seq": "3", "flag": "true", "kind": "docs" },
       "origins": [{ "origin": "derived:branch-name" }]
     }
   ],

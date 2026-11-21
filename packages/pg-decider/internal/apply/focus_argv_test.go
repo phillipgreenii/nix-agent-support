@@ -39,7 +39,7 @@ type focusArgvLink struct {
 // focusArgvView is the decider's view of the issue source ACME-7 selected for
 // focusArgvPeriod (annotation nil means "not selected") whose linked focus
 // bead is in the given state.
-func focusArgvView(t *testing.T, annotation any, beadState, marker string) *view.View {
+func focusArgvView(t *testing.T, annotation any, beadState, marker string) *view.DeskView {
 	t.Helper()
 	return focusArgvViewFor(t, "ACME-7", annotation, &focusArgvLink{id: focusArgvBead, state: beadState, marker: marker})
 }
@@ -47,7 +47,7 @@ func focusArgvView(t *testing.T, annotation any, beadState, marker string) *view
 // focusArgvViewFor builds the view of issue source source with the given
 // focus_selected annotation and linked bead (nil: none linked). The source id
 // is no bead id, so no bead pattern is needed.
-func focusArgvViewFor(t *testing.T, source string, annotation any, bead *focusArgvLink) *view.View {
+func focusArgvViewFor(t *testing.T, source string, annotation any, bead *focusArgvLink) *view.DeskView {
 	t.Helper()
 	links := []any{}
 	if bead != nil {
@@ -91,7 +91,7 @@ func focusArgvViewFor(t *testing.T, source string, annotation any, bead *focusAr
 
 // focusArgvPlan plans v and returns the single focus.item action, failing when
 // the rule skipped or planned anything else.
-func focusArgvPlan(t *testing.T, v *view.View, cfg *config.Config) action.Action {
+func focusArgvPlan(t *testing.T, v *view.DeskView, cfg *config.Config) action.Action {
 	t.Helper()
 	res := decide.DecideWith(v, v.Type, cfg)
 	var got []action.Action
@@ -109,7 +109,7 @@ func focusArgvPlan(t *testing.T, v *view.View, cfg *config.Config) action.Action
 // focusArgvApply applies the plan against a fake connector whose live reads
 // answer with live (the `issue show --fresh` stdout) and no children, and
 // returns every `issue update` the apply layer sent.
-func focusArgvApply(t *testing.T, v *view.View, cfg *config.Config, a action.Action, live string) []string {
+func focusArgvApply(t *testing.T, v *view.DeskView, cfg *config.Config, a action.Action, live string) []string {
 	t.Helper()
 	d := newDouble(t, focusShowRule(live), focusChildrenRule(focusNoChildren))
 	res := Run(context.Background(), Input{Type: v.Type, ID: v.ID, View: v, Actions: []action.Action{a}, Env: testEnv(d, cfg)})

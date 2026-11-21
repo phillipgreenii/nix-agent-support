@@ -54,6 +54,9 @@ mkGoApp {
       ../pg-claude-code-recorder
       ../pg-sqlite
       ../pg-failsig
+      # go.mod replaces pg-desk for the source-desk member's use of its published
+      # contract package; the router's own binary does not link it.
+      members.deskapiFileset
     ];
   };
   modRoot = "pg-router";

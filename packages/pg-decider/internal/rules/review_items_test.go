@@ -37,7 +37,7 @@ func rNodeKey(head string) string { return "pr:PR_node_42:review-pr:" + head }
 
 // reviewBuild is the mine_create view with the given review items linked, the
 // PR head at head, and the force-review flag as asked.
-func reviewBuild(t *testing.T, force bool, items ...rItem) *view.View {
+func reviewBuild(t *testing.T, force bool, items ...rItem) *view.DeskView {
 	t.Helper()
 	var m map[string]any
 	b := reviewReadFixture(t, "mine_create")
@@ -82,7 +82,7 @@ func reviewBuild(t *testing.T, force bool, items ...rItem) *view.View {
 	return v
 }
 
-func reviewEval(v *view.View) decide.Result {
+func reviewEval(v *view.DeskView) decide.Result {
 	return reviewRuleOf().Evaluate(decide.Input{View: v, Items: workitem.BuildIndex(v), EntityType: decide.EntityTypePR})
 }
 
@@ -289,7 +289,7 @@ func TestReopenedPRWithAClosedReviewedHeadGetsNoReviewItem(t *testing.T) {
 }
 
 // patchLinkState rebuilds v with link id in the given state.
-func patchLinkState(t *testing.T, v *view.View, id, state string) {
+func patchLinkState(t *testing.T, v *view.DeskView, id, state string) {
 	t.Helper()
 	for i := range v.Links {
 		if v.Links[i].ID == id {

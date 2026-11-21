@@ -30,7 +30,7 @@ import (
 
 // Apply returns res with area labels added to the create and update actions it
 // already holds. It never adds or removes an action and never mutates res.
-func Apply(res action.PlanResult, v *view.View, cfg *config.Config) action.PlanResult {
+func Apply(res action.PlanResult, v *view.DeskView, cfg *config.Config) action.PlanResult {
 	if v == nil || cfg == nil || len(cfg.AreaLabels) == 0 || len(res.Actions) == 0 {
 		return res
 	}

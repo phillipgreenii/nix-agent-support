@@ -16,7 +16,7 @@ import (
 func TestApplyJSONPrintsThePlanObjectOfPlanJSON(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	t.Setenv("PG_DECIDER_CONFIG", "")
-	scriptedWrites(t, func(*view.View) []action.Action { return nil }, func(string, string) (string, string) { return `{"result":{}}`, "0" })
+	scriptedWrites(t, func(*view.DeskView) []action.Action { return nil }, func(string, string) (string, string) { return `{"result":{}}`, "0" })
 	out, errOut, code := runCLI(t, "apply", "pr", "acme/widgets#42", "--json")
 	if code != 0 {
 		t.Fatalf("exit %d err %q", code, errOut)
@@ -35,7 +35,7 @@ func TestApplyJSONListsEachActionWithItsOpAndTheSkippedRulesOnPartialFailure(t *
 	t.Setenv("PG_DECIDER_CONFIG", "")
 	target := "wb-fail"
 	scriptedWrites(t,
-		func(*view.View) []action.Action {
+		func(*view.DeskView) []action.Action {
 			return []action.Action{
 				{Op: action.OpCreate, Kind: "review-pr", Rule: "r.ok", Fields: action.Fields{Title: "ok", Metadata: map[string]string{"dedup_key": "pr:acme/widgets#42:review-pr:aaa"}}},
 				{Op: action.OpUpdate, Rule: "r.fail", Target: &target, Fields: action.Fields{Title: "x"}},

@@ -119,7 +119,7 @@ func anchorActsAsMine(relationship string) (mine, ok bool) {
 // mergeability CONFLICTING or merge state DIRTY. UNKNOWN is not a conflict.
 // The merge state is not a decoded snapshot member, so it is read from the
 // view's raw JSON.
-func anchorHasConflict(v *view.View) bool {
+func anchorHasConflict(v *view.DeskView) bool {
 	if v.Snapshot.Mergeable == "CONFLICTING" {
 		return true
 	}
@@ -136,11 +136,11 @@ func anchorHasConflict(v *view.View) bool {
 
 // anchorCurrentPriority is the anchor's current priority. pg-desk's composite
 // view reports it as links[].priority (docs/behavior/pg-desk/show.md, omitted
-// when the stored snapshot has none); the decoded view.Link has no such
+// when the stored snapshot has none); the decoded view.LinkedEntity has no such
 // member, so it is read from the raw link (links[].priority, "P2" or 2), then
 // from the link metadata's "priority"; when the view reports none the tracker
 // default seeds it.
-func anchorCurrentPriority(v *view.View, anchor workitem.Item) int {
+func anchorCurrentPriority(v *view.DeskView, anchor workitem.Item) int {
 	var raw struct {
 		Links []struct {
 			ID       string          `json:"id"`

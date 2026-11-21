@@ -17,8 +17,10 @@ mkGoApp {
   # the module files (members.json lists them; the Go boundary test reads the
   # same file), so a router-engine edit does not bump this binary's --version.
   #
-  # This binary has no compile-time dependency on packages/pg-desk: it execs
-  # pg-desk as a subprocess and parses its stdout JSON generically.
+  # This binary's only compile-time use of packages/pg-desk is its published
+  # contract package (pkg/deskapi, standard library only; the module's go.mod
+  # replaces ../pg-desk, and members.memberFileset carries that package); it
+  # still execs pg-desk as a subprocess for the data.
   src = lib.fileset.toSource {
     root = members.packagesRoot;
     fileset = members.memberFileset "source-desk";

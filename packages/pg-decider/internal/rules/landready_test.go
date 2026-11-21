@@ -26,7 +26,7 @@ func landreadyFixtures(t *testing.T) []string {
 	return names
 }
 
-func landreadyLoadView(t *testing.T, name string) *view.View {
+func landreadyLoadView(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "landready", name+".json"))
 	if err != nil {

@@ -26,7 +26,7 @@ func threadRec(thread, msg, source string, version int, parent string) map[strin
 
 // threadView is an open PR view (the committed minimal fixture) carrying the
 // given thread change records and decider annotations.
-func threadView(t *testing.T, recs []map[string]any, annotated map[string]string) *view.View {
+func threadView(t *testing.T, recs []map[string]any, annotated map[string]string) *view.DeskView {
 	t.Helper()
 	return suitePatch(t, "pr_new_everything", func(m map[string]any) {
 		m["thread_changes"] = recs

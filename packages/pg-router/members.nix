@@ -40,6 +40,15 @@ in
 rec {
   inherit data;
 
+  # The published pg-desk contract package the source-desk member imports
+  # (go.mod `replace ... => ../pg-desk`). The module's go.mod names it, so every
+  # build of the router module needs it to resolve; the golden files under
+  # testdata/ are read in place by the member's decoder test.
+  deskapiFileset = lib.fileset.unions [
+    (here + "/../pg-desk/go.mod")
+    (here + "/../pg-desk/pkg/deskapi")
+  ];
+
   # Directory under packages/ that roots every fileset below.
   packagesRoot = here + "/..";
 
@@ -51,6 +60,7 @@ rec {
       ++ memberPaths data.members.${name}
       ++ [ sharedFileset ]
       ++ [ (here + "/../claude-transcript") ]
+      ++ [ deskapiFileset ]
     );
 
   # `lib.fileset` value for the router itself (the docs tree and every member

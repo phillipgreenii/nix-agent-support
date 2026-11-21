@@ -257,12 +257,12 @@ func TestPropertyAdoptionByTitleShapeNeverAdoptsIntoAnotherEntity(t *testing.T) 
 		number := numberGen().Draw(t, "view number")
 		titles := rapid.SliceOfN(titleGen(repo, number), 1, 8).Draw(t, "titles")
 
-		v := &view.View{Type: "pr", ID: fmt.Sprintf("%s#%d", repo, number)}
+		v := &view.DeskView{Type: "pr", ID: fmt.Sprintf("%s#%d", repo, number)}
 		v.Snapshot.Repo, v.Snapshot.Number = repo, number
 		want := map[string]Kind{}
 		for i, tt := range titles {
 			id := "wb-" + strconv.Itoa(i)
-			v.Links = append(v.Links, view.Link{Type: "issue", ID: id, Title: tt.title, State: "open"})
+			v.Links = append(v.Links, view.LinkedEntity{Type: "issue", ID: id, Title: tt.title, State: "open"})
 			if tt.kind != "" {
 				want[id] = tt.kind
 			}
@@ -284,10 +284,10 @@ func TestPropertyAnotherNodesItemIsNeverAdopted(t *testing.T) {
 		repo := repoGen().Draw(t, "view repo")
 		number := numberGen().Draw(t, "view number")
 		titles := rapid.SliceOfN(titleGen(repo, number), 1, 6).Draw(t, "titles")
-		v := &view.View{Type: "pr", ID: fmt.Sprintf("%s#%d", repo, number)}
+		v := &view.DeskView{Type: "pr", ID: fmt.Sprintf("%s#%d", repo, number)}
 		v.Snapshot.Repo, v.Snapshot.Number, v.Snapshot.NodeID = repo, number, "PR_mine"
 		for i, tt := range titles {
-			v.Links = append(v.Links, view.Link{
+			v.Links = append(v.Links, view.LinkedEntity{
 				Type: "issue", ID: "wb-" + strconv.Itoa(i), Title: tt.title, State: "open",
 				Metadata: map[string]string{"node_id": "PR_other"},
 			})

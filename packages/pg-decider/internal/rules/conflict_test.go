@@ -15,7 +15,7 @@ import (
 
 const conflictRuleID = "conflict.present"
 
-func conflictLoadView(t *testing.T, name string) *view.View {
+func conflictLoadView(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "conflict", name+".json"))
 	if err != nil {

@@ -35,7 +35,7 @@ func focusRaw(t *testing.T, name string) []byte {
 	return b
 }
 
-func focusLoad(t *testing.T, name string) *view.View {
+func focusLoad(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	v, err := view.Parse(focusRaw(t, name))
 	if err != nil {
@@ -54,7 +54,7 @@ func focusMap(t *testing.T, name string) map[string]any {
 	return m
 }
 
-func focusParse(t *testing.T, m map[string]any) *view.View {
+func focusParse(t *testing.T, m map[string]any) *view.DeskView {
 	t.Helper()
 	b, err := json.Marshal(m)
 	if err != nil {
@@ -67,7 +67,7 @@ func focusParse(t *testing.T, m map[string]any) *view.View {
 	return v
 }
 
-func focusPatch(t *testing.T, name string, mutate func(m map[string]any)) *view.View {
+func focusPatch(t *testing.T, name string, mutate func(m map[string]any)) *view.DeskView {
 	t.Helper()
 	m := focusMap(t, name)
 	mutate(m)
@@ -113,7 +113,7 @@ type focusSetup struct {
 	source     func(snap map[string]any)
 }
 
-func (s focusSetup) view(t *testing.T) *view.View {
+func (s focusSetup) view(t *testing.T) *view.DeskView {
 	t.Helper()
 	return focusParse(t, s.mapped(t))
 }
@@ -138,7 +138,7 @@ type focusOutcome struct {
 	skip *action.Skip
 }
 
-func focusDecide(t *testing.T, v *view.View, cfg *config.Config) focusOutcome {
+func focusDecide(t *testing.T, v *view.DeskView, cfg *config.Config) focusOutcome {
 	t.Helper()
 	res := decide.DecideWith(v, v.Type, cfg)
 	var out focusOutcome
@@ -528,8 +528,8 @@ func TestFocusRuleFailsClosedWhenMemberAbsentFromView(t *testing.T) {
 func TestFocusCheckViewAcceptsPresentNullAndOtherTypes(t *testing.T) {
 	for _, fixture := range []string{"pr_selected", "issue_selected"} {
 		v := focusSetup{fixture: fixture, annotation: nil, bead: &focusBead{state: "open"}}.view(t)
-		if !v.Annotations.FocusSelected.Present || v.Annotations.FocusSelected.Set {
-			t.Fatalf("setup: want a present null, got %+v", v.Annotations.FocusSelected)
+		if !v.FocusSelected.Present || v.FocusSelected.Set {
+			t.Fatalf("setup: want a present null, got %+v", v.FocusSelected)
 		}
 		if err := CheckFocusView(v, v.Type); err != nil {
 			t.Errorf("%s: a present null must pass, got %v", fixture, err)

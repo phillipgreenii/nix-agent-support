@@ -11,7 +11,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
-func load(t *testing.T, name string) *view.View {
+func load(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
@@ -284,7 +284,7 @@ func TestNodeIDKeyFormIsEqualIdentity(t *testing.T) {
 }
 
 func TestBuildIndexEdgeCases(t *testing.T) {
-	ix := BuildIndex(&view.View{Type: "pr", ID: "x/y#1"})
+	ix := BuildIndex(&view.DeskView{Type: "pr", ID: "x/y#1"})
 	if _, ok := ix.Anchor(); ok {
 		t.Fatal("anchor in empty view")
 	}
@@ -304,7 +304,7 @@ func TestBuildIndexEdgeCases(t *testing.T) {
 }
 
 func TestMalformedMetadataIsEmptyNeverAPanic(t *testing.T) {
-	v := &view.View{Type: "pr", ID: "x/y#1", Links: []view.Link{
+	v := &view.DeskView{Type: "pr", ID: "x/y#1", Links: []view.LinkedEntity{
 		{Type: "issue", ID: "a", State: "open", Title: "process-feedback: x/y#1", Metadata: map[string]string{"covered_comments": ",,  ,", "dedup_key": "pr:x/y#1:process-feedback:d"}},
 		{Type: "issue", ID: "b", State: "open", Title: "fix-ci: x/y#1", Metadata: map[string]string{"dedup_key": "pr:x/y#1:fix-ci", "head_sha": ""}},
 		{Type: "issue", ID: "c", State: "open", Title: "resolve-conflict: x/y#1", Metadata: nil},
@@ -371,7 +371,7 @@ func TestPackageNeverReadsOrStoresACloser(t *testing.T) {
 // A focus bead is a keyed work item and is indexed like any other; Find with
 // no context reaches it because its key has no suffix.
 func TestKeyedFocusBeadIsIndexed(t *testing.T) {
-	v := &view.View{Type: "pr", ID: "acme/widgets#3", Links: []view.Link{{
+	v := &view.DeskView{Type: "pr", ID: "acme/widgets#3", Links: []view.LinkedEntity{{
 		Type: "issue", ID: "bd-f1", Relation: RelationSource, State: "open",
 		Title: "Focus acme/widgets#3 - a title", Labels: []string{"focus-item"},
 		Metadata: map[string]string{"dedup_key": "pr:acme/widgets#3:focus-item", "source_type": "pr", "source_id": "acme/widgets#3"},
@@ -393,7 +393,7 @@ func TestKeyedFocusBeadIsIndexed(t *testing.T) {
 // shaped like the PR's own anchor title or like a child's exact title.
 func TestKeylessSourceLinkIsNeverAdopted(t *testing.T) {
 	for _, title := range []string{"acme/widgets#3: looks like the anchor", "review-pr: acme/widgets#3", "fix-ci: acme/widgets#3"} {
-		v := &view.View{Type: "pr", ID: "acme/widgets#3", Links: []view.Link{{
+		v := &view.DeskView{Type: "pr", ID: "acme/widgets#3", Links: []view.LinkedEntity{{
 			Type: "issue", ID: "bd-f1", Relation: RelationSource, State: "open", Title: title,
 		}}}
 		ix := BuildIndex(v)
@@ -412,7 +412,7 @@ func TestKeylessSourceLinkIsNeverAdopted(t *testing.T) {
 // A head-scoped kind's title carries " @ <short head>"; the suffix is delimited,
 // so a keyless item with that title is adopted and "#4" never names "#42".
 func TestTitleShapeAcceptsTheShortHeadSuffix(t *testing.T) {
-	v := &view.View{Type: "pr", ID: "acme/widgets#4", Snapshot: view.PRSnapshot{Repo: "acme/widgets", Number: 4}}
+	v := &view.DeskView{Type: "pr", ID: "acme/widgets#4", Snapshot: view.PRSnapshot{Repo: "acme/widgets", Number: 4}}
 	for title, want := range map[string]bool{
 		"review-pr: acme/widgets#4":                       true,
 		"review-pr: acme/widgets#4 @ 9f3c1e2":             true,
@@ -426,8 +426,8 @@ func TestTitleShapeAcceptsTheShortHeadSuffix(t *testing.T) {
 		if got := TitleNames(title, v); got != want {
 			t.Errorf("TitleNames(%q) = %v, want %v", title, got, want)
 		}
-		l := view.Link{Type: "issue", ID: "bd-x", State: "open", Title: title, Relation: "work"}
-		ix := BuildIndex(&view.View{Type: "pr", ID: v.ID, Snapshot: v.Snapshot, Links: []view.Link{l}})
+		l := view.LinkedEntity{Type: "issue", ID: "bd-x", State: "open", Title: title, Relation: "work"}
+		ix := BuildIndex(&view.DeskView{Type: "pr", ID: v.ID, Snapshot: v.Snapshot, Links: []view.LinkedEntity{l}})
 		if got := len(ix.Adoptable()) == 1; got != want {
 			t.Errorf("adoptable(%q) = %v, want %v", title, got, want)
 		}
@@ -436,13 +436,13 @@ func TestTitleShapeAcceptsTheShortHeadSuffix(t *testing.T) {
 
 // Several review items of one PR are all indexed; Find picks by head, open first.
 func TestSeveralReviewItemsAreFoundByHead(t *testing.T) {
-	mk := func(id, state, head, key string) view.Link {
-		return view.Link{
+	mk := func(id, state, head, key string) view.LinkedEntity {
+		return view.LinkedEntity{
 			Type: "issue", ID: id, State: state, Relation: "work", Title: "review-pr: acme/widgets#42 @ " + head,
 			Metadata: map[string]string{"head_sha": head, "dedup_key": key},
 		}
 	}
-	v := &view.View{Type: "pr", ID: "acme/widgets#42", Links: []view.Link{
+	v := &view.DeskView{Type: "pr", ID: "acme/widgets#42", Links: []view.LinkedEntity{
 		mk("bd-1", "closed", "aaaaaaa", "pr:acme/widgets#42:review-pr:aaaaaaa"),
 		mk("bd-2", "open", "bbbbbbb", "pr:acme/widgets#42:review-pr:bbbbbbb"),
 	}}

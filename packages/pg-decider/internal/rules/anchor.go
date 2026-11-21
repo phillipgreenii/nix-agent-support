@@ -75,7 +75,7 @@ func anchorPRState(s view.PRSnapshot) string {
 // leaves every other condition to the rule, so this is a shared per-rule
 // guard rather than a new precedence step; anchor.priority already gates the
 // same way.
-func anchorTerminalSkip(v *view.View) (decide.Result, bool) {
+func anchorTerminalSkip(v *view.DeskView) (decide.Result, bool) {
 	st := anchorPRState(v.Snapshot)
 	if st != anchorPRStateClosed && st != anchorPRStateMerged {
 		return decide.Result{}, false
@@ -164,7 +164,7 @@ func (anchorClosedRule) Evaluate(in decide.Input) decide.Result {
 // child of the anchor. The view lists a PR's own work items with relation
 // "work"; a link that names another parent in its metadata belongs to that
 // parent, not to this anchor.
-func anchorIsOpenChild(l view.Link, anchorID string) bool {
+func anchorIsOpenChild(l view.LinkedEntity, anchorID string) bool {
 	if l.Type != "issue" || l.Relation != "work" || l.ID == anchorID || l.State == "closed" {
 		return false
 	}
@@ -262,7 +262,7 @@ func anchorNeededBy(rules map[string]bool) []string {
 // is born with the conflict-priority nudge already applied (the tracker's
 // default priority is the baseline), exactly as the sync it replaces created
 // it, so the next run finds the pbase marker in place and does nothing.
-func anchorCreate(v *view.View, neededBy []string) action.Action {
+func anchorCreate(v *view.DeskView, neededBy []string) action.Action {
 	s := v.Snapshot
 	c := workitem.ContractFor(workitem.KindAnchor)
 	var labels []string

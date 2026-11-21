@@ -48,7 +48,7 @@ func TitleWithHead(k Kind, repo string, number int, head string) string {
 const titleHeadSep = " @ "
 
 // EntityRefFrom reads the entity identity out of a view.
-func EntityRefFrom(v *view.View) EntityRef {
+func EntityRefFrom(v *view.DeskView) EntityRef {
 	return EntityRef{Type: v.Type, ID: v.ID, NodeID: v.Snapshot.NodeID}
 }
 

@@ -19,7 +19,7 @@ const (
 	feedbackD2   = "de7ef7ee219f" // c-102
 )
 
-func feedbackLoadView(t *testing.T, name string) *view.View {
+func feedbackLoadView(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "feedback", name+".json"))
 	if err != nil {

@@ -18,7 +18,7 @@ import (
 // same Go package. The rules are always looked up through the registry, so
 // each test also proves the rule registered under its id.
 
-func anchorLoadView(t *testing.T, name string) *view.View {
+func anchorLoadView(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "anchor", name+".json"))
 	if err != nil {
@@ -42,7 +42,7 @@ func anchorRule(t *testing.T, id string) decide.Rule {
 	return nil
 }
 
-func anchorInput(v *view.View) decide.Input {
+func anchorInput(v *view.DeskView) decide.Input {
 	return decide.Input{View: v, Items: workitem.BuildIndex(v), EntityType: decide.EntityTypePR}
 }
 

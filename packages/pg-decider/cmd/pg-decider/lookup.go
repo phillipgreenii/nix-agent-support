@@ -23,7 +23,7 @@ const lookupEntityType = "pr"
 // lookupRead reads and bounds the all-status listing (apply.ReadLookup); tests
 // swap it. A nil Lookup with a nil error means "no lookup" and never happens in
 // production for a pr run.
-var lookupRead = func(ctx context.Context, env apply.Env, v *view.View) (*apply.Lookup, error) {
+var lookupRead = func(ctx context.Context, env apply.Env, v *view.DeskView) (*apply.Lookup, error) {
 	return apply.ReadLookup(ctx, env, v)
 }
 
@@ -36,7 +36,7 @@ var lookupNow = time.Now
 // trusted it prints the diagnostic and the failed-closed counters line (with
 // the size known, so the composed command can persist them), and returns
 // ok=false; the caller exits with exitcode.LookupUntrusted and writes nothing.
-func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, v *view.View, verb, typ, id string) (*apply.Lookup, bool) {
+func readRunLookup(ctx context.Context, errOut io.Writer, cfg *config.Config, v *view.DeskView, verb, typ, id string) (*apply.Lookup, bool) {
 	if typ != lookupEntityType {
 		return nil, true
 	}

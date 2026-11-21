@@ -41,8 +41,8 @@ func emits(op action.Op, kind string) func(Input) Result {
 	}
 }
 
-func prView() *view.View {
-	v := &view.View{Type: "pr", ID: "acme/widgets#42"}
+func prView() *view.DeskView {
+	v := &view.DeskView{Type: "pr", ID: "acme/widgets#42"}
 	v.Snapshot.Repo, v.Snapshot.Number = "acme/widgets", 42
 	v.Decorations.Relationship = "mine"
 	return v

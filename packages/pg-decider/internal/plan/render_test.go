@@ -15,7 +15,7 @@ import (
 
 func str(s string) *string { return &s }
 
-func loadView(t *testing.T, name string) *view.View {
+func loadView(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {

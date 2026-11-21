@@ -31,7 +31,7 @@ func realLookup(t *testing.T) {
 	t.Helper()
 	orig := lookupRead
 	t.Cleanup(func() { lookupRead = orig })
-	lookupRead = func(ctx context.Context, env apply.Env, v *view.View) (*apply.Lookup, error) {
+	lookupRead = func(ctx context.Context, env apply.Env, v *view.DeskView) (*apply.Lookup, error) {
 		return apply.ReadLookup(ctx, env, v)
 	}
 }
@@ -466,7 +466,7 @@ func TestReadRunLookupTimesTheLookup(t *testing.T) {
 	t.Cleanup(func() { lookupRead, lookupNow = origRead, origNow })
 	lookupNow = steppingClock(1500 * time.Millisecond)
 
-	lookupRead = func(context.Context, apply.Env, *view.View) (*apply.Lookup, error) {
+	lookupRead = func(context.Context, apply.Env, *view.DeskView) (*apply.Lookup, error) {
 		return apply.NewLookup(nil), nil
 	}
 	var errOut bytes.Buffer
@@ -475,7 +475,7 @@ func TestReadRunLookupTimesTheLookup(t *testing.T) {
 		t.Fatalf("ok=%v elapsed=%v", ok, lk.Elapsed())
 	}
 
-	lookupRead = func(context.Context, apply.Env, *view.View) (*apply.Lookup, error) {
+	lookupRead = func(context.Context, apply.Env, *view.DeskView) (*apply.Lookup, error) {
 		return nil, &apply.LookupError{Reason: apply.LookupReasonUnavailable, Err: errors.New("down")}
 	}
 	errOut.Reset()

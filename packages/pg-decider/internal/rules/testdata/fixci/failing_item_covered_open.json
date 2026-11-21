@@ -45,7 +45,7 @@
       "labels": ["pbase:42"],
       "metadata": {
         "repo": "acme/widgets",
-        "pr_number": 42,
+        "pr_number": "42",
         "dedup_key": "pr:acme/widgets#42:anchor"
       }
     },
@@ -58,7 +58,7 @@
       "labels": ["mine", "worker-ready"],
       "metadata": {
         "repo": "acme/widgets",
-        "pr_number": 42,
+        "pr_number": "42",
         "head_sha": "9f3c1e2",
         "failing_builds": "900:2,901:1",
         "failing_checks": "lint,unit",

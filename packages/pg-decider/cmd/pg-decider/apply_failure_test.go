@@ -20,12 +20,12 @@ const anchorKey = "pr:acme/widgets#42:anchor"
 
 // scriptedWrites swaps decideFn for one returning actions and applyRunner for
 // an in-process runner that records every exec and answers through respond.
-func scriptedWrites(t *testing.T, decide func(v *view.View) []action.Action, respond func(name, args string) (stdout string, exit string)) *[]execRec {
+func scriptedWrites(t *testing.T, decide func(v *view.DeskView) []action.Action, respond func(name, args string) (stdout string, exit string)) *[]execRec {
 	t.Helper()
 	var recs []execRec
 	origDecide, origRun := decideFn, applyRunner
 	t.Cleanup(func() { decideFn, applyRunner = origDecide, origRun })
-	decideFn = func(v *view.View, _ string, _ *config.Config) action.PlanResult {
+	decideFn = func(v *view.DeskView, _ string, _ *config.Config) action.PlanResult {
 		return action.PlanResult{Actions: decide(v), Skipped: []action.Skip{}}
 	}
 	applyRunner = func(_ context.Context, c apply.Call) apply.CallResult {
@@ -38,7 +38,7 @@ func scriptedWrites(t *testing.T, decide func(v *view.View) []action.Action, res
 	return &recs
 }
 
-func hasAnchorLink(v *view.View) bool {
+func hasAnchorLink(v *view.DeskView) bool {
 	for _, l := range v.Links {
 		if l.Metadata["dedup_key"] == anchorKey {
 			return true
@@ -60,7 +60,7 @@ func TestADeciderWriteWhoseRefreshFailsExitsZeroIsNotUndoneAndTheNextRunWritesNo
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	t.Setenv("PG_DECIDER_CONFIG", "")
 	recs := scriptedWrites(t,
-		func(v *view.View) []action.Action {
+		func(v *view.DeskView) []action.Action {
 			if hasAnchorLink(v) {
 				return nil
 			}
@@ -117,7 +117,7 @@ func TestApplyInstallsTheFailureAndMetricsHooksAndEscalatesWithTheExactRunCounte
 	t.Setenv("PG_DECIDER_CONFIG", "")
 	two, three := "wb-fail", "wb-dup"
 	recs := scriptedWrites(t,
-		func(*view.View) []action.Action {
+		func(*view.DeskView) []action.Action {
 			return []action.Action{
 				{Op: action.OpCreate, Kind: "review-pr", Rule: "r.ok", Fields: action.Fields{Title: "ok", Metadata: map[string]string{"dedup_key": "pr:acme/widgets#42:review-pr:aaa"}}},
 				{Op: action.OpCreate, Kind: "review-pr", Rule: "r.dup", Fields: action.Fields{Title: "dup", Metadata: map[string]string{"dedup_key": "pr:acme/widgets#42:review-pr:bbb"}}},
@@ -186,7 +186,7 @@ func TestApplyInstallsTheFailureAndMetricsHooksAndEscalatesWithTheExactRunCounte
 func TestAnIdleRunStillEmitsOneCounterLine(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	t.Setenv("PG_DECIDER_CONFIG", "")
-	recs := scriptedWrites(t, func(*view.View) []action.Action { return nil }, func(string, string) (string, string) { return `{"result":{}}`, "0" })
+	recs := scriptedWrites(t, func(*view.DeskView) []action.Action { return nil }, func(string, string) (string, string) { return `{"result":{}}`, "0" })
 	_, errOut, code := runCLI(t, "apply", "pr", "acme/widgets#42")
 	want := `{"contract":"pg-decider.run-counters/v1","type":"pr","id":"acme/widgets#42","rules":{},"escalations":0}` + "\n"
 	if code != 0 || errOut != want || len(*recs) != 0 {
@@ -203,7 +203,7 @@ func TestApplyAbandonedFocusHoldIsSkippedStaleExitsZeroAndWritesNoComment(t *tes
 	t.Setenv("PG_DECIDER_CONFIG", "")
 	target := "bd-focus-1"
 	recs := scriptedWrites(t,
-		func(*view.View) []action.Action {
+		func(*view.DeskView) []action.Action {
 			return []action.Action{{
 				Op: action.OpUpdate, Kind: "focus-item", Target: &target, Rule: "focus.item",
 				Fields: action.Fields{Status: "deferred", Metadata: map[string]string{"focus_hold": "struck"}},

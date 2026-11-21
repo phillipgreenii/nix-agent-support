@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apievent "github.com/phillipgreenii/pg-router/api/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/pkg/deskapi"
 
 	"github.com/spf13/cobra"
 )
@@ -21,7 +22,7 @@ var now = time.Now
 const stampLayout = "2006-01-02T15:04:05Z"
 
 // statusOK is the envelope source status that does not count as degraded.
-const statusOK = "ok"
+const statusOK = deskapi.StatusOK
 
 // changedSuffix is appended to the entity type to form the emit
 // ("<type>.changed"), the only event type the adapter produces.
@@ -32,10 +33,9 @@ type entityGroup struct {
 	id      string
 	typ     string
 	title   string
-	version json.Number
+	version int64
 	origin  string
-	seq     json.Number
-	seqVal  float64
+	seq     int64
 	minSeq  int64
 	kinds   []string
 	seen    map[string]bool
@@ -51,7 +51,7 @@ type entityGroup struct {
 //
 // It also returns, per item, the lowest record sequence of its entity in the
 // poll (the input of the deferred-ack token rule).
-func itemsWithLowest(env envelope) ([]apievent.Item, []int64, error) {
+func itemsWithLowest(env deskapi.Changes) ([]apievent.Item, []int64, error) {
 	degraded := make([]string, 0, len(env.Sources))
 	for _, s := range env.Sources {
 		if s.Status != statusOK {
@@ -61,25 +61,17 @@ func itemsWithLowest(env envelope) ([]apievent.Item, []int64, error) {
 	var order []string
 	groups := make(map[string]*entityGroup)
 	for _, r := range env.Records {
-		seq, err := numberOrZero(r.Seq)
-		if err != nil {
-			return nil, nil, fmt.Errorf("record %q: seq: %w", r.ID, err)
-		}
-		version, err := numberOrZero(r.Version)
-		if err != nil {
-			return nil, nil, fmt.Errorf("record %q: version: %w", r.ID, err)
-		}
-		seqVal, _ := strconv.ParseFloat(string(seq), 64)
-		seqInt, _ := strconv.ParseInt(string(seq), 10, 64)
+		seq, version := r.Seq, r.Version
 		g, ok := groups[r.ID]
 		if !ok {
 			g = &entityGroup{id: r.ID, typ: r.Type, seen: map[string]bool{}, kinds: []string{}}
 			groups[r.ID] = g
-			g.minSeq = seqInt
+			g.minSeq = seq
+			g.seq = seq - 1 // so the first record always becomes the latest
 			order = append(order, r.ID)
 		}
-		if seqInt < g.minSeq {
-			g.minSeq = seqInt
+		if seq < g.minSeq {
+			g.minSeq = seq
 		}
 		for _, kind := range r.Kinds {
 			if !g.seen[kind] {
@@ -87,8 +79,8 @@ func itemsWithLowest(env envelope) ([]apievent.Item, []int64, error) {
 				g.kinds = append(g.kinds, kind)
 			}
 		}
-		if g.seq == "" || seqVal > g.seqVal {
-			g.seq, g.seqVal = seq, seqVal
+		if seq > g.seq {
+			g.seq = seq
 			g.typ, g.title, g.version, g.origin = r.Type, r.Title, version, r.Origin
 		}
 	}
@@ -98,7 +90,7 @@ func itemsWithLowest(env envelope) ([]apievent.Item, []int64, error) {
 		g := groups[id]
 		lows = append(lows, g.minSeq)
 		items = append(items, apievent.Item{
-			ID:    g.id + "@" + string(g.seq),
+			ID:    g.id + "@" + strconv.FormatInt(g.seq, 10),
 			Emit:  g.typ + changedSuffix,
 			Type:  g.typ,
 			Title: g.title,
@@ -120,13 +112,9 @@ func itemsWithLowest(env envelope) ([]apievent.Item, []int64, error) {
 // k the token (lowest sequence of item k+1) - 1 and the last item the
 // envelope's cursor.to, so every record at or below a token belongs to an item
 // at or before it. The lane of every item is its entity type.
-func withAck(items []apievent.Item, lows []int64, to json.Number) ([]apievent.Item, error) {
+func withAck(items []apievent.Item, lows []int64, last int64) ([]apievent.Item, error) {
 	if len(items) == 0 {
 		return items, nil
-	}
-	last, err := strconv.ParseInt(string(to), 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("envelope cursor.to %q is not an integer", string(to))
 	}
 	idx := make([]int, len(items))
 	for i := range idx {
@@ -144,18 +132,6 @@ func withAck(items []apievent.Item, lows []int64, to json.Number) ([]apievent.It
 		out[k] = it
 	}
 	return out, nil
-}
-
-// numberOrZero validates a JSON number copied from the envelope and keeps it
-// a number (json.Number marshals as its literal).
-func numberOrZero(n json.Number) (json.Number, error) {
-	if n == "" {
-		return json.Number("0"), nil
-	}
-	if _, err := strconv.ParseFloat(string(n), 64); err != nil {
-		return "", err
-	}
-	return n, nil
 }
 
 const rootLong = `Exposes pg-desk's change envelope as pg-router command-query items.
@@ -246,7 +222,9 @@ func newRootCmd() *cobra.Command {
 			fmt.Fprintf(stderr, "pg-router-source-pg-desk: pg-desk exited %d\n", res.exitCode)
 			return errFailed
 		}
-		var env envelope
+		var env deskapi.Changes
+		// Lenient on purpose: the contract evolves additively, so an unknown
+		// member must not stop a poll (the strict decode is the contract test's).
 		if err := json.Unmarshal(res.stdout, &env); err != nil {
 			fmt.Fprintf(stderr, "pg-router-source-pg-desk: pg-desk output is not a change envelope: %v\n", err)
 			return errFailed

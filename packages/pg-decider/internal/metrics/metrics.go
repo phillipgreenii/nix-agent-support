@@ -126,7 +126,7 @@ var _ apply.Hook = (*Hook)(nil)
 // New returns the metrics hook for one run on the entity typ/id. The view is
 // accepted for symmetry with the failure hook; the counters are derived from
 // the run's events.
-func New(_ *view.View, typ, id string) *Hook { return &Hook{typ: typ, id: id} }
+func New(_ *view.DeskView, typ, id string) *Hook { return &Hook{typ: typ, id: id} }
 
 // Routed records the routed item that triggered the run (nil without
 // --from-item), so the line carries its seq and id.

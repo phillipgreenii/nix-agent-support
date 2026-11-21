@@ -41,7 +41,7 @@ func suiteRaw(t *testing.T, name string) []byte {
 	return b
 }
 
-func suiteLoad(t *testing.T, name string) *view.View {
+func suiteLoad(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	v, err := view.Parse(suiteRaw(t, name))
 	if err != nil {
@@ -52,7 +52,7 @@ func suiteLoad(t *testing.T, name string) *view.View {
 
 // suitePatch loads a fixture, applies mutate to its decoded JSON object and
 // parses the result, so View.Raw stays consistent with the typed members.
-func suitePatch(t *testing.T, name string, mutate func(m map[string]any)) *view.View {
+func suitePatch(t *testing.T, name string, mutate func(m map[string]any)) *view.DeskView {
 	t.Helper()
 	var m map[string]any
 	if err := json.Unmarshal(suiteRaw(t, name), &m); err != nil {
@@ -80,7 +80,7 @@ func suiteSuppress(kinds ...string) func(m map[string]any) {
 	return func(m map[string]any) { suiteAnnotations(m)["suppress"] = kinds }
 }
 
-func suiteDecide(v *view.View) action.PlanResult { return decide.Decide(v, decide.EntityTypePR) }
+func suiteDecide(v *view.DeskView) action.PlanResult { return decide.Decide(v, decide.EntityTypePR) }
 
 func suiteRegisteredIDs() []string {
 	var ids []string
@@ -193,7 +193,7 @@ func TestHiddenEntityYieldsZeroActions(t *testing.T) {
 		t.Fatalf("the focus issue fixture must yield exactly one focus.item action, got %+v", got)
 	}
 
-	cases := map[string]*view.View{"pr_hidden (committed)": suiteLoad(t, "pr_hidden")}
+	cases := map[string]*view.DeskView{"pr_hidden (committed)": suiteLoad(t, "pr_hidden")}
 	for _, name := range suiteTriggerFixtures {
 		cases[name+" (hidden)"] = suitePatch(t, name, suiteHide)
 	}
@@ -364,18 +364,18 @@ func TestSuppressKindSkipsOnlyThatKind(t *testing.T) {
 
 func TestLandReadyNeverCreatesWorkItem(t *testing.T) {
 	const rule = "land.ready"
-	ready := func(t *testing.T) *view.View { return suiteLoad(t, "pr_land_ready") }
+	ready := func(t *testing.T) *view.DeskView { return suiteLoad(t, "pr_land_ready") }
 	cases := []struct {
 		name string
-		load func(t *testing.T) *view.View
+		load func(t *testing.T) *view.DeskView
 		want []string // annotate values land.ready writes; none when empty
 	}{
 		{"ready", ready, []string{"true"}},
-		{"ready and already annotated true", func(t *testing.T) *view.View { return suiteLoad(t, "pr_land_ready_annotated") }, nil},
-		{"not ready, annotated true", func(t *testing.T) *view.View { return suiteLoad(t, "pr_land_not_ready_annotated") }, []string{"false"}},
-		{"not ready", func(t *testing.T) *view.View { return suiteLoad(t, "pr_land_not_ready") }, nil},
-		{"team", func(t *testing.T) *view.View { return suiteLoad(t, "pr_team_ready") }, nil},
-		{"hidden", func(t *testing.T) *view.View { return suitePatch(t, "pr_land_ready", suiteHide) }, nil},
+		{"ready and already annotated true", func(t *testing.T) *view.DeskView { return suiteLoad(t, "pr_land_ready_annotated") }, nil},
+		{"not ready, annotated true", func(t *testing.T) *view.DeskView { return suiteLoad(t, "pr_land_not_ready_annotated") }, []string{"false"}},
+		{"not ready", func(t *testing.T) *view.DeskView { return suiteLoad(t, "pr_land_not_ready") }, nil},
+		{"team", func(t *testing.T) *view.DeskView { return suiteLoad(t, "pr_team_ready") }, nil},
+		{"hidden", func(t *testing.T) *view.DeskView { return suitePatch(t, "pr_land_ready", suiteHide) }, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -544,7 +544,7 @@ func TestWorkItemForCurrentContextNeverRecreated(t *testing.T) { // S26
 
 // suiteWantClosedWith checks the fixture's work item of kind k really is
 // closed and carries the close_reason the test name claims.
-func suiteWantClosedWith(t *testing.T, v *view.View, k workitem.Kind, reason string) {
+func suiteWantClosedWith(t *testing.T, v *view.DeskView, k workitem.Kind, reason string) {
 	t.Helper()
 	items := workitem.BuildIndex(v).ByKind(k)
 	if len(items) != 1 {

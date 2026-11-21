@@ -2231,7 +2231,6 @@
                 "claude-transcript"
                 "pg-failsig"
                 "pg-connector"
-                "pg-decider"
                 "pg-gwm"
                 "ccpool-probe"
                 "pg-rescue"
@@ -2357,6 +2356,22 @@
                       ./packages/pg-claude-code-recorder
                       ./packages/pg-sqlite
                       ./packages/pg-failsig
+                      # the pg-desk source adapter imports the published pg-desk contract package
+                      ./packages/pg-desk/go.mod
+                      ./packages/pg-desk/pkg/deskapi
+                    ];
+                  };
+                })
+                (goLint {
+                  module = "pg-decider";
+                  modRoot = "pg-decider";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-decider
+                      # the published pg-desk contract package (go.mod replace)
+                      ./packages/pg-desk/go.mod
+                      ./packages/pg-desk/pkg/deskapi
                     ];
                   };
                 })
@@ -2462,6 +2477,9 @@
                       ./packages/pg-claude-code-recorder
                       ./packages/pg-sqlite
                       ./packages/pg-failsig
+                      # the pg-desk source adapter imports the published pg-desk contract package
+                      ./packages/pg-desk/go.mod
+                      ./packages/pg-desk/pkg/deskapi
                     ];
                   };
                 })
@@ -2493,6 +2511,17 @@
               # runs everything else, so the check names and what each gates are
               # unchanged by the fold.
               routerMembers = import ./packages/pg-router/members.nix { inherit lib; };
+              # pg-decider reads the pg-desk contract through its published package
+              # (go.mod replace => ../pg-desk), so its build sandbox holds that
+              # module's go.mod and pkg/deskapi (golden files included) beside it.
+              pgDeciderSrc = lib.fileset.toSource {
+                root = ./packages;
+                fileset = lib.fileset.unions [
+                  ./packages/pg-decider
+                  ./packages/pg-desk/go.mod
+                  ./packages/pg-desk/pkg/deskapi
+                ];
+              };
               memberGoTests =
                 name: extraFlags: post:
                 memberGoTestsWith name extraFlags post {
@@ -7966,7 +7995,8 @@
               # gate. Pattern A: flat src at the module dir, no local replace.
               pg-decider-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
                 pname = "pg-decider-go-tests";
-                src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                src = pgDeciderSrc;
+                modRoot = "pg-decider";
                 gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
               };
 
@@ -8382,7 +8412,8 @@
               pg-decider-parity-gate =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-decider-parity-gate";
-                  src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                  src = pgDeciderSrc;
+                  modRoot = "pg-decider";
                   gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8453,7 +8484,8 @@
               pg-pr-change-real-tools =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-pr-change-real-tools";
-                  src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                  src = pgDeciderSrc;
+                  modRoot = "pg-decider";
                   gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8502,7 +8534,8 @@
               # change. Post-land verify role, or on demand.
               pg-pr-change-bd-contract-tests = mkBdContractCheck {
                 pname = "pg-pr-change-bd-contract-tests";
-                src = lib.cleanSource ./packages/pg-decider;
+                src = pgDeciderSrc;
+                modRoot = "pg-decider";
                 gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
                 runRegex = "^TestPRChangeRealBD_";
                 testPackages = [ "./internal/prchange/" ];
@@ -8597,7 +8630,8 @@
               pg-pr-backfill-real-tools =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-pr-backfill-real-tools";
-                  src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                  src = pgDeciderSrc;
+                  modRoot = "pg-decider";
                   gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {
@@ -8671,7 +8705,8 @@
               pg-decider-lane-fake =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-decider-lane-fake";
-                  src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                  src = pgDeciderSrc;
+                  modRoot = "pg-decider";
                   gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
                 }).overrideAttrs
                   (_: {

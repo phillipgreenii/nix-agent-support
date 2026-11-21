@@ -41,7 +41,7 @@
       "labels": [],
       "metadata": {
         "repo": "acme/widgets",
-        "pr_number": 42,
+        "pr_number": "42",
         "dedup_key": "pr:acme/widgets#42:anchor"
       }
     },
@@ -53,7 +53,7 @@
       "title": "review-pr: acme/widgets#42",
       "metadata": {
         "repo": "acme/widgets",
-        "pr_number": 42,
+        "pr_number": "42",
         "head_sha": "9f3c1e2",
         "dedup_key": "pr:acme/widgets#42:review-pr"
       }

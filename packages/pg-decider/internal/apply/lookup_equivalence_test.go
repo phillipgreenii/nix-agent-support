@@ -66,7 +66,7 @@ func entities(bs []corpusBead) string {
 func TestPerPRLookupEqualsTheFilteredFullListingForEveryPR(t *testing.T) {
 	all := corpus()
 	for n := 1000; n < 1006; n++ {
-		v := &view.View{Type: "pr", ID: fmt.Sprintf("acme/api#%d", n), Snapshot: view.PRSnapshot{Repo: "acme/api", Number: n}}
+		v := &view.DeskView{Type: "pr", ID: fmt.Sprintf("acme/api#%d", n), Snapshot: view.PRSnapshot{Repo: "acme/api", Number: n}}
 		full := newDouble(t, respRule{Match: "issue list", Stdout: listing(entities(all), "")})
 		fl, err := ReadLookup(context.Background(), testEnv(full, lookupCfg()), v)
 		if err != nil {

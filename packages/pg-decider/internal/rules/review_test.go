@@ -15,7 +15,7 @@ import (
 
 const reviewHead = "9f3c1e2"
 
-func reviewLoadView(t *testing.T, name string) *view.View {
+func reviewLoadView(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "review", name+".json"))
 	if err != nil {

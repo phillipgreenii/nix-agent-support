@@ -16,7 +16,7 @@ import (
 
 const fixciRuleID = "fixci.failing-on-head"
 
-func fixciLoadView(t *testing.T, name string) *view.View {
+func fixciLoadView(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "fixci", name+".json"))
 	if err != nil {
@@ -304,7 +304,7 @@ func TestFixCIRerunAfterApplyWritesNothing(t *testing.T) {
 	for k, val := range create.Fields.Metadata {
 		md[k] = val
 	}
-	v.Links = append(v.Links, view.Link{
+	v.Links = append(v.Links, view.LinkedEntity{
 		Type: "issue", ID: "bd-new", Relation: "work", State: "open",
 		Title: create.Fields.Title, Labels: create.Fields.Labels, Metadata: md,
 	})
@@ -386,8 +386,8 @@ func TestCIFailingAndGreenPredicatesMatchDeskCIStatus(t *testing.T) {
 	}
 }
 
-func TestCIRunDecodingToleratesNumericIDAndMissingAttempt(t *testing.T) {
-	v, err := view.Parse([]byte(`{"contract":"pg-desk.view/v1","type":"pr","id":"x","ci":{"runs":[{"id":123,"name":"n","status":"completed","conclusion":"failure"}]}}`))
+func TestCIRunDecodingToleratesMissingAttempt(t *testing.T) {
+	v, err := view.Parse([]byte(`{"contract":"pg-desk.view/v1","type":"pr","id":"x","ci":{"runs":[{"id":"123","name":"n","status":"completed","conclusion":"failure"}]}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

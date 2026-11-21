@@ -19,7 +19,7 @@ import (
 
 const nodeidRuleID = "adoption.node-id"
 
-func nodeidLoadView(t *testing.T, name string) *view.View {
+func nodeidLoadView(t *testing.T, name string) *view.DeskView {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "nodeid", name+".json"))
 	if err != nil {

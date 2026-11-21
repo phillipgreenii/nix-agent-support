@@ -29,7 +29,7 @@ func (lazyAnchor) Evaluate(in decide.Input) decide.Result {
 	}}}
 }
 
-func decideAndApply(t *testing.T, entityType string, v *view.View) (*double, Result) {
+func decideAndApply(t *testing.T, entityType string, v *view.DeskView) (*double, Result) {
 	t.Helper()
 	d := newDouble(t)
 	plan := decide.Decide(v, entityType)
@@ -61,7 +61,7 @@ func TestUnchangedStateProducesZeroWrites(t *testing.T) {
 
 	// The state that run produced: the anchor is linked from the view.
 	v := prView()
-	v.Links = []view.Link{{
+	v.Links = []view.LinkedEntity{{
 		Type: "issue", ID: "wb-1", State: "open",
 		Title:    prID + ": anchor",
 		Metadata: map[string]string{"dedup_key": "pr:" + prID + ":anchor"},

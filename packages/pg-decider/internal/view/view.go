@@ -1,7 +1,9 @@
 // Package view decodes the pg-desk composite view contract `pg-desk.view/v1`
 // (docs/behavior/pg-desk/show.md) and reads it by exec'ing
-// `pg-desk <type> show <id> --json`. It never imports packages/pg-desk or
-// packages/pg-connector: the JSON is decoded with this module's own structs.
+// `pg-desk <type> show <id> --json`. The wire shape is the published contract
+// package packages/pg-desk/pkg/deskapi; the module never imports the rest of
+// packages/pg-desk or packages/pg-connector (the PR and issue snapshots are
+// decoded with this module's own structs).
 package view
 
 import (
@@ -9,13 +11,16 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/pkg/deskapi"
 )
 
 // Contract is the only view contract this module understands.
-const Contract = "pg-desk.view/v1"
+const Contract = deskapi.ViewContract
 
-// View is one decoded composite view.
-type View struct {
+// DeskView is one decoded composite view: the deskapi wire members plus the
+// decoded snapshots and the presence-tracked focus_selected member.
+type DeskView struct {
 	// Raw is the complete printed JSON, so later packets can decode members
 	// added after this one landed.
 	Raw                json.RawMessage
@@ -32,7 +37,12 @@ type View struct {
 	SnapshotRaw json.RawMessage
 	Decorations Decorations
 	Annotations Annotations
-	Links       []Link
+	// FocusSelected is annotations.focus_selected, with presence tracked
+	// (deskapi decodes it as a pointer, which cannot tell absent from null).
+	FocusSelected FocusSelected
+	Links         []LinkedEntity
+	// CI is the pr view's optional ci section (nil when absent).
+	CI *deskapi.CI
 	// ThreadChanges are the thread change records the view shows (the
 	// optional `thread_changes` member, absent today: no connector feeds it
 	// yet).
@@ -88,44 +98,12 @@ type Comment struct {
 	Resolved bool   `json:"resolved"`
 }
 
-// Decorations are the stored interpretation of the entity.
-type Decorations struct {
-	// Relationship is "mine", "co-owned" or "team".
-	Relationship string        `json:"relationship"`
-	Dispositions []Disposition `json:"dispositions"`
-	Urgency      string        `json:"urgency"`
-	Category     string        `json:"category"`
-}
-
-// Disposition is one comment's computed disposition and its override.
-type Disposition struct {
-	CommentID string  `json:"comment_id"`
-	Computed  string  `json:"computed"`
-	Override  *string `json:"override"`
-}
-
-// Annotations are the operator/decider-set annotations of the entity.
-type Annotations struct {
-	Hidden struct {
-		Value  bool    `json:"value"`
-		Reason *string `json:"reason"`
-	} `json:"hidden"`
-	WIP         bool     `json:"wip"`
-	Suppress    []string `json:"suppress"`
-	ForceReview bool     `json:"force_review"`
-	// ForceReviewSHA is annotations.force_review_sha: nil when unset.
-	ForceReviewSHA *string `json:"force_review_sha"`
-	// ReadyToLand is annotations.ready_to_land: nil when unset (member added
-	// by pg2-2j5ac.52.14.13).
-	ReadyToLand *bool `json:"ready_to_land,omitempty"`
-	// FocusSelected is annotations.focus_selected, with presence tracked:
-	// a member absent from the printed view (an older pg-desk, or a
-	// rollback) is NOT the same as a present null. The focus rule decides
-	// how a run fails closed on an absent member; the reader does not.
-	FocusSelected FocusSelected `json:"focus_selected"`
-	// Decider maps decider name -> key -> value.
-	Decider map[string]map[string]string `json:"decider"`
-}
+// Decorations, Disposition and Annotations are the deskapi wire shapes.
+type (
+	Decorations = deskapi.Decorations
+	Disposition = deskapi.Disposition
+	Annotations = deskapi.Annotations
+)
 
 // FocusSelected is the annotations.focus_selected member decoded with
 // presence. The four observable states are: absent (Present false), present
@@ -168,96 +146,65 @@ func (f FocusSelected) Selected() (period string, ok bool) {
 	return f.Value, true
 }
 
-// Link is one entity linked to the viewed one.
-type Link struct {
+// LinkedEntity is one entity linked to the viewed one, flattened from the
+// deskapi link (pointer members dereferenced, origins reduced to their names).
+type LinkedEntity struct {
 	Type, ID, Relation, URL, State, Assignee string
 	Labels, Origins                          []string
-	// Metadata holds the linked entity's metadata; scalar values are
-	// rendered as their JSON text (strings unquoted).
+	// Metadata holds the linked entity's metadata.
 	Metadata map[string]string
-	// Title is the linked entity's stored title, "" when none (member added
-	// by pg2-2j5ac.52.14.13).
+	// Title is the linked entity's stored title, "" when none.
 	Title string
 }
 
-// UnmarshalJSON decodes a printed link. origins[] are objects whose
-// `origin` member (e.g. "derived:branch-name") becomes the string entry.
-func (l *Link) UnmarshalJSON(data []byte) error {
-	var w struct {
-		Type     string                     `json:"type"`
-		ID       string                     `json:"id"`
-		Relation string                     `json:"relation"`
-		URL      string                     `json:"url"`
-		State    string                     `json:"state"`
-		Assignee string                     `json:"assignee"`
-		Title    string                     `json:"title"`
-		Labels   []string                   `json:"labels"`
-		Metadata map[string]json.RawMessage `json:"metadata"`
-		Origins  []json.RawMessage          `json:"origins"`
+func linkedEntity(l deskapi.Link) LinkedEntity {
+	out := LinkedEntity{
+		Type: l.Type, ID: l.ID, Relation: l.Relation, URL: l.URL, State: l.State, Title: l.Title,
 	}
-	if err := json.Unmarshal(data, &w); err != nil {
-		return err
+	if l.Assignee != nil {
+		out.Assignee = *l.Assignee
 	}
-	*l = Link{
-		Type: w.Type, ID: w.ID, Relation: w.Relation, URL: w.URL, State: w.State,
-		Assignee: w.Assignee, Title: w.Title, Labels: w.Labels,
+	if l.Labels != nil {
+		out.Labels = *l.Labels
 	}
-	if w.Metadata != nil {
-		l.Metadata = make(map[string]string, len(w.Metadata))
-		for k, raw := range w.Metadata {
-			var s string
-			if json.Unmarshal(raw, &s) == nil {
-				l.Metadata[k] = s
-			} else {
-				l.Metadata[k] = strings.TrimSpace(string(raw))
-			}
-		}
+	if l.Metadata != nil {
+		out.Metadata = *l.Metadata
 	}
-	for _, raw := range w.Origins {
-		var s string
-		if json.Unmarshal(raw, &s) == nil {
-			l.Origins = append(l.Origins, s)
-			continue
-		}
-		var o struct {
-			Origin string `json:"origin"`
-		}
-		if err := json.Unmarshal(raw, &o); err != nil {
-			return fmt.Errorf("link %q origin: %w", w.ID, err)
-		}
-		l.Origins = append(l.Origins, o.Origin)
+	for _, o := range l.Origins {
+		out.Origins = append(out.Origins, o.Origin)
 	}
-	return nil
+	return out
 }
 
 // Parse decodes one printed view. Unknown members are tolerated; a contract
 // other than Contract is an error. View.Raw is data.
-func Parse(data []byte) (*View, error) {
-	var w struct {
-		Contract    string          `json:"contract"`
-		Type        string          `json:"type"`
-		ID          string          `json:"id"`
-		Version     int64           `json:"version"`
-		AsOf        string          `json:"as_of"`
-		Stale       bool            `json:"stale"`
-		Snapshot    json.RawMessage `json:"snapshot"`
-		Decorations Decorations     `json:"decorations"`
-		Annotations Annotations     `json:"annotations"`
-		Links       []Link          `json:"links"`
-
-		ThreadChanges []ThreadChange `json:"thread_changes"`
-	}
+func Parse(data []byte) (*DeskView, error) {
+	var w deskapi.View
 	if err := json.Unmarshal(data, &w); err != nil {
 		return nil, fmt.Errorf("parse view: %w", err)
 	}
 	if w.Contract != Contract {
 		return nil, fmt.Errorf("unsupported view contract %q (want %q)", w.Contract, Contract)
 	}
-	v := &View{
+	// Members deskapi does not carry: focus_selected with presence, and the
+	// optional thread_changes.
+	var extra struct {
+		Annotations struct {
+			FocusSelected FocusSelected `json:"focus_selected"`
+		} `json:"annotations"`
+		ThreadChanges []ThreadChange `json:"thread_changes"`
+	}
+	if err := json.Unmarshal(data, &extra); err != nil {
+		return nil, fmt.Errorf("parse view: %w", err)
+	}
+	v := &DeskView{
 		Raw: json.RawMessage(data), Contract: w.Contract, Type: w.Type, ID: w.ID,
 		Version: w.Version, AsOf: w.AsOf, Stale: w.Stale, SnapshotRaw: w.Snapshot,
-		Decorations: w.Decorations, Annotations: w.Annotations, Links: w.Links,
-		ThreadChanges: w.ThreadChanges,
+		Decorations: w.Decorations, Annotations: w.Annotations, CI: w.CI,
+		FocusSelected: extra.Annotations.FocusSelected, ThreadChanges: extra.ThreadChanges,
+	}
+	for _, l := range w.Links {
+		v.Links = append(v.Links, linkedEntity(l))
 	}
 	if w.Type == "pr" && len(w.Snapshot) > 0 && string(w.Snapshot) != "null" {
 		if err := json.Unmarshal(w.Snapshot, &v.Snapshot); err != nil {

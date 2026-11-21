@@ -4,19 +4,14 @@
 package rules
 
 import (
-	"encoding/json"
 	"strconv"
-	"strings"
 
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
 // ciRun is one entry of the composite view's additive `ci` section
-// (`"ci": {"runs": [{"id", "attempt", "name", "status", "conclusion",
-// "url"}]}`, docs/behavior/pg-desk/show.md). View does not decode that section,
-// so the rules that need it read it from View.Raw through this struct. A build
-// id is the run's ID plus its Attempt: GitHub keeps a run's id when it is
-// re-run.
+// (docs/behavior/pg-desk/show.md), flattened from deskapi.CIRun. A build id is
+// the run's ID plus its Attempt: GitHub keeps a run's id when it is re-run.
 type ciRun struct {
 	ID         string
 	Attempt    int
@@ -31,56 +26,26 @@ type ciRun struct {
 	Required *bool
 }
 
-// UnmarshalJSON accepts the run id as a string (the documented shape) or a
-// bare number, and a missing or null attempt as 0.
-func (r *ciRun) UnmarshalJSON(data []byte) error {
-	var w struct {
-		ID         json.RawMessage `json:"id"`
-		Attempt    *int            `json:"attempt"`
-		Name       string          `json:"name"`
-		Status     string          `json:"status"`
-		Conclusion string          `json:"conclusion"`
-		URL        string          `json:"url"`
-		Required   *bool           `json:"required"`
-	}
-	if err := json.Unmarshal(data, &w); err != nil {
-		return err
-	}
-	*r = ciRun{Name: w.Name, Status: w.Status, Conclusion: w.Conclusion, URL: w.URL, Required: w.Required}
-	if len(w.ID) > 0 && string(w.ID) != "null" {
-		var s string
-		if json.Unmarshal(w.ID, &s) == nil {
-			r.ID = s
-		} else {
-			r.ID = strings.TrimSpace(string(w.ID))
-		}
-	}
-	if w.Attempt != nil {
-		r.Attempt = *w.Attempt
-	}
-	return nil
-}
-
 // buildID is the run id plus attempt, "<run id>:<attempt>": the encoding of one
 // entry of a fix-ci item's failing_builds list.
 func (r ciRun) buildID() string { return r.ID + ":" + strconv.Itoa(r.Attempt) }
 
-// ciRuns decodes the runs of the view's `ci` section. It returns nil when the
-// view is nil, carries no `ci` section (a binary that predates it) or the
-// section does not decode: "no CI data" is never a failure or a green.
-func ciRuns(v *view.View) []ciRun {
-	if v == nil || len(v.Raw) == 0 {
+// ciRuns returns the runs of the view's `ci` section (decoded by view.Parse
+// through the deskapi contract). It returns nil when the view is nil or carries
+// no `ci` section (a binary that predates it): "no CI data" is never a failure
+// or a green.
+func ciRuns(v *view.DeskView) []ciRun {
+	if v == nil || v.CI == nil {
 		return nil
 	}
-	var w struct {
-		CI *struct {
-			Runs []ciRun `json:"runs"`
-		} `json:"ci"`
+	var out []ciRun
+	for _, r := range v.CI.Runs {
+		out = append(out, ciRun{
+			ID: r.ID, Attempt: r.Attempt, Name: r.Name, Status: r.Status,
+			Conclusion: r.Conclusion, URL: r.URL, Required: r.Required,
+		})
 	}
-	if err := json.Unmarshal(v.Raw, &w); err != nil || w.CI == nil {
-		return nil
-	}
-	return w.CI.Runs
+	return out
 }
 
 // ciRunPending is pg-desk's notion of a run still in flight: not completed, or

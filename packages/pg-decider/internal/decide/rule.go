@@ -21,7 +21,7 @@ import (
 // Input is what every rule evaluates. The core builds it once per run, so
 // rules never rebuild the work-item index.
 type Input struct {
-	View       *view.View
+	View       *view.DeskView
 	Items      *workitem.Index
 	EntityType string
 	// Config is the decider's configuration, read as data (a rule never

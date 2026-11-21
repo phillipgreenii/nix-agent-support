@@ -93,13 +93,13 @@ var ErrFocusSelectedAbsent = errors.New("the view lacks annotations.focus_select
 // rule serves lacks annotations.focus_selected. A present null is fine: it
 // means unset. plan and apply call it before any rule or hook runs, so
 // nothing is written. It returns nil for a nil view and for any other type.
-func CheckFocusView(v *view.View, entityType string) error {
+func CheckFocusView(v *view.DeskView, entityType string) error {
 	if v == nil {
 		return nil
 	}
 	for _, t := range focusEntityTypes {
 		if t == entityType {
-			if !v.Annotations.FocusSelected.Present {
+			if !v.FocusSelected.Present {
 				return ErrFocusSelectedAbsent
 			}
 			return nil
@@ -125,11 +125,11 @@ func (focusItemRule) Evaluate(in decide.Input) decide.Result {
 	v := in.View
 	bead, hasBead := in.Items.Find(workitem.KindFocusItem, workitem.Context{})
 
-	period, selected := v.Annotations.FocusSelected.Selected()
-	if !selected && !focusIsStrike(v.Annotations.FocusSelected) {
+	period, selected := v.FocusSelected.Selected()
+	if !selected && !focusIsStrike(v.FocusSelected) {
 		// Absent (the run fails closed elsewhere) or a malformed key.
 		cause := focusCauseMalformedKey
-		if !v.Annotations.FocusSelected.Present {
+		if !v.FocusSelected.Present {
 			cause = focusCauseNoSelection
 		}
 		return focusSkip(action.ReasonNotMatched, cause, bead, hasBead, nil)
@@ -172,7 +172,7 @@ func focusNoBead(in decide.Input, period string, selected, terminal bool) decide
 	return decide.Result{Actions: []action.Action{focusMint(in, period)}}
 }
 
-func focusWithBead(v *view.View, bead workitem.Item, selected, terminal bool) decide.Result {
+func focusWithBead(v *view.DeskView, bead workitem.Item, selected, terminal bool) decide.Result {
 	skip := func(cause string) decide.Result {
 		return focusSkip(action.ReasonAlreadyHandled, cause, bead, true, nil)
 	}
@@ -248,7 +248,7 @@ func focusSkip(reason, cause string, bead workitem.Item, hasBead bool, extra map
 
 // focusUpdate is the single update of a hold or a release. flags are extra
 // boolean facts (only "marker_only" today).
-func focusUpdate(bead workitem.Item, transition string, f action.Fields, v *view.View, flags ...string) decide.Result {
+func focusUpdate(bead workitem.Item, transition string, f action.Fields, v *view.DeskView, flags ...string) decide.Result {
 	target := bead.ID
 	facts := map[string]any{
 		"transition":  transition,
@@ -303,7 +303,7 @@ func focusMint(in decide.Input, period string) action.Action {
 // focusSource reads what the bead shape needs from the source's snapshot: the
 // reference the title uses, the source's title and URL, its tracker priority
 // name and its tracker issue type. A PR has no priority or issue type.
-func focusSource(v *view.View) (ref, title, url, priority, issueType string) {
+func focusSource(v *view.DeskView) (ref, title, url, priority, issueType string) {
 	if v.Type == decide.EntityTypePR {
 		s := v.Snapshot
 		ref = v.ID
@@ -356,7 +356,7 @@ var focusIssueDoneStates = map[string]bool{
 // terminal when anchorPRState reports merged or closed; an issue source when
 // status_category is "done" or, when the category is empty, when its state is
 // one of focusIssueDoneStates.
-func focusSourceTerminal(v *view.View) bool {
+func focusSourceTerminal(v *view.DeskView) bool {
 	if v.Type == decide.EntityTypePR {
 		st := anchorPRState(v.Snapshot)
 		return st == anchorPRStateClosed || st == anchorPRStateMerged

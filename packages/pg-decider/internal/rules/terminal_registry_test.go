@@ -33,7 +33,7 @@ func terminalAnchorGroup(id string) bool {
 
 // terminalViolations evaluates every rule outside the anchor group against v
 // and describes each one that emits an action.
-func terminalViolations(rules []decide.Rule, v *view.View) []string {
+func terminalViolations(rules []decide.Rule, v *view.DeskView) []string {
 	in := decide.Input{View: v, Items: workitem.BuildIndex(v), EntityType: decide.EntityTypePR}
 	var out []string
 	for _, r := range rules {

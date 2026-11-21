@@ -88,7 +88,7 @@ func kindFromTitle(title string) (Kind, bool) {
 }
 
 // entityTitleRef is the <repo>#<n> reference titles use for this entity.
-func entityTitleRef(v *view.View) string {
+func entityTitleRef(v *view.DeskView) string {
 	if s := v.Snapshot; s.Repo != "" && s.Number > 0 {
 		return fmt.Sprintf("%s#%d", s.Repo, s.Number)
 	}
@@ -116,7 +116,7 @@ func titleNamesKind(title string, k Kind, ref string) bool {
 // keyed work item and is indexed like any other. A keyless link of relation
 // "source" is never adoptable, whatever its title looks like: a focus bead is
 // not the PR's own work, so it is never adopted as an anchor or a child.
-func BuildIndex(v *view.View) *Index {
+func BuildIndex(v *view.DeskView) *Index {
 	ix := &Index{}
 	if v == nil {
 		return ix
@@ -310,7 +310,7 @@ func (ix *Index) Adoptable() []Adoptable {
 // the entity reference ("fix-ci: <repo>#<n>") or the anchor prefix
 // "<repo>#<n>: ". The all-status lookup uses it to keep a legacy keyless item
 // that a metadata-only filter would hide.
-func TitleNames(title string, v *view.View) bool {
+func TitleNames(title string, v *view.DeskView) bool {
 	if v == nil {
 		return false
 	}

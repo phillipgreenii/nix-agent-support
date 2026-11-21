@@ -9,16 +9,23 @@
 mkGoApp {
   pname = "pg-decider";
 
-  # Pattern A (phillipg-nix-repo-base ADR 0008): a single module rooted at
-  # this package dir, with go.mod and the committed gomod2nix.toml side by
-  # side. No local `replace`, so no modRoot and no parent-rooted fileset are
-  # needed (mirrors packages/pg-router-source-pg-desk/default.nix).
-  #
-  # This binary has no compile-time dependency on packages/pg-desk or
-  # packages/pg-connector: it execs them as subprocesses and parses their
-  # stdout JSON generically.
-  src = lib.cleanSource ./.;
-  modRoot = null;
+  # Pattern B (phillipg-nix-repo-base ADR 0008): go.mod replaces ../pg-desk for
+  # its published contract package (pkg/deskapi, standard library only), so the
+  # build sandbox holds this module and that one package at their relative
+  # positions. The rest of pg-desk is not a compile-time dependency: the binary
+  # execs pg-desk and pg-connector as subprocesses.
+  src = lib.fileset.toSource {
+    root = ./..;
+    fileset = lib.fileset.unions [
+      ./.
+      ../pg-desk/go.mod
+      ../pg-desk/pkg/deskapi
+    ];
+  };
+  modRoot = "pg-decider";
+
+  # go.work is for the editor and go-work-vet only; a build resolves through go.mod.
+  env.GOWORK = "off";
 
   gomod2nixToml = ./gomod2nix.toml;
 

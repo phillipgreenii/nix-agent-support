@@ -340,7 +340,7 @@ func TestFocusHoldReleaseCycleRealBD(t *testing.T) {
 	}
 	// applyOne plans the single focus.item action of v and applies it through
 	// apply.Run, returning the plan and its one event.
-	applyOne := func(v *view.View) (action.Action, Event) {
+	applyOne := func(v *view.DeskView) (action.Action, Event) {
 		t.Helper()
 		a := focusArgvPlan(t, v, w.cfg())
 		res := Run(ctx, Input{Type: v.Type, ID: v.ID, View: v, Actions: []action.Action{a}, Env: env})

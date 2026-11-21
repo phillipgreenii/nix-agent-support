@@ -65,7 +65,7 @@ const (
 
 // Hook implements apply.Hook.
 type Hook struct {
-	view        *view.View
+	view        *view.DeskView
 	typ, id     string
 	state       map[string]string // annotations.decider[<type>-decider]
 	onEscalate  func(rule string)
@@ -76,7 +76,7 @@ var _ apply.Hook = (*Hook)(nil)
 
 // New returns the failure hook for one run on the entity typ/id whose freshly
 // read view is v.
-func New(v *view.View, typ, id string) *Hook {
+func New(v *view.DeskView, typ, id string) *Hook {
 	h := &Hook{view: v, typ: typ, id: id}
 	name := typ + "-decider"
 	if v != nil {

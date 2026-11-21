@@ -96,7 +96,7 @@ func TestApplyFailsClosedWhenFocusSelectedIsAbsentAndWritesNothing(t *testing.T)
 			recs := recordWrites(t, []action.Action{{Op: action.OpClose, Rule: "r", Target: str("wb-1")}}, `{"result":{}}`, "0")
 			decided := false
 			inner := decideFn
-			decideFn = func(v *view.View, typ string, cfg *config.Config) action.PlanResult {
+			decideFn = func(v *view.DeskView, typ string, cfg *config.Config) action.PlanResult {
 				decided = true
 				return inner(v, typ, cfg)
 			}

@@ -27,7 +27,7 @@ import (
 
 // decideFn computes the action list from the view and the configuration (the
 // rules read it as data); tests swap it.
-var decideFn = func(v *view.View, entityType string, cfg *config.Config) action.PlanResult {
+var decideFn = func(v *view.DeskView, entityType string, cfg *config.Config) action.PlanResult {
 	return decide.DecideWith(v, entityType, cfg)
 }
 
@@ -38,7 +38,7 @@ var applyRunner apply.Runner = apply.ExecRunner
 // applyHooks returns the per-action hooks of an apply run, in call order: the
 // audit comment, then the failure counter and escalation, then the run
 // counters (which count the escalations the failure hook created).
-var applyHooks = func(v *view.View, typ, id string, it *item.Routed, skipped []action.Skip, lk *apply.Lookup) []apply.Hook {
+var applyHooks = func(v *view.DeskView, typ, id string, it *item.Routed, skipped []action.Skip, lk *apply.Lookup) []apply.Hook {
 	fail := failure.New(v, typ, id)
 	run := metrics.New(v, typ, id)
 	run.Routed(it)

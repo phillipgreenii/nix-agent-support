@@ -67,7 +67,7 @@ func focusChildrenRule(stdout string) respRule {
 	return respRule{Match: "pg-connector issue children " + focusBeadID, Stdout: stdout}
 }
 
-func focusRun(t *testing.T, d *double, cfg *config.Config, errBuf *bytes.Buffer, v *view.View, acts ...action.Action) Result {
+func focusRun(t *testing.T, d *double, cfg *config.Config, errBuf *bytes.Buffer, v *view.DeskView, acts ...action.Action) Result {
 	t.Helper()
 	env := testEnv(d, cfg)
 	if errBuf != nil {
@@ -458,9 +458,9 @@ func focusListing(key string, beads ...[2]string) string {
 	return `{"entities":[` + strings.Join(ents, ",") + `],"present_ids":[],"sources":[]}`
 }
 
-func focusLinkedView() *view.View {
+func focusLinkedView() *view.DeskView {
 	v := prView()
-	v.Links = []view.Link{{
+	v.Links = []view.LinkedEntity{{
 		Type: "issue", ID: "bd-focus-9", Relation: "source", State: "open", Labels: []string{"focus-item"},
 		Metadata: map[string]string{"dedup_key": focusKey, "source_type": "pr", "source_id": prID},
 	}}

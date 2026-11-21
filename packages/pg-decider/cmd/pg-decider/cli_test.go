@@ -18,11 +18,11 @@ func fixture(name string) string { return filepath.Join("..", "..", "testdata", 
 type seamCalls struct {
 	planTyp, planID string
 	planJSON        bool
-	planView        *view.View
+	planView        *view.DeskView
 	applyTyp        string
 	applyID         string
 	applyItem       *item.Routed
-	applyView       *view.View
+	applyView       *view.DeskView
 	calls           int
 }
 

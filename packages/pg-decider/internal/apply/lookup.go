@@ -157,7 +157,7 @@ const (
 
 // PRIdentity is the repository and number of the viewed PR: the snapshot's
 // when it carries both, else parsed from the view id ("<owner/name>#<n>").
-func PRIdentity(v *view.View) (repo, number string, ok bool) {
+func PRIdentity(v *view.DeskView) (repo, number string, ok bool) {
 	if v == nil {
 		return "", "", false
 	}
@@ -199,7 +199,7 @@ func paramArgs(names []string, repo, number string) ([]string, error) {
 // partial Lookup) for an unset query, a failed or unreadable call, a
 // source that did not succeed, a truncated listing, a PR with no identity to send, and a per-PR answer that lacks a work
 // item the view's index owns or adopts.
-func ReadLookup(ctx context.Context, env Env, v *view.View) (*Lookup, error) {
+func ReadLookup(ctx context.Context, env Env, v *view.DeskView) (*Lookup, error) {
 	cfg := env.Config
 	if cfg == nil || cfg.WorkItemsQuery == "" {
 		return nil, &LookupError{
@@ -266,7 +266,7 @@ func ReadLookup(ctx context.Context, env Env, v *view.View) (*Lookup, error) {
 // per-PR answer does not hold. A per-PR query is a narrower read than the whole
 // listing, so an item it fails to return would be minted again; any such item
 // makes the answer untrusted.
-func missingOwned(v *view.View, items []ListedItem) []string {
+func missingOwned(v *view.DeskView, items []ListedItem) []string {
 	have := make(map[string]bool, len(items))
 	for _, it := range items {
 		have[it.ID] = true
@@ -287,7 +287,7 @@ func missingOwned(v *view.View, items []ListedItem) []string {
 // shapes the work-item behavior doc adopts by: the kind prefix plus the PR
 // reference, or the anchor prefix "<repo>#<n>: ". A metadata-only filter would
 // hide the keyless ones and mint duplicates.
-func belongs(it ListedItem, ref workitem.EntityRef, v *view.View) bool {
+func belongs(it ListedItem, ref workitem.EntityRef, v *view.DeskView) bool {
 	if k := it.Metadata["dedup_key"]; k != "" {
 		if _, _, _, _, ok := workitem.ParseKey(k); ok {
 			return ref.Owns(k)
@@ -310,7 +310,7 @@ func belongs(it ListedItem, ref workitem.EntityRef, v *view.View) bool {
 // keyless legacy anchor is adopted instead of duplicated. A focus bead is
 // added with the "source" relation, as the focus watch links it. v itself is
 // not modified; with nothing to add, v is returned.
-func (l *Lookup) Augment(v *view.View) *view.View {
+func (l *Lookup) Augment(v *view.DeskView) *view.DeskView {
 	if l == nil || v == nil {
 		return v
 	}
@@ -321,12 +321,12 @@ func (l *Lookup) Augment(v *view.View) *view.View {
 			linked[lk.ID] = true
 		}
 	}
-	var add []view.Link
+	var add []view.LinkedEntity
 	for _, it := range l.items {
 		if linked[it.ID] || !belongs(it, ref, v) {
 			continue
 		}
-		link := view.Link{
+		link := view.LinkedEntity{
 			Type: "issue", ID: it.ID, Title: it.Title, State: it.State, Assignee: it.Assignee,
 			Labels: append([]string(nil), it.Labels...), Metadata: cloneMD(it.Metadata),
 		}
@@ -339,7 +339,7 @@ func (l *Lookup) Augment(v *view.View) *view.View {
 		return v
 	}
 	out := *v
-	out.Links = append(append([]view.Link(nil), v.Links...), add...)
+	out.Links = append(append([]view.LinkedEntity(nil), v.Links...), add...)
 	return &out
 }
 

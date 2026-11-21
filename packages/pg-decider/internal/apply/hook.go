@@ -77,7 +77,7 @@ type Hook interface {
 // Input is one apply run.
 type Input struct {
 	Type, ID string
-	View     *view.View
+	View     *view.DeskView
 	Actions  []action.Action
 	Item     *item.Routed // nil without --from-item
 	Env      Env

@@ -41,8 +41,8 @@ type viewCtxKey struct{}
 // viewFromContext returns the view the CLI read for this invocation (nil
 // outside a command run). The seams receive it through their context so
 // their pinned signatures stay unchanged and the view is read exactly once.
-func viewFromContext(ctx context.Context) *view.View {
-	v, _ := ctx.Value(viewCtxKey{}).(*view.View)
+func viewFromContext(ctx context.Context) *view.DeskView {
+	v, _ := ctx.Value(viewCtxKey{}).(*view.DeskView)
 	return v
 }
 

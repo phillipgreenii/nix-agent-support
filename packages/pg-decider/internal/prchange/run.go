@@ -98,7 +98,7 @@ type run struct {
 	key DeliveryKey
 	// view is the stored view the decider decides on, read after a successful
 	// refresh.
-	view *view.View
+	view *view.DeskView
 	// rec is the run record under construction; failStage and failClass are set
 	// by fail.
 	rec                  RunRecord
@@ -344,12 +344,12 @@ func (r *run) refreshFailed(res Result) int {
 
 // readView reads the stored composite view of the PR. On failure it returns the
 // class to report and the detail.
-func (r *run) readView() (v *view.View, class, detail string) {
+func (r *run) readView() (v *view.DeskView, class, detail string) {
 	return viewFromResult(r.call(Call{Name: "pg-desk", Args: []string{"pr", "show", r.id, "--json"}}))
 }
 
 // viewFromResult decodes the result of `pg-desk pr show <id> --json`.
-func viewFromResult(res Result) (v *view.View, class, detail string) {
+func viewFromResult(res Result) (v *view.DeskView, class, detail string) {
 	switch {
 	case res.StartErr != nil:
 		return nil, ClassHydrateError, res.StartErr.Error()

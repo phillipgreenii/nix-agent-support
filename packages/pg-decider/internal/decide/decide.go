@@ -24,7 +24,7 @@ import (
 //
 // Actions follow rule ordinal, then the order the rule returned them. Both
 // lists are non-nil.
-func Decide(v *view.View, entityType string) action.PlanResult {
+func Decide(v *view.DeskView, entityType string) action.PlanResult {
 	return DecideWith(v, entityType, nil)
 }
 
@@ -32,7 +32,7 @@ func Decide(v *view.View, entityType string) action.PlanResult {
 // through Input.Config (focus.item reads bead_id_pattern and
 // focus_priority_map from it). The configuration is data: DecideWith stays a
 // pure function of the view and that data. A nil cfg is the zero Config.
-func DecideWith(v *view.View, entityType string, cfg *config.Config) action.PlanResult {
+func DecideWith(v *view.DeskView, entityType string, cfg *config.Config) action.PlanResult {
 	rules := RulesFor(entityType)
 	res := action.PlanResult{Actions: []action.Action{}, Skipped: []action.Skip{}}
 	if v == nil {

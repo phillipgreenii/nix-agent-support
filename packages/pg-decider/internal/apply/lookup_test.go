@@ -31,8 +31,8 @@ func ent(id, title, state, md string) string {
 	return `{"id":"` + id + `","title":"` + title + `","state":"` + state + `","metadata":{` + md + `}}`
 }
 
-func lookupView() *view.View {
-	return &view.View{
+func lookupView() *view.DeskView {
+	return &view.DeskView{
 		Type: "pr", ID: "acme/api#7",
 		Snapshot: view.PRSnapshot{ID: "acme/api#7", Repo: "acme/api", Number: 7, NodeID: "PR_node7"},
 	}
@@ -147,7 +147,7 @@ func TestReadLookupToleratesNonStringMetadataAndTheEnvelopeShape(t *testing.T) {
 	}
 }
 
-func linkIDs(v *view.View) []string {
+func linkIDs(v *view.DeskView) []string {
 	var out []string
 	for _, l := range v.Links {
 		out = append(out, l.ID)
@@ -167,7 +167,7 @@ func TestAugmentAddsTheClosedItemsOfThePRAndNothingOfAnotherPR(t *testing.T) {
 		{ID: "unrelated", Title: "write docs", State: "open", Metadata: map[string]string{"repo": "acme/api", "pr_number": "9"}},
 	})
 	v := lookupView()
-	v.Links = []view.Link{{Type: "issue", ID: "legacy-meta", Title: "process-feedback: acme/api#7", State: "open", Metadata: map[string]string{}}}
+	v.Links = []view.LinkedEntity{{Type: "issue", ID: "legacy-meta", Title: "process-feedback: acme/api#7", State: "open", Metadata: map[string]string{}}}
 
 	got := lk.Augment(v)
 	ids := strings.Join(linkIDs(got), ",")
@@ -366,17 +366,17 @@ func perPRCfg() *config.Config {
 func TestPRIdentityPrefersTheSnapshotThenParsesTheViewID(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		v    *view.View
+		v    *view.DeskView
 		repo string
 		num  string
 		ok   bool
 	}{
 		{"snapshot", lookupView(), "acme/api", "7", true},
-		{"id only", &view.View{Type: "pr", ID: "acme/api#0113446"}, "acme/api", "113446", true},
-		{"snapshot wins", &view.View{ID: "x/y#1", Snapshot: view.PRSnapshot{Repo: "acme/api", Number: 7}}, "acme/api", "7", true},
-		{"no number", &view.View{ID: "acme/api"}, "", "", false},
-		{"bad number", &view.View{ID: "acme/api#x"}, "", "", false},
-		{"no repo", &view.View{ID: "#7"}, "", "", false},
+		{"id only", &view.DeskView{Type: "pr", ID: "acme/api#0113446"}, "acme/api", "113446", true},
+		{"snapshot wins", &view.DeskView{ID: "x/y#1", Snapshot: view.PRSnapshot{Repo: "acme/api", Number: 7}}, "acme/api", "7", true},
+		{"no number", &view.DeskView{ID: "acme/api"}, "", "", false},
+		{"bad number", &view.DeskView{ID: "acme/api#x"}, "", "", false},
+		{"no repo", &view.DeskView{ID: "#7"}, "", "", false},
 		{"nil", nil, "", "", false},
 	} {
 		repo, num, ok := PRIdentity(tc.v)
@@ -406,7 +406,7 @@ func TestReadLookupSendsThePRIdentityAsParams(t *testing.T) {
 
 func TestReadLookupPerPRFailsClosedWithoutAPRIdentity(t *testing.T) {
 	d := newDouble(t)
-	lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg()), &view.View{Type: "pr", ID: "weird"})
+	lk, err := ReadLookup(context.Background(), testEnv(d, perPRCfg()), &view.DeskView{Type: "pr", ID: "weird"})
 	var le *LookupError
 	if lk != nil || !errors.As(err, &le) || le.Reason != LookupReasonNoPRIdentity {
 		t.Fatalf("lookup=%v err=%v", lk, err)
@@ -438,9 +438,9 @@ func TestReadLookupPerPRTruncatedAndDegradedFailClosed(t *testing.T) {
 	}
 }
 
-func consistencyView() *view.View {
+func consistencyView() *view.DeskView {
 	v := lookupView()
-	v.Links = []view.Link{
+	v.Links = []view.LinkedEntity{
 		{Type: "issue", ID: "k1", Title: "anything", Metadata: map[string]string{"dedup_key": "pr:acme/api#7:anchor"}},
 		{Type: "issue", ID: "legacy1", Title: "acme/api#7: legacy anchor"},                                             // adopted by anchor prefix
 		{Type: "issue", ID: "other", Title: "unrelated"},                                                               // not owned

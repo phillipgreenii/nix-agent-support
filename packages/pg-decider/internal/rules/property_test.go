@@ -45,7 +45,7 @@ func pinRapid(env, name, value string) {
 // printed JSON as a map, so View.Raw stays consistent with the typed members.
 type propView map[string]any
 
-func (p propView) parse(t *rapid.T) *view.View {
+func (p propView) parse(t *rapid.T) *view.DeskView {
 	b, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)

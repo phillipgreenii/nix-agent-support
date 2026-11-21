@@ -53,7 +53,7 @@ func TestApplyRunCountersCarryFocusTransitionsAndTheAuditCommentsCarryFactsTrans
 	hold := action.Fields{Status: "deferred", Metadata: map[string]string{"focus_hold": "struck"}}
 	release := action.Fields{Status: "open", ClearDefer: true, Metadata: map[string]string{"focus_hold": "released"}}
 	recs := scriptedWrites(t,
-		func(*view.View) []action.Action {
+		func(*view.DeskView) []action.Action {
 			return []action.Action{
 				{
 					Op: action.OpCreate, Kind: "focus-item", Rule: "focus.item",
@@ -126,7 +126,7 @@ func TestApplyPlanSkipOnlyRunEmitsSkipsAndNoActionCountsWithSeqAndFromItem(t *te
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	t.Setenv("PG_DECIDER_CONFIG", "")
 	recs := recordWrites(t, nil, `{"result":{}}`, "0")
-	decideFn = func(*view.View, string, *config.Config) action.PlanResult {
+	decideFn = func(*view.DeskView, string, *config.Config) action.PlanResult {
 		bead := map[string]any{"id": "bd-1", "state": "in_progress"}
 		return action.PlanResult{Actions: []action.Action{}, Skipped: []action.Skip{
 			{Rule: "focus.item", Reason: action.ReasonAlreadyHandled, Facts: map[string]any{"cause": "claimed", "bead": bead}},
