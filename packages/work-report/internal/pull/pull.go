@@ -52,6 +52,15 @@ const unknownSource = pgconn.Binary
 // wait, so the worst case adds this wait plus one backend deadline).
 const DefaultRetryWait = 30 * time.Second
 
+// CapWindowWait is the wait before the retry when a source was refused by a
+// governor cap ("rest_search cap reached: N of M requests per minute spent").
+// The cap counts requests over a sliding one-minute window and a failed first
+// attempt leaves its spend in that window (a daemon killed mid-call has
+// already been charged), so a retry after DefaultRetryWait is refused again.
+// The refusal's reason carries no retry time on the wire, so the retry waits
+// the full window. A longer RetryWait still wins.
+const CapWindowWait = 60 * time.Second
+
 // Deps are a pull's collaborators. Log may be nil. RetryWait (zero means
 // DefaultRetryWait) and Sleep (nil means a real, context-aware timer) are the
 // seam through which tests wait without sleeping.
@@ -390,6 +399,15 @@ var unavailableReason = regexp.MustCompile(`scriptout: unavailable(?::|$)`)
 
 func isUnavailableReason(reason string) bool { return unavailableReason.MatchString(reason) }
 
+// capRefusalReason matches the governor's refusal of a spend, which the
+// daemon-forwarded backend renders as "scriptout: unavailable: <resource> cap
+// reached: <n> of <m> requests per minute spent, this spend <k>". If
+// pg-connector rewords it the longer wait silently stops (the retry reverts to
+// the ordinary wait); the tests pin today's wording.
+var capRefusalReason = regexp.MustCompile(`scriptout: unavailable: \S+ cap reached: `)
+
+func isCapRefusalReason(reason string) bool { return capRefusalReason.MatchString(reason) }
+
 // retryDeadlines waits once, then re-invokes each held retryable (deadline- or
 // unavailable-degraded) source once, pinned to that source, replacing its held row with the retry's
 // row. A retry that yields no row for the source (cannot run, no decodable
@@ -405,7 +423,13 @@ func (r *run) retryDeadlines(ctx context.Context, held []pending) ([]pending, er
 	if len(sources) == 0 {
 		return held, nil
 	}
-	if err := r.wait(ctx); err != nil {
+	capRefused := false
+	for _, p := range held {
+		if p.retry && isCapRefusalReason(p.row.Reason) {
+			capRefused = true
+		}
+	}
+	if err := r.wait(ctx, capRefused); err != nil {
 		return held, err
 	}
 	for _, u := range plan(r.d.Cfg, sources) {
@@ -431,10 +455,14 @@ func (r *run) retryDeadlines(ctx context.Context, held []pending) ([]pending, er
 
 // wait sleeps RetryWait (DefaultRetryWait when zero) through the injectable
 // Sleep, or a real timer that ends early with ctx.
-func (r *run) wait(ctx context.Context) error {
+// When capRefused, the wait is at least CapWindowWait.
+func (r *run) wait(ctx context.Context, capRefused bool) error {
 	d := r.d.RetryWait
 	if d <= 0 {
 		d = DefaultRetryWait
+	}
+	if capRefused && d < CapWindowWait {
+		d = CapWindowWait
 	}
 	if r.d.Sleep != nil {
 		return r.d.Sleep(ctx, d)

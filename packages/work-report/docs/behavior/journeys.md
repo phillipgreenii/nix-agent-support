@@ -47,7 +47,9 @@ Extensions:
 
 - 2a. A source is unavailable or errors: reported degraded, with a reason; the other sources'
   pulls continue (`INV-DEGRADE-1`). A source that merely ran out of time, or whose backend was temporarily unavailable, is first given one more attempt after a short
-  wait, and is reported degraded only if that attempt also fails.
+  wait, and is reported degraded only if that attempt also fails. A source refused by a request-rate cap
+  (its reason names a "cap reached" refusal) waits at least the cap's one-minute window instead, so the
+  failed attempt's own spend has left the window before the retry.
 - 2b. A source is disabled: reported disabled; never attempted.
 - 3a. An entry fails its type's schema: rejected and reported, never stored (`INV-TYPE-1`); the
   source's other entries are still stored and its outcome is succeeded, with the rejections

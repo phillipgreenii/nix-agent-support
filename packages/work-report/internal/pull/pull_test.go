@@ -1137,3 +1137,59 @@ func TestTruncatedFirstSightingStoresUnenriched(t *testing.T) {
 		t.Errorf("labels = %d; want the unenriched item", n)
 	}
 }
+
+// capRefusal is the real wording of a governor cap refusal: the Jira-style
+// unavailable sentinel followed by the governor's message, as it reached
+// pull.jsonl after a daemon restart killed the first attempt mid-call.
+const capRefusal = `scriptout: unavailable: rest_search cap reached: 11 of 20 requests per minute spent, this spend 10`
+
+func TestCapRefusedSourceWaitsOutTheWindowBeforeTheRetry(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"": {listDoc([]string{
+			srcRow("pr-github", "degraded", capRefusal),
+			srcRow("src-slow", "degraded", backendDeadline),
+		})},
+		"pr-github": {listDoc([]string{srcRow("pr-github", "succeeded", "")}, goodItem("pr-github", "p"))},
+		"src-slow":  {listDoc([]string{srcRow("src-slow", "succeeded", "")}, goodItem("src-slow", "s"))},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{})
+
+	if len(sl.waits) != 1 || sl.waits[0] != pull.CapWindowWait {
+		t.Errorf("waits = %v; want one wait of the %v governor window", sl.waits, pull.CapWindowWait)
+	}
+	if pull.CapWindowWait < 60*time.Second {
+		t.Errorf("CapWindowWait = %v; the governor window is 60s", pull.CapWindowWait)
+	}
+	if r := rowsBySource(res)["pr-github"]; r.Status != pull.StatusSucceeded {
+		t.Errorf("pr-github = %+v; want succeeded after the retry", r)
+	}
+}
+
+func TestOtherUnavailableReasonsKeepTheOrdinaryWait(t *testing.T) {
+	for name, reason := range map[string]string{
+		"daemon down":     daemonDown,
+		"deadline":        backendDeadline,
+		"cap in prose":    "scriptout: unavailable: daemon said the cap reached nothing",
+		"not unavailable": "scriptout: invalid argument: rest_search cap reached: 1 of 2",
+	} {
+		t.Run(name, func(t *testing.T) {
+			conn := &scriptedConn{answers: map[string][]string{
+				"":      {listDoc([]string{srcRow("src-x", "degraded", reason)})},
+				"src-x": {listDoc([]string{srcRow("src-x", "succeeded", "")}, goodItem("src-x", "x"))},
+			}}
+			e, sl := retryEnv(t, conn)
+			run(t, e, pull.Opts{})
+			if name == "not unavailable" {
+				if len(sl.waits) != 0 {
+					t.Errorf("waits = %v; want none", sl.waits)
+				}
+				return
+			}
+			if len(sl.waits) != 1 || sl.waits[0] != pull.DefaultRetryWait {
+				t.Errorf("waits = %v; want the ordinary %v", sl.waits, pull.DefaultRetryWait)
+			}
+		})
+	}
+}
