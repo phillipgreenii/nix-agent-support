@@ -51,8 +51,9 @@ type Engine struct {
 	procm atomic.Pointer[listEntry]
 
 	// inc is the registry state LiveSessions extends instead of rereading; incMu
-	// guards it.
-	incMu sync.Mutex
+	// guards it. A caller waits for it under its request context, so a request
+	// whose client has gone leaves the queue at once.
+	incMu ctxMutex
 	inc   *liveInc
 
 	// reg is the registry state a model load extends instead of rereading; regMu
@@ -60,6 +61,32 @@ type Engine struct {
 	regMu sync.Mutex
 	reg   regCache
 }
+
+// ctxMutex is a mutex whose waiter gives up when its context ends. The zero
+// value is an unlocked mutex.
+type ctxMutex struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (m *ctxMutex) init() { m.once.Do(func() { m.ch = make(chan struct{}, 1) }) }
+
+// Lock takes the mutex, or returns the context's error once ctx ends first.
+func (m *ctxMutex) Lock(ctx context.Context) error {
+	m.init()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case m.ch <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Unlock releases a mutex Lock took.
+func (m *ctxMutex) Unlock() { <-m.ch }
 
 // modelEntry is a cached complete model. The model is a function of the
 // registry, history and end-reason records, the Process observations and the
@@ -769,8 +796,17 @@ func (e *Engine) listModel(ctx context.Context) (*model, error) {
 		}
 		return c.m, nil
 	}
-	e.incMu.Lock()
+	if err := e.incMu.Lock(ctx); err != nil {
+		return nil, err
+	}
 	defer e.incMu.Unlock()
+	// The holder before this caller may have built the model for the state the
+	// store is in now: take the counters again and reuse its answer, so a queue
+	// of lists behind one slow read costs one read, not one each.
+	live, removed, epoch, ready = e.St.LiveInputSeq(), e.St.RemovalSeq(), e.St.RollbackEpoch(), e.St.SessionRefReady()
+	if c := e.list.Load(); c != nil && c.live == live && c.removed == removed && c.epoch == epoch && c.ready == ready {
+		return c.m, nil
+	}
 	st, procs, err := e.syncInc(ctx)
 	if err != nil {
 		return nil, err
@@ -1017,7 +1053,9 @@ func (e *Engine) syncInc(ctx context.Context) (*liveInc, []store.Proc, error) {
 // liveIncremental derives the live sessions from the registry state held in
 // e.inc, first reading only what the store gained since.
 func (e *Engine) liveIncremental(ctx context.Context) (map[string]bool, error) {
-	e.incMu.Lock()
+	if err := e.incMu.Lock(ctx); err != nil {
+		return nil, err
+	}
 	defer e.incMu.Unlock()
 	st, procs, err := e.syncInc(ctx)
 	if err != nil {
