@@ -71,3 +71,75 @@ tests:
       - eval_time: 130m
         alertname: pg-repo-runner-tip-unverified
         exp_alerts: []
+
+  # check duration 4h (14400 s), a green verdict every 5h (60 samples of 5m), the tip is always
+  # unverified because main moves faster than one check: threshold is 2h + 2 * 4h = 10h
+  - name: a long-check fast-moving repo with a verdict every 5h stays quiet
+    interval: 5m
+    input_series:
+      - series: 'pg_repo_runner_unverified_tip{repo="alpha"}'
+        values: "1x360"
+      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",result="green"}'
+        values: "0x59 18000x60 36000x60 54000x60 72000x60 90000x60"
+      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha"}'
+        values: "14400x360"
+    alert_rule_test:
+      - eval_time: 8h
+        alertname: pg-repo-runner-tip-unverified
+        exp_alerts: []
+      - eval_time: 15h
+        alertname: pg-repo-runner-tip-unverified
+        exp_alerts: []
+      - eval_time: 24h
+        alertname: pg-repo-runner-tip-unverified
+        exp_alerts: []
+
+  # same repo, but a red verdict counts too, and only the stale repo fires
+  - name: a red verdict inside the window keeps one repo quiet while a stopped repo fires
+    interval: 5m
+    input_series:
+      - series: 'pg_repo_runner_unverified_tip{repo="alpha"}'
+        values: "1x300"
+      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",result="red"}'
+        values: "72000x300"
+      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha"}'
+        values: "3600x300"
+      - series: 'pg_repo_runner_unverified_tip{repo="beta"}'
+        values: "1x300"
+      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="beta",result="green"}'
+        values: "0x300"
+      - series: 'pg_repo_runner_check_last_duration_seconds{repo="beta"}'
+        values: "3600x300"
+    alert_rule_test:
+      # alpha: red at 20h, eval at 22h -> 2h old, quiet. beta: last verdict at 0, window 2h + 2h = 4h,
+      # then 2h for -> fires after 6h
+      - eval_time: 5h
+        alertname: pg-repo-runner-tip-unverified
+        exp_alerts: []
+      - eval_time: 22h
+        alertname: pg-repo-runner-tip-unverified
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: beta
+
+  # verify stopped recording verdicts: the last one was at t=0, 1h check, so the window is 4h
+  - name: a repo whose verify stopped recording verdicts still fires
+    interval: 5m
+    input_series:
+      - series: 'pg_repo_runner_unverified_tip{repo="alpha"}'
+        values: "1x200"
+      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",result="green"}'
+        values: "0x200"
+      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha"}'
+        values: "3600x200"
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: pg-repo-runner-tip-unverified
+        exp_alerts: []
+      - eval_time: 7h
+        alertname: pg-repo-runner-tip-unverified
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              repo: alpha

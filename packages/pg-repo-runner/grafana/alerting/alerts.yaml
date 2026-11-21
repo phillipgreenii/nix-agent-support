@@ -3,6 +3,11 @@
 # at the end of each `tips` run (every 5 minutes), so each series is labelled by `repo`
 # (the allow-list key) and the rules alert per repo.
 #
+# Rule "tip-unverified" fires on an unverified tip only when the repo has also gone without a green
+# or red verdict for longer than 2 hours plus twice its own latest check duration: a repo whose
+# check outlasts the time between its commits always has an unverified current tip, so the tip
+# alone cannot clear. A repo with no green or red verdict on record keeps the plain tip signal.
+#
 # Rules "red-no-newer-tip" and "tip-unverified" read the last known value across gaps with
 # last_over_time over 1d, so a runner hold longer than the 5 minute lookback does not drop the
 # series and restart their 24h and 2h timers.
@@ -122,8 +127,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "A repo's primary tip has had no check verdict for over 2 hours"
-          description: "pg_repo_runner_unverified_tip has been 1 for over 2 hours (read as the last known value over 1d, so a runner hold does not reset the timer): the verify role has not recorded a verdict for this repo's primary tip. Check that verify is enabled for the repo in the runner allow-list, that pg-router is running, and the verify role's run log."
+          summary: "A repo's primary tip is unverified and verify has recorded no green or red verdict for over its own check duration plus 2 hours"
+          description: "pg_repo_runner_unverified_tip has been 1 and, for over 2 hours, the newest green or red verdict (pg_repo_runner_check_last_timestamp_seconds, max over result) has been older than 2 hours plus twice the latest check duration (pg_repo_runner_check_last_duration_seconds); both read as the last known value over 1d, so a runner hold does not reset the timer. A repo whose check outlasts the gap between its commits keeps an unverified current tip, so the tip alone is not the signal: verify is not keeping up with the repo (no verdicts recorded). Check that verify is enabled for the repo in the runner allow-list, that pg-router is running, whether every item is load-declined, and the verify role's run log."
         data:
           - refId: A
             relativeTimeRange:
@@ -134,7 +139,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: "last_over_time(pg_repo_runner_unverified_tip[1d]) == 1"
+              expr: "last_over_time(pg_repo_runner_unverified_tip[1d]) == 1 unless on(repo) (time() - max by (repo) (last_over_time(pg_repo_runner_check_last_timestamp_seconds[1d])) <= 7200 + 2 * last_over_time(pg_repo_runner_check_last_duration_seconds[1d]))"
           - refId: B
             datasourceUid: __expr__
             model:
