@@ -28,12 +28,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/x/cmdrun"
 )
-
-// pgConnectorBinary is the ambient $PATH name this probe execs. Never a
-// compile-time import of packages/pg-connector.
-const pgConnectorBinary = "pg-connector"
 
 // defaultPgConnectorBackend is the backend instance name every call below
 // pins to unless --connector-backend overrides it [design: Contract's
@@ -47,52 +44,43 @@ const defaultPgConnectorBackend = "pg-connector-issue-beads"
 // --connector-backend through runOptions (run.go defaultRunDeps), so there
 // is no package-level mutable state.
 
-type pgConnectorResult struct {
-	stdout   []byte
-	stderr   []byte
-	exitCode int
-}
-
-// runPgConnector execs pg-connector with args, inheriting this process's
+// callConnector runs one pg-connector verb through the published client over
+// the probe's runner seam (runnerOrExec), inheriting this process's
 // environment verbatim (see this file's own header comment on how the
-// tracker is selected). The returned error is non-nil only when
-// the child could never even be started.
-func runPgConnector(ctx context.Context, args []string) (pgConnectorResult, error) {
-	//cmdrun:unbounded the caller supplies the context deadline
-	r := runnerOrExec()(ctx, cmdrun.Call{Name: pgConnectorBinary, Args: args})
-	if r.StartErr != nil {
-		return pgConnectorResult{}, fmt.Errorf("pg-connector: exec %v: %w", args, r.StartErr)
+// tracker is selected). fanOut true runs a fan-out verb ("list"), accepting
+// exits 0 and 5 (degraded but usable); false runs a targeted verb, accepting
+// exit 0 only. A failure copies pg-connector's own captured stderr
+// (if any) to warn, else the client error, and returns errConnectorFailed.
+// The returned bytes are the raw stdout for a fan-out call and the envelope's
+// result for a targeted one.
+func callConnector(ctx context.Context, args []string, fanOut bool, warn func(string)) ([]byte, error) {
+	var stderr []byte
+	cl := client.Client{Run: func(ctx context.Context, call cmdrun.Call) cmdrun.Result {
+		r := runnerOrExec()(ctx, call)
+		stderr = r.Stderr
+		return r
+	}}
+	var (
+		out []byte
+		err error
+	)
+	if fanOut {
+		out, err = cl.FanOutStdout(ctx, args...)
+	} else {
+		out, err = cl.Targeted(ctx, args...)
 	}
-	return pgConnectorResult{stdout: r.Stdout, stderr: r.Stderr, exitCode: r.Code}, nil
-}
-
-// invokeOrFail runs pg-connector with args and treats any exit code in
-// okCodes as success; anything else copies pg-connector's own captured
-// stderr (if any) to stderr and returns errConnectorFailed.
-func invokeOrFail(ctx context.Context, args []string, okCodes map[int]bool, warn func(string)) ([]byte, error) {
-	res, err := runPgConnector(ctx, args)
 	if err != nil {
-		warn(err.Error())
-		return nil, errConnectorFailed
-	}
-	if !okCodes[res.exitCode] {
-		if len(res.stderr) > 0 {
-			warn(string(res.stderr))
+		if len(stderr) > 0 {
+			warn(string(stderr))
 		} else {
-			warn(fmt.Sprintf("pg-connector: exit %d", res.exitCode))
+			warn(err.Error())
 		}
 		return nil, errConnectorFailed
 	}
-	return res.stdout, nil
+	return out, nil
 }
 
 var errConnectorFailed = errors.New("pg-router-probe: pg-connector call failed")
-
-// connectorEnvelope is the minimal subset of pg-connector's own targeted-
-// op wire envelope this probe decodes: {"result": ...} on success.
-type connectorEnvelope struct {
-	Result json.RawMessage `json:"result"`
-}
 
 // connectorIssue is the subset of pg-connector's schema.Issue this probe
 // needs from "issue create"/"issue list".
@@ -104,14 +92,6 @@ type connectorIssue struct {
 	// closed bead it is effectively its close time (dedup.go's
 	// newestClosedMatch).
 	UpdatedAt string `json:"updated_at,omitempty"`
-}
-
-// connectorIssueListEnvelope mirrors pg-connector's own "issue list" JSON
-// wire shape (cmd/pg-connector/issue.go's issueListOutcome) — decoded
-// generically since this probe has no compile-time dependency on
-// packages/pg-connector.
-type connectorIssueListEnvelope struct {
-	Entities []connectorIssue `json:"entities"`
 }
 
 // defaultDedupQuery is the named pg-connector query this probe's dedup
@@ -152,16 +132,16 @@ const defaultDedupQuery = "escalated-all"
 // pg-router-source-pg-connector's own classifyExit for the same reason:
 // list is a fan-out op, unlike create/update/comment below.
 func listEscalated(ctx context.Context, backend, query string, warn func(string)) ([]connectorIssue, error) {
-	out, err := invokeOrFail(ctx, []string{
+	out, err := callConnector(ctx, []string{
 		"issue", "list",
 		"--query", query,
 		"--backend", backend,
 		"--output", "json",
-	}, map[int]bool{0: true, 5: true}, warn)
+	}, true, warn)
 	if err != nil {
 		return nil, err
 	}
-	var env connectorIssueListEnvelope
+	var env client.ListOutcome[connectorIssue]
 	if err := json.Unmarshal(out, &env); err != nil {
 		return nil, fmt.Errorf("pg-router-probe: decode issue list response: %w", err)
 	}
@@ -248,16 +228,12 @@ func createIssue(ctx context.Context, backend, title string, labels []string, me
 	// create's own exit-code scheme is the targeted-op scheme (0 success;
 	// anything else is a failure worth surfacing) -- unlike list above, it
 	// never returns a usable "degraded" partial result.
-	out, err := invokeOrFail(ctx, args, map[int]bool{0: true}, warn)
+	out, err := callConnector(ctx, args, false, warn)
 	if err != nil {
 		return connectorIssue{}, err
 	}
-	var env connectorEnvelope
-	if err := json.Unmarshal(out, &env); err != nil {
-		return connectorIssue{}, fmt.Errorf("pg-router-probe: decode issue create response: %w", err)
-	}
 	var issue connectorIssue
-	if err := json.Unmarshal(env.Result, &issue); err != nil {
+	if err := json.Unmarshal(out, &issue); err != nil {
 		return connectorIssue{}, fmt.Errorf("pg-router-probe: decode issue create result: %w", err)
 	}
 	return issue, nil
@@ -274,7 +250,7 @@ func updateIssueMetadata(ctx context.Context, backend, id string, metadata map[s
 		"--output", "json",
 	}
 	args = append(args, metadataArgs(metadata)...)
-	_, err := invokeOrFail(ctx, args, map[int]bool{0: true}, warn)
+	_, err := callConnector(ctx, args, false, warn)
 	return err
 }
 
@@ -288,6 +264,6 @@ func commentIssue(ctx context.Context, backend, id, body string, warn func(strin
 		"--backend", backend,
 		"--output", "json",
 	}
-	_, err := invokeOrFail(ctx, args, map[int]bool{0: true}, warn)
+	_, err := callConnector(ctx, args, false, warn)
 	return err
 }

@@ -9,11 +9,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 )
 
 // stubOnPath installs an executable shell script named name first on $PATH.
@@ -26,24 +29,26 @@ func stubOnPath(t *testing.T, name, script string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-// A nil runner runs the real child: exit code, stdout and stderr and the
-// argv all cross the seam.
-func TestRunPgConnectorThroughExecUsesTheRealPath(t *testing.T) {
-	stubOnPath(t, pgConnectorBinary, `printf '%s' "$*"; printf err >&2; exit 2`)
-	res, err := runPgConnector(context.Background(), []string{"issue", "list"})
-	if err != nil {
-		t.Fatalf("runPgConnector: %v", err)
+// A nil runner runs the real child: the argv crosses the seam and a nonzero
+// exit is a failure that forwards the child's own stderr.
+func TestCallConnectorThroughExecUsesTheRealPath(t *testing.T) {
+	stubOnPath(t, client.Binary, `printf '%s' "$*"; printf err >&2; exit 2`)
+	warn, msgs := warnCollector()
+	_, err := callConnector(context.Background(), []string{"issue", "list"}, true, warn)
+	if !errors.Is(err, errConnectorFailed) {
+		t.Fatalf("callConnector: %v, want errConnectorFailed", err)
 	}
-	if res.exitCode != 2 || string(res.stdout) != "issue list" || string(res.stderr) != "err" {
-		t.Errorf("got %+v, want exit 2, stdout %q, stderr %q", res, "issue list", "err")
+	if len(*msgs) != 1 || (*msgs)[0] != "err" {
+		t.Errorf("warnings = %v, want the child's stderr %q", *msgs, "err")
 	}
 }
 
 // A pg-connector that is not on $PATH is a start error, not an exit code.
-func TestRunPgConnectorMissingBinaryIsAStartError(t *testing.T) {
+func TestCallConnectorMissingBinaryIsAStartError(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	if _, err := runPgConnector(context.Background(), []string{"issue", "list"}); err == nil {
-		t.Fatal("want a start error when pg-connector is not on PATH")
+	warn, msgs := warnCollector()
+	if _, err := callConnector(context.Background(), []string{"issue", "list"}, true, warn); !errors.Is(err, errConnectorFailed) || len(*msgs) != 1 {
+		t.Fatalf("got %v, warnings %v; want errConnectorFailed with one warning", err, *msgs)
 	}
 }
 
