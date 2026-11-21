@@ -4,7 +4,7 @@
 > launchd runs the daemon; these commands look at it and talk to it.
 > More information: `pg-assistants --help`, and `pg-assistants <command> --help`.
 
-- Show each assistant: running or not, context fill, ladder rung, why it is waiting, and any problem:
+- Show each assistant: running or not, context fill, ladder rung, why it is waiting, and any problem (IDLE: it ended its turn and went quiet; the daemon nudges, then restarts it):
 
 `pg-assistants status`
 

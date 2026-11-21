@@ -53,9 +53,12 @@ type Deps struct {
 	Blocks  *blocks.Tracker // seeded by the caller from the previous status.json
 	// Quota reads an assistant's consumption for its [assistant.quota] meter;
 	// nil (or an assistant without a quota) means no quota meter.
-	Quota  quota.Source
-	Status *StatusBoard
-	Events *slog.Logger // a jsonllogger logger built with EventLogOptions
+	Quota quota.Source
+	// Transcript reads a session's transcript for idle detection; nil means
+	// no idle detection.
+	Transcript Transcript
+	Status     *StatusBoard
+	Events     *slog.Logger // a jsonllogger logger built with EventLogOptions
 	// Go starts a named loop: lifecycle.Group.Go in production. A loop
 	// returns nil when its context ends; an error would begin shutdown.
 	Go    func(name string, fn func(ctx context.Context) error)
@@ -508,11 +511,12 @@ type session struct {
 	aliveAt   time.Time // when it was last seen alive; zero: never
 	ladder    ladder.State
 
-	answered     bool   // a usage call has succeeded
-	usageErr     string // the latest usage error
-	loggedErr    string // the usage error last logged
-	noControl    int    // consecutive usage failures saying the mod is not there
-	noContext    int    // consecutive answered usage calls without a context token count
+	answered     bool      // a usage call has succeeded
+	usageErr     string    // the latest usage error
+	loggedErr    string    // the usage error last logged
+	noControl    int       // consecutive usage failures saying the mod is not there
+	noContext    int       // consecutive answered usage calls without a context token count
+	idleSince    time.Time // when the transcript last changed, while the session is idle; else zero
 	windowWarned bool
 	stalled      bool // the start stalled: its end counts as a crash
 	exitSeen     bool // an exit request was seen while it ran
@@ -608,7 +612,7 @@ func (l *assistantLoop) running(ctx context.Context, now time.Time) {
 		meters = append(meters, l.quota(ctx, now)...)
 	}
 	meters = append(meters, l.s.d.Blocks.Meters(now)...)
-	in := ladder.Input{Now: now, Enabled: l.a.Enabled, ExitRequested: req, Meters: meters}
+	in := ladder.Input{Now: now, Enabled: l.a.Enabled, ExitRequested: req, Meters: meters, Idle: l.idle(now)}
 	next, act, reason := ladder.Step(s.ladder, in, l.s.grace)
 	s.ladder = next
 	if reason != "" {
@@ -620,6 +624,33 @@ func (l *assistantLoop) running(ctx context.Context, now time.Time) {
 	if err := l.s.act(ctx, s.target, act, reason); err != nil && !ending(ctx) {
 		l.fail(act.String(), err)
 	}
+}
+
+// idleAfterTicks is how many ticks a session's transcript may stay quiet with
+// its turn ended before the session counts as idle.
+const idleAfterTicks = 2
+
+// idle reads the session's transcript and returns how long it has sat idle: its
+// turn has ended and the transcript has had no write for 2 ticks. Zero means
+// not idle, including when the transcript cannot be read (a new session has
+// none yet). A tool call or subagent still running leaves the last message a
+// tool call, so it is never idle however long it takes.
+func (l *assistantLoop) idle(now time.Time) time.Duration {
+	s := l.sess
+	s.idleSince = time.Time{}
+	if l.s.d.Transcript == nil || s.sessionID == "" {
+		return 0
+	}
+	ts, err := l.s.d.Transcript.State(l.a.Cwd, s.sessionID)
+	if err != nil || !ts.TurnEnded {
+		return 0
+	}
+	d := now.Sub(ts.ModTime)
+	if d < idleAfterTicks*l.a.Tick {
+		return 0
+	}
+	s.idleSince = ts.ModTime
+	return d
 }
 
 func (l *assistantLoop) readPID(ctx context.Context) {
@@ -952,6 +983,7 @@ func (l *assistantLoop) status(now time.Time) AssistantStatus {
 	st.Running, st.PID, st.SessionID, st.StartedAt = true, s.pid, s.sessionID, s.startedAt
 	st.ContextTokens, st.ContextFraction, st.ContextAt = s.contextTokens, s.contextFraction, s.contextAt
 	st.QuotaFraction, st.QuotaDetail = s.quotaFraction, s.quotaDetail
+	st.IdleSince = s.idleSince
 	st.Ladder, st.Rung = kindName(s.ladder.Kind), rungName(s.ladder.Rung)
 	var hints []string
 	if s.noControl >= noControlTicks {

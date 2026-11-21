@@ -47,13 +47,25 @@ pg-assistants status --check   # the health probe: exit 3 down, 5 degraded, 0 he
 The table is `ID ENABLED RUNNING CONTEXT LADDER WAIT NOTE`. `WAIT` says why an enabled assistant
 is not running (`backoff`, `block_hold` or `missing_cwd`, with the time it waits until), and `NOTE`
 shows the first of: a config error, `stalled` (the loop has not ticked for `tick + grace.kill +
-45s`), a hint (for example "control mod not answering (shell startup waiting? trust dialog? plugin
+45s`), `IDLE <duration>` (see below), a hint (for example "control mod not answering (shell startup waiting? trust dialog? plugin
 disabled?)"), the last error, the last exit. A session on the assistants' tmux server that no valid
 config entry supervises is listed with the note `not in config` and is stopped. When the status
 file is missing or over a minute old, `status` warns naming
 `launchctl print gui/<uid>/com.phillipg.pg-assistants-daemon` and the launchd stderr log,
 `$XDG_STATE_HOME/pg-assistants-launchd/launchd-stderr.log`. The last output of a session that
 ended is in `<state dir>/last-exit/<id>.txt`.
+
+### Idle sessions
+
+A session that ended its turn (typically on a question nobody can answer, such as a declined
+permission prompt) and then sits with no write to its transcript
+(`$CLAUDE_CONFIG_DIR/projects/<cwd>/<session>.jsonl`, default `~/.claude`) for 2 ticks is idle.
+`status` shows `IDLE <duration>` in `NOTE` (the time since the transcript last changed), and the
+meter ladder treats the session as having reached its nudge point: it sends the nudge (reason
+`idle for ...`), then interrupts after `grace.interrupt` and kills after `grace.kill` if it still
+has not exited, and the next session starts from the notes. A session in the middle of a long tool
+call or subagent is never idle, because its last transcript message is a tool call, not a
+finished turn. The threshold is 2 times the assistant's `tick`, so a longer `tick` lengthens it.
 
 ### Attaching
 

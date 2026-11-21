@@ -165,16 +165,17 @@ func (c *cli) daemon(ctx context.Context, args []string) int {
 		Exit:     c.exit,
 	})
 	deps := supervisor.Deps{
-		Tmux:    tc,
-		Control: control.Client{Bin: p.PgClaudeControl, Run: c.run},
-		Trust:   newTrustFile(p.ClaudeJSON),
-		Blocks:  tracker,
-		Quota:   quota.Dialing{Socket: c.getenv("PG_CLAUDE_CODE_RECORDER_SOCKET")},
-		Status:  board,
-		Events:  events,
-		Go:      g.Go,
-		NewID:   c.newID,
-		Stat:    os.Stat,
+		Tmux:       tc,
+		Control:    control.Client{Bin: p.PgClaudeControl, Run: c.run},
+		Trust:      newTrustFile(p.ClaudeJSON),
+		Blocks:     tracker,
+		Quota:      quota.Dialing{Socket: c.getenv("PG_CLAUDE_CODE_RECORDER_SOCKET")},
+		Transcript: supervisor.FSTranscript{ConfigDir: claudeConfigDir(c.getenv)},
+		Status:     board,
+		Events:     events,
+		Go:         g.Go,
+		NewID:      c.newID,
+		Stat:       os.Stat,
 	}
 	// Neither error below happens today (Run and every loop return nil); they
 	// go to launchd's stderr log and fail the exit status.
@@ -232,4 +233,13 @@ func newUUID() string {
 	b[6] = b[6]&0x0f | 0x40 // version 4
 	b[8] = b[8]&0x3f | 0x80 // variant 10
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// claudeConfigDir is the directory Claude keeps its projects and transcripts
+// in: $CLAUDE_CONFIG_DIR, else $HOME/.claude.
+func claudeConfigDir(getenv func(string) string) string {
+	if d := getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return d
+	}
+	return filepath.Join(getenv("HOME"), ".claude")
 }

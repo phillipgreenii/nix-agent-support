@@ -24,6 +24,10 @@
 //     a turn), the disabled ladder's time steps apply as well, with or without
 //     meters; after a kill, a force kill on every call. A session that was never
 //     nudged and has no meter at its nudge point is left alone.
+//   - Idle (Input.Idle): a session whose turn ended and whose transcript has
+//     been quiet past the idle threshold counts as a nudge-point reading on
+//     the meter ladder, so it is nudged, then interrupted and killed by the
+//     time steps. It never lifts a target above the nudge.
 //   - An interrupt that fires once grace.interrupt has passed since the nudge
 //     marks the state NudgeIgnored, which status shows as a hint (a session
 //     that does not exit after a nudge may be waiting on a permission prompt).
@@ -154,6 +158,11 @@ type Input struct {
 	Orphan        bool    // no valid config entry supervises the session; names it in reasons
 	ExitRequested bool    // true while the request is on file
 	Meters        []Meter // only the meters with a current reading
+	// Idle, when non-zero, is how long the session has sat with its turn
+	// ended and no transcript activity. On the meter ladder it sets a nudge
+	// target of its own, so an idle session is nudged and the time steps then
+	// interrupt and kill it like any other nudged session.
+	Idle time.Duration
 }
 
 // Grace holds the time steps: Interrupt is the wait from a nudge to the
@@ -191,6 +200,9 @@ func Step(s State, in Input, g Grace) (State, Action, string) {
 	default:
 		s.Kind = KindMeter
 		target, why := target(in.Meters)
+		if in.Idle > 0 && target < RungNudge {
+			target, why = RungNudge, fmt.Sprintf("idle for %s with no transcript activity", in.Idle.Round(time.Second))
+		}
 		return climb(s, in.Now, g, target, why, "")
 	}
 }

@@ -312,7 +312,8 @@ func waitCell(a supervisor.AssistantStatus, now time.Time) string {
 	return a.WaitReason + " until " + clock(a.WaitUntil, now)
 }
 
-// note is the first of: the config error, stalled, the hint, the last error,
+// note is the first of: the config error, stalled, idle (IDLE and how long
+// the transcript has been quiet, then the hint), the hint, the last error,
 // the last exit. A config error comes first: such an assistant has no loop,
 // so it never ticks. Stalled comes next: a stalled loop's other fields are
 // old, except its last error, which is kept after it, since it is often the
@@ -330,6 +331,12 @@ func note(a supervisor.AssistantStatus, stalled bool, now time.Time) string {
 		}
 		if a.LastError != "" {
 			s += ": " + a.LastError
+		}
+		return s
+	case !a.IdleSince.IsZero():
+		s := "IDLE " + age(now.Sub(a.IdleSince))
+		if a.Hint != "" {
+			s += ": " + a.Hint
 		}
 		return s
 	case a.Hint != "":

@@ -183,6 +183,9 @@ func TestStatusNotePriority(t *testing.T) {
 		// A loop that panicked on its first tick published a zero last tick.
 		{"stalled before any tick", supervisor.AssistantStatus{LastError: "panic: boom (loop restarts in 4m0s)"}, "stalled (no tick yet): panic: boom (loop restarts in 4m0s)"},
 		{"stalled before any tick, no error", supervisor.AssistantStatus{}, "stalled (no tick yet)"},
+		{"idle over hint and last error", supervisor.AssistantStatus{IdleSince: now.Add(-12 * time.Minute), Hint: "h", LastError: "e", LastTick: now}, "IDLE 12m: h"},
+		{"idle alone", supervisor.AssistantStatus{IdleSince: now.Add(-3 * time.Minute), LastTick: now}, "IDLE 3m"},
+		{"stalled over idle", supervisor.AssistantStatus{IdleSince: now.Add(-3 * time.Minute), LastTick: stalledTick}, "stalled (last tick 1h00m ago)"},
 		{"hint over last error", supervisor.AssistantStatus{Hint: "h", LastError: "e", LastTick: now}, "h"},
 		{"last error over last exit", supervisor.AssistantStatus{LastError: "e", LastExit: exit, LastTick: now}, "e"},
 		{"last exit", supervisor.AssistantStatus{LastExit: exit, LastTick: now}, "last exit: status 1 after 12s"},

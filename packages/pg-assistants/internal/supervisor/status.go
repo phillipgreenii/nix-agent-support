@@ -35,6 +35,7 @@ type AssistantStatus struct {
 	ContextTokens   int64     `json:"context_tokens,omitempty"`
 	ContextFraction float64   `json:"context_fraction,omitempty"`
 	ContextAt       time.Time `json:"context_at,omitzero"` // when the context figure was read
+	IdleSince       time.Time `json:"idle_since,omitzero"` // the transcript's last write, while the turn has ended and it is quiet
 	QuotaFraction   float64   `json:"quota_fraction,omitempty"`
 	QuotaDetail     string    `json:"quota_detail,omitempty"`
 	Ladder          string    `json:"ladder,omitempty"` // meter | disabled | exit

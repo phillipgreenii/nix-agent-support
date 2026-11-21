@@ -394,7 +394,9 @@ type harness struct {
 	w      *world
 	blocks *blocks.Tracker
 	quota  quota.Source
-	stat   func(string) (os.FileInfo, error)
+	// transcript answers the idle check; nil means no idle detection.
+	transcript Transcript
+	stat       func(string) (os.FileInfo, error)
 
 	group  *group
 	status *StatusBoard
@@ -461,7 +463,7 @@ func (h *harness) startWith(board func(*StatusBoard)) {
 	h.runErr = make(chan error, 1)
 	d := Deps{
 		Tmux: fakeTmux{h.w}, Control: fakeControl{h.w}, Trust: fakeTrust{h.w},
-		Blocks: h.blocks, Quota: h.quota, Status: h.status, Events: logger,
+		Blocks: h.blocks, Quota: h.quota, Transcript: h.transcript, Status: h.status, Events: logger,
 		Go: h.group.Go, NewID: h.w.newID, Stat: h.stat,
 	}
 	go func() { h.runErr <- Run(ctx, h.cfg, d) }()
@@ -601,4 +603,23 @@ func wantBudgets(t *testing.T, h *harness) {
 func num(v any) float64 {
 	f, _ := v.(float64)
 	return f
+}
+
+// fakeTranscript answers every session's transcript with one state, which a
+// test may replace between ticks.
+type fakeTranscript struct {
+	mu sync.Mutex
+	st TranscriptState
+}
+
+func (f *fakeTranscript) set(st TranscriptState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.st = st
+}
+
+func (f *fakeTranscript) State(string, string) (TranscriptState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.st, nil
 }

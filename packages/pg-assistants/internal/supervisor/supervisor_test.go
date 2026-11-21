@@ -1127,3 +1127,82 @@ func TestUsageGetsTheTickTimeNotTheCallTime(t *testing.T) {
 		}
 	})
 }
+
+// An assistant that ended its turn and left the transcript quiet for 2 ticks
+// is shown IDLE, nudged, and then interrupted and killed by the ladder's time
+// steps; the next session starts at once.
+func TestIdleSessionIsNudgedAndRecycled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, exampleA)
+		tr := &fakeTranscript{}
+		tr.set(TranscriptState{ModTime: h.t0, TurnEnded: true})
+		h.transcript = tr
+		h.start()
+		defer h.stop()
+
+		h.until(90 * time.Second) // 1.5 ticks of quiet: not yet idle
+		if st := h.statusOf(exampleA); !st.IdleSince.IsZero() || st.Rung != "" {
+			t.Errorf("at 1m: idle_since %v rung %q, want neither", st.IdleSince, st.Rung)
+		}
+		h.until(3 * time.Minute)
+		st := h.statusOf(exampleA)
+		if !st.IdleSince.Equal(h.t0) || st.Rung != "nudge" || !strings.HasPrefix(st.Reason, "idle for 2m0s") {
+			t.Errorf("at 3m: idle_since %v rung %q reason %q, want idle since the start, nudge, an idle reason",
+				st.IdleSince, st.Rung, st.Reason)
+		}
+		h.until(15 * time.Minute)
+		acts := h.w.actions(exampleA)
+		want := []string{"new-session@0s", "submit@2m0s", "interrupt@7m0s", "submit@7m0s", "signal@9m0s"}
+		if len(acts) < len(want) || !slices.Equal(acts[:len(want)], want) {
+			t.Errorf("actions = %q, want them to start with %q", acts, want)
+		}
+		if n := len(h.eventsFor("kill", exampleA)); n != 1 {
+			t.Errorf("kill events = %d, want 1 (the restart after the grace)", n)
+		}
+		if n := len(h.w.callsOf("new-session", exampleA)); n < 2 {
+			t.Errorf("new-session calls = %d, want the session restarted (next one starts from notes.md)", n)
+		}
+	})
+}
+
+// A long tool call or subagent leaves the transcript quiet, but the last
+// message is a tool call, so the session is never idle.
+func TestLongToolCallIsNotIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, exampleA)
+		tr := &fakeTranscript{}
+		tr.set(TranscriptState{ModTime: h.t0, TurnEnded: false})
+		h.transcript = tr
+		h.start()
+		defer h.stop()
+
+		h.until(30 * time.Minute)
+		wantActions(t, h, exampleA, "new-session@0s")
+		if st := h.statusOf(exampleA); !st.IdleSince.IsZero() || st.Rung != "" {
+			t.Errorf("idle_since %v rung %q, want neither", st.IdleSince, st.Rung)
+		}
+	})
+}
+
+// A session whose transcript keeps changing is not idle even with its turn
+// ended, and one that wakes after the nudge stops being shown IDLE.
+func TestTranscriptActivityClearsIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t, exampleA)
+		tr := &fakeTranscript{}
+		tr.set(TranscriptState{ModTime: h.t0, TurnEnded: true})
+		h.transcript = tr
+		h.start()
+		defer h.stop()
+
+		h.until(3 * time.Minute)
+		if st := h.statusOf(exampleA); st.IdleSince.IsZero() {
+			t.Fatal("not idle at 3m, want idle")
+		}
+		tr.set(TranscriptState{ModTime: h.t0.Add(3 * time.Minute), TurnEnded: false}) // it woke and works
+		h.until(4 * time.Minute)
+		if st := h.statusOf(exampleA); !st.IdleSince.IsZero() {
+			t.Errorf("idle_since %v after new activity, want zero", st.IdleSince)
+		}
+	})
+}

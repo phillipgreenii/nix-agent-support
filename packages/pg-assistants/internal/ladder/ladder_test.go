@@ -506,3 +506,30 @@ func TestOrphanReasonSaysNotInConfig(t *testing.T) {
 		t.Errorf("reason = %q, want disabled", reason)
 	}
 }
+
+func TestIdleNudgesThenTimeStepsEscalate(t *testing.T) {
+	in := func(now time.Time, idle time.Duration) Input {
+		i := enabled(now)
+		i.Idle = idle
+		return i
+	}
+	// Not idle: left alone.
+	check(t, "not idle", State{}, in(t0, 0), want{act: ActNone, rung: RungNone, kind: KindMeter})
+	s := check(t, "idle", State{}, in(t0, 2*time.Minute),
+		want{act: ActNudge, rung: RungNudge, kind: KindMeter, at: t0, reason: "idle for 2m0s with no transcript activity"})
+	// Idle never lifts the target above the nudge: the time steps do the rest.
+	s = check(t, "still idle", s, in(t0.Add(time.Minute), 3*time.Minute), want{act: ActNone, rung: RungNudge, kind: KindMeter, at: t0})
+	s = check(t, "+5m", s, in(t0.Add(5*time.Minute), 7*time.Minute),
+		want{act: ActInterrupt, rung: RungInterrupt, kind: KindMeter, at: t0.Add(5 * time.Minute)})
+	check(t, "+2m", s, in(t0.Add(7*time.Minute), 9*time.Minute),
+		want{act: ActKill, rung: RungKill, kind: KindMeter, at: t0.Add(7 * time.Minute)})
+}
+
+func TestIdleDoesNotOverrideAHigherMeter(t *testing.T) {
+	i := enabled(t0, contextMeter(0.96, "192000 of 200000 tokens"))
+	i.Idle = time.Hour
+	_, act, reason := Step(State{}, i, g)
+	if act != ActNudge || !strings.HasPrefix(reason, "context at 96%") {
+		t.Errorf("action %v reason %q, want a nudge naming the context meter", act, reason)
+	}
+}
