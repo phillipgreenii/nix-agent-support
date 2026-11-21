@@ -67,7 +67,7 @@ flowchart LR
   it the cursor still advances at emit, as before. Each printed item carries `ack` `{lane, token}`
   (lane is the backend name, token the position to acknowledge, section "Settlement" below), and
   pg-router acknowledges by running `settle`, which sends `changes-ack`, once every event up to that
-  token has been accepted by every handler that matches it (pg-router `INV-EVT-8`). Delivery is
+  token has been accepted by every handler that matches it (pg-router `INV-EVT-10`). Delivery is
   at-least-once: a poll re-prints every row after the last acknowledged position, so an event that
   expired un-accepted, or a batch the adapter failed to print, is offered again at the next poll.
   A poll that returns no change acknowledges each succeeded source's `next_seq` itself. Pinned by
