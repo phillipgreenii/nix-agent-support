@@ -162,7 +162,7 @@ func TestHeartbeatCatchUpAtExactlyTheCapIsSilent(t *testing.T) {
 	}
 }
 
-// Time budget: with a slow row the pass stops at the deadline between rows, the
+// Time budget: once the budget ends the pass stops at the deadline between rows, the
 // row in flight finishes (it is not marked failed), and the heartbeat is intact.
 func TestHeartbeatCatchUpStopsAtBudget(t *testing.T) {
 	withReleaseVersion(t)
@@ -171,10 +171,18 @@ func TestHeartbeatCatchUpStopsAtBudget(t *testing.T) {
 	withHeartbeatLedger(t, "[]", nil)
 	origRows := catchUpBeforeRow
 	t.Cleanup(func() { catchUpBeforeRow = origRows })
-	catchUpBeforeRow = func(store.InterpretationKey) { time.Sleep(60 * time.Millisecond) }
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// The budget expires (the context ends) while the third row is in flight, so
+	// exactly three rows finish: no wall clock is involved.
+	const budgetEndsDuringRow = 3
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	seen := 0
+	catchUpBeforeRow = func(store.InterpretationKey) {
+		seen++
+		if seen == budgetEndsDuringRow {
+			cancel()
+		}
+	}
 	st, err := store.Open(rs.path)
 	if err != nil {
 		t.Fatal(err)
@@ -189,8 +197,8 @@ func TestHeartbeatCatchUpStopsAtBudget(t *testing.T) {
 		t.Fatalf("stoppedBy = %q, want budget", out.stoppedBy)
 	}
 	done := out.counts.Changed + out.counts.Unchanged
-	if done < 1 || done >= 6 {
-		t.Errorf("re-interpreted %d rows, want some but not all", done)
+	if done != budgetEndsDuringRow {
+		t.Errorf("re-interpreted %d rows, want %d (the row in flight finishes, none after)", done, budgetEndsDuringRow)
 	}
 	if out.counts.Failed != 0 {
 		t.Errorf("failed = %d: a deadline must not mark a row failed", out.counts.Failed)
