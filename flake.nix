@@ -4393,7 +4393,7 @@
 
               # home/programs/pg-origin-guard: the module renders
               # $XDG_CONFIG_HOME/pg-origin-guard/config.toml for a sample realm, the REAL
-              # package loads it (config errors exit 78, so a bad file fails the module's
+              # package loads it (config errors exit 7, so a bad file fails the module's
               # own build), installs the binary and registers the tldr page.
               test-pg-origin-guard-hm-render =
                 let
@@ -4475,15 +4475,18 @@
                     cat "$sampleCfg" > "$XDG_CONFIG_HOME/pg-origin-guard/config.toml"
                     unset SSH_AUTH_SOCK
                     rc=0; pg-origin-guard status >out.txt 2>&1 || rc=$?
-                    [ "$rc" != 78 ] || { cat out.txt >&2; echo "FAIL: rendered config rejected" >&2; exit 1; }
+                    # exit 7 is exitcode.Config (packages/pg-origin-guard/cli_test.go TestCLIConfigErrorIs7)
+                    [ "$rc" != 7 ] || { cat out.txt >&2; echo "FAIL: rendered config rejected" >&2; exit 1; }
                     grep -q zr out.txt || { cat out.txt >&2; echo "FAIL: status does not list realm zr" >&2; exit 1; }
                     rc=0; pg-origin-guard check --realm zr >out.txt 2>&1 || rc=$?
-                    [ "$rc" = 75 ] || { cat out.txt >&2; echo "FAIL: check with no agent should exit 75, got $rc" >&2; exit 1; }
+                    # exit 3 is exitcode.Unavailable (packages/pg-origin-guard/cli_test.go TestCLICheckUnavailableIs3)
+                    [ "$rc" = 3 ] || { cat out.txt >&2; echo "FAIL: check with no agent should exit 3, got $rc" >&2; exit 1; }
 
-                    # a config the tool rejects is exit 78 (what the module build relies on)
+                    # a config the tool rejects is exit 7 (what the module build relies on)
                     printf '[breaker]\nfailure_threshold = 0\n' > "$XDG_CONFIG_HOME/pg-origin-guard/config.toml"
                     rc=0; pg-origin-guard status >out.txt 2>&1 || rc=$?
-                    [ "$rc" = 78 ] || { cat out.txt >&2; echo "FAIL: bad config should exit 78, got $rc" >&2; exit 1; }
+                    # exit 7 is exitcode.Config (packages/pg-origin-guard/cli_test.go TestCLIConfigErrorIs7)
+                    [ "$rc" = 7 ] || { cat out.txt >&2; echo "FAIL: bad config should exit 7, got $rc" >&2; exit 1; }
                     touch $out
                   '';
 
@@ -9942,11 +9945,14 @@
                     EOF
                     beads-exporter -check-config fixture.json
 
-                    # An unknown field is rejected with the configuration-invalid exit code.
+                    # An unknown field is rejected with the configuration-invalid exit code. The
+                    # numeric value (7, exitcode.Config) is owned by
+                    # packages/beads-exporter/cmd/beads-exporter/main_test.go
+                    # (TestExitCodesUseTheSharedTable).
                     jq '. + { unknownField: 1 }' fixture.json > bad.json
                     status=0
                     beads-exporter -check-config bad.json || status=$?
-                    [ "$status" = 3 ] || fail "unknown field: want exit 3, got $status"
+                    [ "$status" = 7 ] || fail "unknown field: want exit 7, got $status"
 
                     # The retired transcript keys are unknown fields now: a stale file that
                     # still carries one is rejected, not half-honoured.
@@ -9954,7 +9960,7 @@
                       jq ". + $retired" fixture.json > retired.json
                       status=0
                       beads-exporter -check-config retired.json || status=$?
-                      [ "$status" = 3 ] || fail "retired key $retired: want exit 3, got $status"
+                      [ "$status" = 7 ] || fail "retired key $retired: want exit 7, got $status"
                     done
 
                     touch "$out"
