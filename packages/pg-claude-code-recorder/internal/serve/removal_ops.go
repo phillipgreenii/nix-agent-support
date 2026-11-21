@@ -81,6 +81,9 @@ func (d *Daemon) opWhere(ctx context.Context, body []byte) (any, *wire.Error) {
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, wire.Errf(wire.ErrNotFound, "no Conversation "+req.Session)
 	}
+	if errors.Is(err, settle.ErrRunBusy) {
+		return nil, wire.Errf(wire.ErrBusy, err.Error())
+	}
 	if err != nil {
 		return nil, wire.Errf(wire.ErrInternal, err.Error())
 	}
@@ -94,6 +97,8 @@ func (d *Daemon) opRemove(ctx context.Context, body []byte) (any, *wire.Error) {
 	}
 	rep, err := d.ops.RemoveCtx(ctx, settle.RemoveOptions{Sessions: req.Sessions, DryRun: req.DryRun})
 	switch {
+	case errors.Is(err, settle.ErrRunBusy):
+		return nil, wire.Errf(wire.ErrBusy, err.Error())
 	case errors.Is(err, settle.ErrRemovalDisabled):
 		return nil, wire.Errf(wire.ErrRemovalDisabled, err.Error()+"; remove --dry-run shows what would go")
 	case err != nil && len(rep.Removed) == 0:

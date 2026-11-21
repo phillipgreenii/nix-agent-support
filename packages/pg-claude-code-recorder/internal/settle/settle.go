@@ -227,6 +227,10 @@ type Settler struct {
 	curAt         time.Time
 	prevHeld      time.Duration
 	waiters       atomic.Int32
+	// holder is the current holder as an atomic snapshot (op and when it took
+	// the lock), for a waiter that gave up without ever holding the lock and so
+	// may not read curOp and curAt.
+	holder atomic.Pointer[runHolder]
 	// yieldSlice is how long a yielding holder (Remove's dry run) keeps the run
 	// lock while someone queues before it hands it over; 0 means runLockSlice.
 	yieldSlice time.Duration
@@ -628,6 +632,17 @@ func (s *Settler) lockRunWait(op string) (func(), time.Duration) {
 	return s.releaseRun, w
 }
 
+// runHolder is the snapshot of who holds the run lock.
+type runHolder struct {
+	op string
+	at time.Time
+}
+
+// ErrRunBusy is returned by a caller that gave up waiting for the run lock
+// because its context ended first. The request is retryable: a pass held the lock
+// for longer than the caller could wait.
+var ErrRunBusy = errors.New("settle: the settler run lock is busy (a pass holds it); retry later")
+
 // acquireRun takes the run lock for op, counts and logs the wait, and records op
 // as the holder.
 func (s *Settler) acquireRun(op string) time.Duration {
@@ -635,13 +650,18 @@ func (s *Settler) acquireRun(op string) time.Duration {
 	s.waiters.Add(1)
 	s.run.Lock()
 	s.waiters.Add(-1)
+	return s.noteAcquired(op, t0)
+}
+
+// noteAcquired records op as the holder of the lock just taken (waiting since
+// t0), counts the wait and logs a slow one with the holder it queued behind.
+func (s *Settler) noteAcquired(op string, t0 time.Time) time.Duration {
 	now := time.Now()
 	w := now.Sub(t0)
 	prevOp, prevHeld := s.prevOp, s.prevHeld
 	s.curOp, s.curAt = op, now
-	lbl := map[string]string{"op": op}
-	s.cfg.Obs.Reg.Add(obs.MSettleRunLockWaits, lbl, 1)
-	s.cfg.Obs.Reg.Add(obs.MSettleRunLockWaitSeconds, lbl, w.Seconds())
+	s.holder.Store(&runHolder{op: op, at: now})
+	s.countRunWait(op, w)
 	if w >= slowRunLockWait {
 		s.cfg.Obs.Log.Warn("settle_run_lock_wait_slow", "op", op, "wait_ms", w.Milliseconds(),
 			"holder_op", prevOp, "holder_held_ms", prevHeld.Milliseconds())
@@ -649,10 +669,65 @@ func (s *Settler) acquireRun(op string) time.Duration {
 	return w
 }
 
+func (s *Settler) countRunWait(op string, w time.Duration) {
+	lbl := map[string]string{"op": op}
+	s.cfg.Obs.Reg.Add(obs.MSettleRunLockWaits, lbl, 1)
+	s.cfg.Obs.Reg.Add(obs.MSettleRunLockWaitSeconds, lbl, w.Seconds())
+}
+
+// lockRunCtx is lockRun that stops waiting when ctx ends and then returns
+// ErrRunBusy. The wait of a caller that gave up is counted, and logged when slow
+// with the holder it was still queued behind. The lock is taken by a helper
+// goroutine, so a caller that gave up leaves it queued: when it gets the lock it
+// finds the caller gone and releases it at once.
+func (s *Settler) lockRunCtx(ctx context.Context, op string) (func(), error) {
+	t0 := time.Now()
+	const (
+		waiting = iota
+		granted
+		abandoned
+	)
+	var state atomic.Int32
+	got := make(chan struct{})
+	s.waiters.Add(1)
+	go func() {
+		s.run.Lock()
+		if state.CompareAndSwap(waiting, granted) {
+			close(got)
+			return
+		}
+		s.run.Unlock() // the caller gave up while this queued
+	}()
+	select {
+	case <-got:
+	case <-ctx.Done():
+		if state.CompareAndSwap(waiting, abandoned) {
+			s.waiters.Add(-1)
+			w := time.Since(t0)
+			s.countRunWait(op, w)
+			if w >= slowRunLockWait {
+				h := s.holder.Load()
+				holderOp, heldMS := "", int64(0)
+				if h != nil {
+					holderOp, heldMS = h.op, time.Since(h.at).Milliseconds()
+				}
+				s.cfg.Obs.Log.Warn("settle_run_lock_wait_slow", "op", op, "wait_ms", w.Milliseconds(),
+					"holder_op", holderOp, "holder_held_ms", heldMS, "gave_up", true)
+			}
+			return nil, ErrRunBusy
+		}
+		<-got // the lock was granted as ctx ended: keep it
+	}
+	s.waiters.Add(-1)
+	s.noteAcquired(op, t0)
+	return s.releaseRun, nil
+}
+
 // releaseRun records how long the current holder kept the lock and releases it.
 func (s *Settler) releaseRun() {
 	s.prevOp, s.prevHeld = s.curOp, time.Since(s.curAt)
 	s.curOp = ""
+	s.holder.Store(nil)
 	s.run.Unlock()
 }
 

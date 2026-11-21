@@ -108,7 +108,11 @@ func (s *Settler) Where(session string) (WhereInfo, error) {
 // request, so a disconnect cannot discard it.
 func (s *Settler) WhereCtx(ctx context.Context, session string) (WhereInfo, error) {
 	rd := s.st.WithContext(ctx)
-	defer s.lockRun("where")()
+	unlock, err := s.lockRunCtx(ctx, "where")
+	if err != nil {
+		return WhereInfo{Session: session, BlockedBy: []string{}}, err
+	}
+	defer unlock()
 	now := s.cfg.Clock.Now()
 	info := WhereInfo{Session: session, BlockedBy: []string{}, RemovalEnabled: s.cfg.RemoveEnable}
 	live, err := s.cfg.Live()

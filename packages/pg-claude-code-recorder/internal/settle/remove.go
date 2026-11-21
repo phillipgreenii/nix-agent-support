@@ -137,9 +137,14 @@ func (s *Settler) Remove(opt RemoveOptions) (RemoveReport, error) {
 // RemoveCtx is Remove under ctx. A removal is not cut by a cancelled ctx (it
 // commits durable stages as it goes), so ctx only carries values.
 func (s *Settler) RemoveCtx(ctx context.Context, opt RemoveOptions) (RemoveReport, error) {
-	ctx = context.WithoutCancel(ctx)
-	unlock, _ := s.lockRunWait("remove")
+	// Only the wait for the run lock honours ctx; once the lock is held the
+	// removal is not cut.
+	unlock, err := s.lockRunCtx(ctx, "remove")
+	if err != nil {
+		return RemoveReport{}, err
+	}
 	defer unlock()
+	ctx = context.WithoutCancel(ctx)
 	if opt.DryRun {
 		// A dry run only reads, so it may give the lock up between Conversations: a
 		// pass over many of them once held it 14 s and starved the settle wake.
