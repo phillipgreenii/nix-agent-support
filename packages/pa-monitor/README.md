@@ -272,7 +272,7 @@ injects keystrokes into a terminal and never invokes `tmux send-keys` or `cmux s
 terminal host. The `cmux-bridge` (one per cmux workspace, a cmux descendant) still opens a
 bidirectional `BridgeChannel` gRPC stream to the daemon, but only to receive `DaemonState`
 snapshots for the cmux sidebar and to register itself: the daemon keeps a per-server bridge
-registry, maintained by a periodic reaper (dead bridges pruned), so the poller can label a
+registry, maintained by a periodic reaper (dead bridges pruned) and keyed by workspace id, where a stream that ends marks its bridge disconnected only if no newer stream of the same bridge has re-registered, so the poller can label a
 session's terminal host as `cmux`, `cmux (no bridge)` or `cmux (bridge disconnected)`. The
 daemon resolves the owning cmux **server PID** via ancestry from one shared ids-only
 `ps -ax -o pid=,ppid=,lstart=` snapshot per tick (bounded reuse of the previous snapshot when

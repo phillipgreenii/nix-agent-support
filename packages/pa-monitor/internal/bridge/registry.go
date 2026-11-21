@@ -36,6 +36,12 @@ type BridgeEntry struct {
 	// (the registry is keyed by workspace id). Zero when the bridge sent none.
 	ServerPID int
 	lastSeen  time.Time
+	// gen identifies the stream that last attached this member, so a
+	// superseded stream's teardown cannot touch a newer stream's registration.
+	gen uint64
+	// disconnected is set when the owning stream ended while the bridge
+	// process may still be alive; it reads as Stale until a stream re-attaches.
+	disconnected bool
 }
 
 // Registry tracks cmux-bridge registrations keyed by cmux workspace id. Each
@@ -47,6 +53,7 @@ type Registry struct {
 	byWorkspace map[string]map[int]*BridgeEntry
 	staleAfter  time.Duration
 	now         func() time.Time
+	nextGen     uint64
 }
 
 // NewRegistry constructs a registry. staleAfter is the cutoff beyond which
@@ -61,14 +68,30 @@ func NewRegistry(staleAfter time.Duration) *Registry {
 
 // AttachStream adds or updates a live-bridge set member, refreshing its
 // lastSeen to now.
-func (r *Registry) AttachStream(workspaceID string, serverPID, bridgePID int) {
+func (r *Registry) AttachStream(workspaceID string, serverPID, bridgePID int) uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.attachLocked(workspaceID, serverPID, bridgePID, r.now())
+	return r.attachLocked(workspaceID, serverPID, bridgePID, r.now())
+}
+
+// DetachStream records that the stream identified by gen (the value
+// AttachStream returned) has ended. The member is kept but reads as Stale
+// ("cmux (bridge disconnected)") until a stream re-attaches or the reaper
+// finds the bridge process dead. It is a no-op when a newer stream has since
+// re-attached the same (workspace, bridge pid): a reconnecting bridge keeps
+// its pid, so the old stream's late teardown must not erase the new
+// registration (which, with Heartbeat a no-op for a missing member, left the
+// workspace reading "no bridge" for good).
+func (r *Registry) DetachStream(workspaceID string, bridgePID int, gen uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if e, ok := r.byWorkspace[workspaceID][bridgePID]; ok && e.gen == gen {
+		e.disconnected = true
+	}
 }
 
 // attachLocked inserts or refreshes a member. Callers must hold r.mu.
-func (r *Registry) attachLocked(workspaceID string, serverPID, bridgePID int, at time.Time) {
+func (r *Registry) attachLocked(workspaceID string, serverPID, bridgePID int, at time.Time) uint64 {
 	members := r.byWorkspace[workspaceID]
 	if members == nil {
 		members = map[int]*BridgeEntry{}
@@ -81,6 +104,10 @@ func (r *Registry) attachLocked(workspaceID string, serverPID, bridgePID int, at
 	}
 	e.ServerPID = serverPID
 	e.lastSeen = at
+	r.nextGen++
+	e.gen = r.nextGen
+	e.disconnected = false
+	return e.gen
 }
 
 // Heartbeat refreshes a member's lastSeen.
@@ -167,12 +194,17 @@ func (r *Registry) StatusForWorkspace(workspaceID string) Status {
 		return Unknown
 	}
 	var freshest time.Time
+	connected := false
 	for _, e := range members {
+		if e.disconnected {
+			continue
+		}
+		connected = true
 		if e.lastSeen.After(freshest) {
 			freshest = e.lastSeen
 		}
 	}
-	if r.now().Sub(freshest) >= r.staleAfter {
+	if !connected || r.now().Sub(freshest) >= r.staleAfter {
 		return Stale
 	}
 	return Alive

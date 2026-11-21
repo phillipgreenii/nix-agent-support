@@ -208,3 +208,35 @@ func TestRegistry_OtherWorkspaceDoesNotSatisfyLookup(t *testing.T) {
 		t.Errorf("BridgePIDs(ws-a) = %v, want nil", got)
 	}
 }
+
+// register -> disconnect -> reconnect, with the reconnect keeping the bridge
+// pid (the same bridge process re-dials) and the old stream's teardown running
+// AFTER the new stream registered.
+func TestRegistry_FlapKeepsReconnectedBridgeAlive(t *testing.T) {
+	r := NewRegistry(30 * time.Second)
+	g1 := r.AttachStream("ws-a", 4000, 100)
+	if got := r.StatusForWorkspace("ws-a"); got != Alive {
+		t.Fatalf("registered: got %v, want Alive", got)
+	}
+	r.DetachStream("ws-a", 100, g1)
+	if got := r.StatusForWorkspace("ws-a"); got != Stale {
+		t.Fatalf("disconnected: got %v, want Stale", got)
+	}
+	g2 := r.AttachStream("ws-a", 4000, 100)
+	if got := r.StatusForWorkspace("ws-a"); got != Alive {
+		t.Fatalf("reconnected: got %v, want Alive", got)
+	}
+	// Late teardown of the superseded stream must not disturb the new one.
+	r.DetachStream("ws-a", 100, g1)
+	if got := r.StatusForWorkspace("ws-a"); got != Alive {
+		t.Fatalf("after stale detach: got %v, want Alive", got)
+	}
+	r.Heartbeat("ws-a", 100, time.Now())
+	if got := r.StatusForWorkspace("ws-a"); got != Alive {
+		t.Fatalf("after heartbeat: got %v, want Alive", got)
+	}
+	r.DetachStream("ws-a", 100, g2)
+	if got := r.StatusForWorkspace("ws-a"); got != Stale {
+		t.Fatalf("second disconnect: got %v, want Stale", got)
+	}
+}

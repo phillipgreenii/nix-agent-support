@@ -97,10 +97,11 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 			registered   bool
 			regWorkspace string
 			regBridgePID int
+			regGen       uint64
 		)
 		defer func() {
 			if registered {
-				s.bridges.Deregister(regWorkspace, regBridgePID)
+				s.bridges.DetachStream(regWorkspace, regBridgePID, regGen)
 			}
 			close(readerDone)
 		}()
@@ -123,7 +124,7 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 				// AttachStream refreshes an existing (workspaceID, bridgePID)
 				// member in place; distinct bridge PIDs on one workspace id
 				// coexist.
-				s.bridges.AttachStream(workspaceID, int(r.GetServerPid()), bridgePID)
+				regGen = s.bridges.AttachStream(workspaceID, int(r.GetServerPid()), bridgePID)
 				registered = true
 				regWorkspace = workspaceID
 				regBridgePID = bridgePID
@@ -138,7 +139,7 @@ func (s *server) BridgeChannel(stream pb.PaMonitor_BridgeChannelServer) error {
 				// Refresh the bridge this stream actually registered
 				// (regBridgePID), not whatever bridge PID the heartbeat
 				// message claims, so stream identity stays consistent with
-				// teardown's Deregister(regWorkspace, regBridgePID).
+				// teardown's DetachStream(regWorkspace, regBridgePID, regGen).
 				s.bridges.Heartbeat(regWorkspace, regBridgePID, time.Now())
 			}
 		}

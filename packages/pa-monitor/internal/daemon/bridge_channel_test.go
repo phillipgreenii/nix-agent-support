@@ -258,3 +258,60 @@ func TestBridgeChannelRejectsRegisterWithoutWorkspaceID(t *testing.T) {
 		t.Fatalf("Register without workspace_id attached a bridge: %v", got)
 	}
 }
+
+// TestBridgeChannelReconnectSamePIDSurvivesOldStreamTeardown reproduces the
+// "cmux (no bridge)" bug: a bridge that re-dials keeps its pid, so when the old
+// stream's handler tears down after the new stream registered, it used to
+// Deregister the new stream's member and Heartbeat (a no-op for a missing
+// member) never restored it. Register, disconnect and reconnect must read
+// Alive, Stale and Alive.
+func TestBridgeChannelReconnectSamePIDSurvivesOldStreamTeardown(t *testing.T) {
+	srv := newBridgeTestServer(t)
+	const wsID = "ws-flap"
+	reg := func() *pb.BridgeMsg {
+		return &pb.BridgeMsg{Kind: &pb.BridgeMsg_Register{Register: &pb.Register{
+			BridgePid: 777, ServerPid: 1, WorkspaceId: wsID,
+		}}}
+	}
+	hb := &pb.BridgeMsg{Kind: &pb.BridgeMsg_Heartbeat{Heartbeat: &pb.Heartbeat{BridgePid: 777}}}
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	s1 := newFakeBridgeStream(ctx1)
+	go func() { _ = srv.BridgeChannel(s1) }()
+	s1.recvCh <- reg()
+	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, wsID) }) {
+		t.Fatal("first stream never registered")
+	}
+
+	// Disconnect: reads "bridge disconnected" (Stale), not "no bridge".
+	cancel1()
+	if !waitFor(t, 2*time.Second, func() bool { return srv.bridges.StatusForWorkspace(wsID) == bridge.Stale }) {
+		t.Fatalf("after disconnect: got %v, want Stale", srv.bridges.StatusForWorkspace(wsID))
+	}
+
+	// Reconnect (same pid): Alive again.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	s2 := newFakeBridgeStream(ctx2)
+	go func() { _ = srv.BridgeChannel(s2) }()
+	s2.recvCh <- reg()
+	if !waitFor(t, 2*time.Second, func() bool { return bridgeLive(srv, wsID) }) {
+		t.Fatal("reconnect never made the bridge live")
+	}
+
+	// Overlap: a third stream registers while the second is still open; the
+	// second's late teardown must not unregister the third.
+	ctx3, cancel3 := context.WithCancel(context.Background())
+	defer cancel3()
+	s3 := newFakeBridgeStream(ctx3)
+	go func() { _ = srv.BridgeChannel(s3) }()
+	s3.recvCh <- reg()
+	time.Sleep(50 * time.Millisecond)
+	cancel2()
+	time.Sleep(100 * time.Millisecond)
+	s3.recvCh <- hb
+	if got := srv.bridges.StatusForWorkspace(wsID); got != bridge.Alive {
+		t.Fatalf("after old stream teardown: got %v, want Alive", got)
+	}
+}
