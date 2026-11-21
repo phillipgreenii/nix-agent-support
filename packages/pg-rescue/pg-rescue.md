@@ -40,6 +40,10 @@
 
 `pg-rescue check`
 
+- The home-manager module runs this check over the generated config at build time (`buildCheck`), so a missing handler binary or a bad chain fails the build:
+
+`pg-rescue check --config {{path/to/config.toml}}`
+
 - Print a result for a handler script to end with (resolved, deferred or declined):
 
 `pg-rescue result {{resolved|deferred|declined}} "{{one line summary}}"`

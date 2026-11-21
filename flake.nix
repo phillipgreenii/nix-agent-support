@@ -14755,6 +14755,28 @@
                     chains.mine.handlers = [ "extra" ];
                   };
 
+                  # A real generated config whose chain names an unknown
+                  # handler and whose other handler has no binary on PATH:
+                  # building its (checked) config.toml must fail.
+                  hmBrokenBinary = evalHM {
+                    enable = true;
+                    handlers.ghost.command = [ "pg-rescue-no-such-binary" ];
+                    chains.broken.handlers = [ "ghost" ];
+                  };
+                  hmBrokenChain = evalHM {
+                    enable = true;
+                    chains.broken.handlers = [ "no-such-handler" ];
+                  };
+                  hmUnchecked = evalHM {
+                    enable = true;
+                    buildCheck = false;
+                    handlers.ghost.command = [ "pg-rescue-no-such-binary" ];
+                    chains.broken.handlers = [ "ghost" ];
+                  };
+                  brokenBinaryCfg = hmBrokenBinary.xdg.configFile."pg-rescue/config.toml".source;
+                  brokenChainCfg = hmBrokenChain.xdg.configFile."pg-rescue/config.toml".source;
+                  uncheckedCfg = hmUnchecked.xdg.configFile."pg-rescue/config.toml".source;
+
                   defaultCfg = hmDefault.xdg.configFile."pg-rescue/config.toml".source;
                   overrideCfg = hmOverride.xdg.configFile."pg-rescue/config.toml".source;
                 in
@@ -14812,11 +14834,23 @@
                       pkgs.pg-rescue-flake-lock-conflict
                       pkgs.yq-go
                     ];
+                    failedBinary = pkgs.testers.testBuildFailure brokenBinaryCfg;
+                    failedChain = pkgs.testers.testBuildFailure brokenChainCfg;
                   }
                   ''
                     set -euo pipefail
                     export HOME="$TMPDIR/home" XDG_STATE_HOME="$TMPDIR/state"
                     mkdir -p "$HOME"
+
+                    # Build-time check over the real generated config: a
+                    # handler with no binary and a chain naming an unknown
+                    # handler each FAIL the build of config.toml; with
+                    # buildCheck off the same broken config is not gated.
+                    [ "$(cat $failedBinary/testBuildFailure.exit)" != 0 ]
+                    grep -q 'NOT FOUND' $failedBinary/testBuildFailure.log
+                    [ "$(cat $failedChain/testBuildFailure.exit)" != 0 ]
+                    grep -q 'no-such-handler' $failedChain/testBuildFailure.log
+                    [ -f ${uncheckedCfg} ]
 
                     # The design's build-time smoke test: the generated config
                     # loads and a successful command passes straight through.

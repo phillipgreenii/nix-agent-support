@@ -184,6 +184,27 @@ let
     };
   };
 
+  generatedConfig = tomlFormat.generate "pg-rescue-config.toml" configAttrs;
+
+  # Build-time gate (design section 15 item 10): `pg-rescue check` over the
+  # machine's REAL generated config. It validates the config exactly as a run
+  # would and resolves every handler's `command[0]` on the PATH of the
+  # packages this home configuration installs, so a bad chain or a missing
+  # handler binary fails the home-manager build instead of failing every run
+  # after activation. The result is the config file itself, so the activated
+  # file is always the checked one.
+  checkedConfig =
+    pkgs.runCommand "pg-rescue-config.toml"
+      {
+        nativeBuildInputs = [ cfg.package ] ++ config.home.packages;
+      }
+      ''
+        export HOME="$TMPDIR/home" XDG_STATE_HOME="$TMPDIR/state"
+        mkdir -p "$HOME"
+        pg-rescue check --config ${generatedConfig}
+        cp ${generatedConfig} "$out"
+      '';
+
   defaultChains = {
     sync.handlers = [
       "flake-lock-conflict"
@@ -225,6 +246,18 @@ in
     flakeLockConflictPackage = lib.mkPackageOption pkgs "pg-rescue-flake-lock-conflict" { };
 
     syncProjectsPackage = lib.mkPackageOption pkgs "sync-projects" { };
+
+    buildCheck = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Run `pg-rescue check` over the generated config at build time, with
+        every package in `home.packages` on `PATH`. An invalid config, an
+        unknown handler in a chain, or a handler whose `command[0]` is not
+        provided by any installed package fails the build. Disable it only for
+        a handler binary installed outside `home.packages`.
+      '';
+    };
 
     redact = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -311,7 +344,7 @@ in
     ];
 
     xdg.configFile."pg-rescue/config.toml".source =
-      tomlFormat.generate "pg-rescue-config.toml" configAttrs;
+      if cfg.buildCheck then checkedConfig else generatedConfig;
 
     programs.tldr.customPages.pg-rescue = lib.mkIf config.programs.tldr.enable {
       platform = "common";

@@ -624,6 +624,14 @@ machine flake (see "Which tracker `pg-rescue-bead` files in" below).
 `pg-rescue check --chain sync` (every default handler binary must resolve). It also asserts the
 override behaviour above.
 
+The module also runs `pg-rescue check` over the machine's REAL generated config as part of the
+home-manager build (option `buildCheck`, default `true`). The `config.toml` that gets activated is
+the checked file, so a config error, a chain naming an unknown handler, or a handler whose
+`command[0]` no package in `home.packages` provides fails the build instead of failing every run
+after activation. Handler binaries installed outside `home.packages` need `buildCheck = false`. The
+same flake check proves a broken generated config fails the build (`pkgs.testers.testBuildFailure`)
+and that `buildCheck = false` skips the gate.
+
 ### Which tracker `pg-rescue-bead` files in
 
 Every `pg-connector` call the handler makes carries one `--backend`: a beads backend instance. Which
