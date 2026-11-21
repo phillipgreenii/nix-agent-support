@@ -479,12 +479,19 @@ func TestErrWorkspaceNotConfigured_MentionsFlagKeepsOldText(t *testing.T) {
 
 // fakeBDScript records one marker file per start (so a test can wait until a
 // call is in flight), records whether the slot's descriptor reached it (under any
-// descriptor number, found with lsof: cmdrun has no ExtraFiles, so the number
-// is the backend's own, not 3; FAKE_BD_SLOTS names the budget state directory),
+// descriptor number, found with lsof when present, else by any open descriptor from 3 up (the
+// nix sandbox has no lsof; Go children set close-on-exec on everything else):
+// cmdrun has no ExtraFiles, so the number is the backend's own, not 3; FAKE_BD_SLOTS names the budget state directory),
 // sleeps FAKE_BD_SLEEP seconds and prints an empty JSON object.
 const fakeBDScript = `#!/bin/sh
 : > "$FAKE_BD_STARTED/start-$$"
-if lsof -F n -p $$ 2>/dev/null | grep -q "^n$FAKE_BD_SLOTS/slot-"; then : > "$FAKE_BD_STARTED/fd3-$$"; fi
+if command -v lsof >/dev/null 2>&1; then
+  if lsof -F n -p $$ 2>/dev/null | grep -q "^n$FAKE_BD_SLOTS/slot-"; then : > "$FAKE_BD_STARTED/fd3-$$"; fi
+else
+  for fd in 3 4 5 6 7 8 9; do
+    if [ -e "/dev/fd/$fd" ]; then : > "$FAKE_BD_STARTED/fd3-$$"; fi
+  done
+fi
 sleep "${FAKE_BD_SLEEP:-0}"
 echo '{}'
 `
