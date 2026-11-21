@@ -37,4 +37,16 @@ in
   checks = {
     test-pg-repo-runner = pg-repo-runner.check;
   };
+
+  # Opt-in tier (PG_REPO_RUNNER_SIGNAL_TESTS=1): the multi-process signal test (a
+  # cancelled run stops the capped check's whole process tree). NOT a check: the flake
+  # publishes it under `legacyPackages.<system>.integration-checks` (ADR 0024 in
+  # nix-repo-base) so `nix flake check` never builds it, and no hook or gate runs it
+  # (global rule V-4). Build by name:
+  # `nix build --no-link .#integration-checks.test-pg-repo-runner-signal`.
+  integration-checks = {
+    test-pg-repo-runner-signal = pg-repo-runner.check.overrideAttrs (_: {
+      PG_REPO_RUNNER_SIGNAL_TESTS = "1";
+    });
+  };
 }

@@ -28,7 +28,7 @@ setup() {
   fi
   # shellcheck disable=SC1090,SC1091
   source "$GFH_LIB"
-  gfh_save_env SCRIPTS_DIR SCRIPT_UNDER_TEST TEST_SUPPORT GFH_LIB
+  gfh_save_env SCRIPTS_DIR SCRIPT_UNDER_TEST TEST_SUPPORT GFH_LIB PG_REPO_RUNNER_SIGNAL_TESTS
   gfh_setup "pg-repo-runner"
   gfh_restore_env
   # no test depends on a pg-origin-guard installed on the machine running it
@@ -956,7 +956,11 @@ only_alpha_verified() {
   [[ $output == *'pg_repo_runner_check_timeouts 1 repo=nix-alpha'* ]]
 }
 
+# Multi-process signal test (V-4): it spawns real processes and signals the runner, so it is
+# not in the unit tier. It runs only with PG_REPO_RUNNER_SIGNAL_TESTS=1, which
+# `nix build .#integration-checks.test-pg-repo-runner-signal` sets.
 @test "a cancelled run (SIGTERM) stops the check's whole process tree, stores no verdict and releases the lease" {
+  [[ ${PG_REPO_RUNNER_SIGNAL_TESTS:-} == 1 ]] || skip "needs PG_REPO_RUNNER_SIGNAL_TESTS=1 (integration-checks.test-pg-repo-runner-signal)"
   local mark="30.$RANDOM$RANDOM" pid i
   PG_ROUTER_ITEM_ID="nix-alpha@$ALPHA_SHA" SHIM_SLEEP="$mark" "${RUNNER[@]}" verify >"$TEST_DIR/cancel.out" 2>&1 3>&- &
   pid=$!

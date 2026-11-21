@@ -22521,6 +22521,13 @@
           // (import ./packages/pg-disk-reclaimer {
             inherit pkgs;
             bashBuilders = pkgs._agentSupportBashBuilders;
+          }).integration-checks
+          # pg-repo-runner's signal tier (PG_REPO_RUNNER_SIGNAL_TESTS=1), defined in its
+          # own default.nix beside its unit check.
+          // (import ./packages/pg-repo-runner {
+            inherit pkgs;
+            bashBuilders = pkgs._agentSupportBashBuilders;
+            beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
           }).integration-checks;
 
           packages = {
