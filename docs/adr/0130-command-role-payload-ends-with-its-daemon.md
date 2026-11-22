@@ -118,3 +118,23 @@ sequenceDiagram
 - Post-deploy: after the next daemon replacement with a long command payload running, capture its
   process group and confirm it is gone within the drain plus 5 s; a survivor with a different
   process group id answers the open question above.
+
+## Note 2026-11-22: no router-level case for a payload that leaves its group
+
+Decision: the opt-in test `TestShutdown_PayloadGroupEndsWithinDrainPlusGrace` gets no case for a
+payload that escapes its process group with `setsid`, and the group-escape shape stays bounded only
+by the runner's wall-clock cap (decision item 3).
+
+Why it is not testable at the router level: the only thing a router test could assert about such a
+payload is that the router's cancel path does NOT end it. That asserts a known limitation, not a
+contract. It would fail the day someone adds a process-tree reaper (a good change), it would pin
+the survival the cap exists to bound, and it would leave a live process the test has to hunt down
+and kill by pid. The bound that matters (the escaped payload ends within the cap) is enforced by
+the runner's shell script outside `pg-router`, so it belongs to the runner's own tests. The one
+router-level property that still holds with an escapee, that the daemon stop and the dispatch
+cancel finish within the drain plus grace and the router exits, is already covered by the
+`descendant-ignores-term` case. `setsid(1)` is also absent on macOS, so a faithful escape would
+need a helper program only to document a gap.
+
+If a reaper that follows escaped descendants is ever adopted (option (f) or a process-tree walk),
+add the escape case then, asserting the escapee is gone within drain plus grace.
