@@ -20,6 +20,9 @@ type stallRunner struct {
 	fx    longHistoryFixture
 	stall func(kind string, idx int) bool
 	calls map[string]int
+	// onStall runs when a page starts to stall, before it blocks: a test uses it
+	// to fire the share that is to cut the page.
+	onStall func(kind string)
 }
 
 func (r *stallRunner) RunStdin(ctx context.Context, _ []byte, args ...string) ([]byte, error) {
@@ -53,6 +56,9 @@ func (r *stallRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	}
 	r.calls[kind]++
 	if r.stall(kind, idx) {
+		if r.onStall != nil {
+			r.onStall(kind)
+		}
 		<-ctx.Done()
 		return nil, errors.New("gh api graphql: signal: killed: " + ctx.Err().Error())
 	}
@@ -70,12 +76,9 @@ func newStallRunner(t *testing.T, stall func(kind string, idx int) bool) *stallR
 // review threads complete and the reviews still read afterwards. The second
 // page of the 5 never answers.
 func TestListCommentsReport_SlowIssueCommentPageIsCutAtItsShare(t *testing.T) {
-	// The stalled page waits out its share in real time and uses no CPU, so
-	// these three overlap their waits instead of adding them up.
-	t.Parallel()
 	const budget = 2 * time.Second
 	r := newStallRunner(t, func(kind string, idx int) bool { return kind == "issues" && idx >= 1 })
-	p := NewWithRunner(r)
+	p := cutProvider(r)
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
@@ -119,11 +122,8 @@ func TestListCommentsReport_SlowIssueCommentPageIsCutAtItsShare(t *testing.T) {
 // as truncated (the connection total is unknown then, so Total is the lower
 // bound Returned+1).
 func TestListCommentsReport_StalledFirstIssueCommentPageIsReportedTruncated(t *testing.T) {
-	// The stalled page waits out its share in real time and uses no CPU, so
-	// these three overlap their waits instead of adding them up.
-	t.Parallel()
 	r := newStallRunner(t, func(kind string, _ int) bool { return kind == "issues" })
-	p := NewWithRunner(r)
+	p := cutProvider(r)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -145,17 +145,9 @@ func TestListCommentsReport_StalledFirstIssueCommentPageIsReportedTruncated(t *t
 // the threads read so far are returned as a truncated connection and the issue
 // comments, whose time was not eaten, are read complete.
 func TestListCommentsReport_SlowThreadPageIsCutAtItsShare(t *testing.T) {
-	// The stalled page waits out its share in real time and uses no CPU, so
-	// these three overlap their waits instead of adding them up.
-	t.Parallel()
-	// The stalled page waits out half the budget in real time, and the pages
-	// before it (20 threads) and the issue-comment pages after it (5) must fit in
-	// the first half and the 30 percent of the budget left behind it. A 2 s budget
-	// left them 1 s and 0.6 s, which a loaded host overran (pg2-tqgth3); 6 s gives
-	// three times the room for a 3 s stall.
 	const budget = 6 * time.Second
 	r := newStallRunner(t, func(kind string, idx int) bool { return kind == "threads" && idx >= 2 })
-	p := NewWithRunner(r)
+	p := cutProvider(r)
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 

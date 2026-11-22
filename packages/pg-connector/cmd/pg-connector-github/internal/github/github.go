@@ -65,6 +65,11 @@ type Provider struct {
 	// now is the clock the connection time budgets read (review_context.go);
 	// nil means time.Now. Tests inject a fake one.
 	now func() time.Time
+	// scopeTimeout derives the context a connection's pages run under, which
+	// ends with DeadlineExceeded once d has passed; nil means
+	// context.WithTimeout. Tests inject a timer they fire by hand, so a share
+	// can be cut without waiting it out in real time.
+	scopeTimeout func(parent context.Context, d time.Duration) (context.Context, context.CancelFunc)
 }
 
 // New constructs a GitHub VCS provider backed by the gh CLI on PATH, reached

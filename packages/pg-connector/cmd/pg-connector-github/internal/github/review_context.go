@@ -153,7 +153,11 @@ func (p *Provider) scopeAt(ctx context.Context, share float64) (context.Context,
 	if left <= 0 {
 		return ctx, b, func() {}
 	}
-	scoped, cancel := context.WithTimeout(ctx, left)
+	timeout := context.WithTimeout
+	if p.scopeTimeout != nil {
+		timeout = p.scopeTimeout
+	}
+	scoped, cancel := timeout(ctx, left)
 	b.scope, b.parent = scoped, ctx
 	return scoped, b, cancel
 }
