@@ -52,13 +52,6 @@ type fallbackJSON struct {
 	Content        string   `json:"content"`
 }
 
-func rfcOrEmpty(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
 // buildFooter gives one line per source named by the store's status or by a
 // rendered entry. Counts come from the entries of THIS report, never from the
 // all-time entry count.

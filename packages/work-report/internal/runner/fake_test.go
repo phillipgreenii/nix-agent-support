@@ -189,12 +189,12 @@ func runScript(s script) int {
 		must(err)
 		cmd.ExtraFiles = []*os.File{upW}
 		must(cmd.Start())
-		upW.Close()
+		_ = upW.Close()
 		// Wait until the grandchild is running and has reported through the
 		// FIFO, so the group is never torn down before it existed.
 		buf := make([]byte, 1)
 		_, _ = io.ReadFull(up, buf)
-		up.Close()
+		_ = up.Close()
 	}
 	if s.ReadyFile != "" {
 		must(os.WriteFile(s.ReadyFile, []byte("ready"), 0o600))
@@ -435,7 +435,7 @@ func newFIFOWatcher(t *testing.T, fx *fixture) *fifoWatcher {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.Close() })
+	t.Cleanup(func() { _ = f.Close() })
 	fx.env[envFakeFIFO] = path
 	return &fifoWatcher{t: t, f: f, path: path}
 }
@@ -618,7 +618,7 @@ func runScriptInProcess(s script, spec ExecSpec, stderr io.Writer) (string, int)
 			return fail(err)
 		}
 		if err := f.Truncate(sp.Size); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fail(err)
 		}
 		if err := f.Close(); err != nil {

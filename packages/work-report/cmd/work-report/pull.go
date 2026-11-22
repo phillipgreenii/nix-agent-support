@@ -179,7 +179,8 @@ func repullCommand(rangeSpec string, sources []string) string {
 func shellQuote(s string) string {
 	safe := s != ""
 	for _, r := range s {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_.:/@+=,", r)) {
+		isSafe := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_.:/@+=,", r)
+		if !isSafe {
 			safe = false
 			break
 		}

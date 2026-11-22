@@ -122,10 +122,10 @@ func (r Result) ExitCode() int {
 			degraded++
 		}
 	}
-	switch {
-	case degraded == 0:
+	switch degraded {
+	case 0:
 		return 0
-	case degraded == attempted:
+	case attempted:
 		return 3
 	default:
 		return 2

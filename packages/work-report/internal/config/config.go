@@ -176,7 +176,7 @@ const KindsMigrationText = "--kind was removed; run 'work-report report <preset>
 // ErrKindsRetired is the load error for a config carrying the retired kinds
 // key, whatever its content. Callers recognize it with
 // errors.Is(err, config.ErrKindsRetired); its text is the migration text.
-var ErrKindsRetired = errors.New("the kinds key is retired: " + KindsMigrationText)
+var ErrKindsRetired = errors.New("the kinds key is retired: " + strings.TrimSuffix(KindsMigrationText, "."))
 
 // hasTopLevelKey reports whether the YAML document's top-level mapping has the
 // key. A document that is not a mapping, or does not parse, has no such key
