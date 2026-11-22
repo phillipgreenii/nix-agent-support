@@ -1,6 +1,8 @@
 # promtool unit tests for the pg-repo-runner-tip-unverified alert. Run by the flake check
 # test-pg-repo-runner-alert-rules (check-alert-rules.sh wraps refId A as a Prometheus alert
 # with the rule's for and labels).
+# The check_last_* input series carry OTel resource labels (host_name, job, service_name) like production, so a
+# label-set mismatch between the by (repo) and unaggregated sides makes the unless clause match nothing and fails.
 rule_files:
   - rules.yml
 
@@ -79,9 +81,9 @@ tests:
     input_series:
       - series: 'pg_repo_runner_unverified_tip{repo="alpha"}'
         values: "1x360"
-      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",result="green"}'
+      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",host_name="h1",job="ccpool",service_name="ccpool",result="green"}'
         values: "0x59 18000x60 36000x60 54000x60 72000x60 90000x60"
-      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha"}'
+      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha",host_name="h1",job="ccpool",service_name="ccpool"}'
         values: "14400x360"
     alert_rule_test:
       - eval_time: 8h
@@ -100,15 +102,15 @@ tests:
     input_series:
       - series: 'pg_repo_runner_unverified_tip{repo="alpha"}'
         values: "1x300"
-      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",result="red"}'
+      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",host_name="h1",job="ccpool",service_name="ccpool",result="red"}'
         values: "72000x300"
-      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha"}'
+      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha",host_name="h1",job="ccpool",service_name="ccpool"}'
         values: "3600x300"
       - series: 'pg_repo_runner_unverified_tip{repo="beta"}'
         values: "1x300"
-      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="beta",result="green"}'
+      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="beta",host_name="h1",job="ccpool",service_name="ccpool",result="green"}'
         values: "0x300"
-      - series: 'pg_repo_runner_check_last_duration_seconds{repo="beta"}'
+      - series: 'pg_repo_runner_check_last_duration_seconds{repo="beta",host_name="h1",job="ccpool",service_name="ccpool"}'
         values: "3600x300"
     alert_rule_test:
       # alpha: red at 20h, eval at 22h -> 2h old, quiet. beta: last verdict at 0, window 2h + 2h = 4h,
@@ -129,9 +131,9 @@ tests:
     input_series:
       - series: 'pg_repo_runner_unverified_tip{repo="alpha"}'
         values: "1x200"
-      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",result="green"}'
+      - series: 'pg_repo_runner_check_last_timestamp_seconds{repo="alpha",host_name="h1",job="ccpool",service_name="ccpool",result="green"}'
         values: "0x200"
-      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha"}'
+      - series: 'pg_repo_runner_check_last_duration_seconds{repo="alpha",host_name="h1",job="ccpool",service_name="ccpool"}'
         values: "3600x200"
     alert_rule_test:
       - eval_time: 5h

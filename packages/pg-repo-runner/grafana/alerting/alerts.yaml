@@ -139,7 +139,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: "last_over_time(pg_repo_runner_unverified_tip[1d]) == 1 unless on(repo) (time() - max by (repo) (last_over_time(pg_repo_runner_check_last_timestamp_seconds[1d])) <= 7200 + 2 * last_over_time(pg_repo_runner_check_last_duration_seconds[1d]))"
+              expr: "last_over_time(pg_repo_runner_unverified_tip[1d]) == 1 unless on(repo) (time() - max by (repo) (last_over_time(pg_repo_runner_check_last_timestamp_seconds[1d])) <= 7200 + 2 * max by (repo) (last_over_time(pg_repo_runner_check_last_duration_seconds[1d])))"
           - refId: B
             datasourceUid: __expr__
             model:
