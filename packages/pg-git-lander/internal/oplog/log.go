@@ -172,7 +172,7 @@ func ParseHeader(path string) (Header, error) {
 	if err != nil {
 		return Header{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	line, err := bufio.NewReader(f).ReadString('\n')
 	if err != nil && line == "" {
 		return Header{}, fmt.Errorf("%s: no header line", path)

@@ -327,7 +327,7 @@ func (r *Resolver) runUnit(ctx context.Context, dir, commit string, rule *config
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	extra := map[string]string{
 		hooks.EnvPrefix + "REPLAYED_COMMIT": commit,

@@ -571,8 +571,6 @@ func (s *session) lock(ctx context.Context, sel *worktrees.Selection) (*Result, 
 	}
 }
 
-func req0(s *session) string { return s.req.RepoFlag }
-
 func (s *session) lockFailure(ctx context.Context, err error) (*Result, error) {
 	var busy *locks.BusyError
 	var ref *locks.RefusedError

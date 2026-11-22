@@ -443,7 +443,9 @@ func TestStatusSkipsALockReleasedBetweenListingAndRead(t *testing.T) {
 		res := real(ctx, c)
 		if !released && slices.Contains(c.Args, "for-each-ref") && !slices.Contains(c.Args, "--format=%(refname) %(objectname) %(objecttype)") {
 			released = true
-			f.git(f.repo.Dir, "update-ref", "-d", ref)
+			if r := f.g.Run(ctx, f.repo.Dir, "update-ref", "-d", ref); !r.OK() {
+				f.t.Errorf("update-ref -d %s: %s", ref, r.Stderr)
+			}
 		}
 		return res
 	}}

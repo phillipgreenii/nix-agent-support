@@ -191,7 +191,7 @@ func TestLandNothingFoundIsNoWorktree(t *testing.T) {
 	f.mkBranch("dev")
 	gitDir := filepath.Join(f.repo.Dir, ".git")
 	_, err := f.do(worktrees.Input{Op: worktrees.Land, Branch: "feat", Target: "dev", Cwd: gitDir})
-	wantRefusal(t, err, outcome.RefNoWorktree)
+	_ = wantRefusal(t, err, outcome.RefNoWorktree)
 }
 
 func TestRebaseCascade(t *testing.T) {
@@ -221,7 +221,7 @@ func TestRebaseCascade(t *testing.T) {
 
 	// A path that is not a worktree: no-worktree.
 	_, err = f.do(worktrees.Input{Op: worktrees.Rebase, Branch: "loose", Cwd: filepath.Join(f.repo.Dir, ".git")})
-	wantRefusal(t, err, outcome.RefNoWorktree)
+	_ = wantRefusal(t, err, outcome.RefNoWorktree)
 
 	// --source-worktree simply names the SW.
 	sel, err = f.do(worktrees.Input{Op: worktrees.Rebase, Branch: "loose", Cwd: filepath.Join(f.repo.Dir, ".git"), SourceFlag: spare})
@@ -242,10 +242,10 @@ func TestMismatchAndNotAWorktree(t *testing.T) {
 	outside := t.TempDir()
 
 	_, err := f.do(worktrees.Input{Op: worktrees.Land, Branch: "feat", Target: "main", Cwd: f.repo.Dir, SourceFlag: spare})
-	wantRefusal(t, err, outcome.RefSourceWTMismatch)
+	_ = wantRefusal(t, err, outcome.RefSourceWTMismatch)
 
 	_, err = f.do(worktrees.Input{Op: worktrees.Land, Branch: "feat", Target: "main", Cwd: f.repo.Dir, TargetFlag: spare})
-	wantRefusal(t, err, outcome.RefTargetWTMismatch)
+	_ = wantRefusal(t, err, outcome.RefTargetWTMismatch)
 
 	r := func(in worktrees.Input) *worktrees.Refusal {
 		_, err := f.do(in)
@@ -376,11 +376,11 @@ func TestMainWorktreeRemoval(t *testing.T) {
 	// main worktree is on main = BRANCH; judged from git, not from the name.
 	in := worktrees.Input{Op: worktrees.Land, Branch: "main", Target: "dev", Cwd: other}
 	_, err := f.do(in)
-	wantRefusal(t, err, outcome.RefMainWorktreeRemoval)
+	_ = wantRefusal(t, err, outcome.RefMainWorktreeRemoval)
 
 	in.SourceFlag = f.repo.Dir // explicit does not help
 	_, err = f.do(in)
-	wantRefusal(t, err, outcome.RefMainWorktreeRemoval)
+	_ = wantRefusal(t, err, outcome.RefMainWorktreeRemoval)
 
 	in.KeepSourceWorktree = true
 	if _, err := f.do(in); err != nil {
@@ -409,7 +409,7 @@ func TestMainWorktreeIsFoundFromGitNotBranchNames(t *testing.T) {
 	}
 	_ = other
 	_, err = f.do(worktrees.Input{Op: worktrees.Land, Branch: "trunk", Target: "dev", Cwd: other})
-	wantRefusal(t, err, outcome.RefMainWorktreeRemoval)
+	_ = wantRefusal(t, err, outcome.RefMainWorktreeRemoval)
 }
 
 func TestUnsupportedLayouts(t *testing.T) {

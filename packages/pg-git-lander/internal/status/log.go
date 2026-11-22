@@ -49,7 +49,7 @@ func PrintLog(w io.Writer, path string, tail int) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if tail < 0 {
 		_, err = io.Copy(w, f)
 		return err

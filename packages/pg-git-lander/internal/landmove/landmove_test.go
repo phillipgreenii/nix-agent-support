@@ -87,14 +87,6 @@ func (f *fx) chosen(dir string) *worktrees.Chosen {
 	return &worktrees.Chosen{Path: dir, Start: f.cur(dir)}
 }
 
-// workOnBranch makes the work branch at result and checks it out in a fresh
-// work worktree.
-func (f *fx) workWorktree(result string) *worktrees.Chosen {
-	p := filepath.Join(f.repo.Root(), "ww")
-	f.git(f.repo.Dir, "worktree", "add", "-b", workbranch.Name(opID), p, result)
-	return &worktrees.Chosen{Path: p, Start: "main"}
-}
-
 func (f *fx) lock(name, content string) (ref, oid string) {
 	f.t.Helper()
 	p := filepath.Join(f.repo.Root(), "blob-"+name)

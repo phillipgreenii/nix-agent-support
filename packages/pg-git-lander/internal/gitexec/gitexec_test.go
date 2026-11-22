@@ -187,7 +187,7 @@ func TestTimeoutKillsWholeProcessGroup(t *testing.T) {
 			return
 		}
 		if time.Now().After(deadline) {
-			syscall.Kill(pid, syscall.SIGKILL)
+			_ = syscall.Kill(pid, syscall.SIGKILL)
 			t.Fatalf("grandchild %d survived the timeout", pid)
 		}
 		time.Sleep(50 * time.Millisecond)

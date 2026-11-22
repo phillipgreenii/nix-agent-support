@@ -82,7 +82,7 @@ func (f *fx) lines(path string) []map[string]any {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	defer fh.Close()
+	defer func() { _ = fh.Close() }()
 	var out []map[string]any
 	sc := bufio.NewScanner(fh)
 	sc.Buffer(nil, 1<<20)
@@ -309,7 +309,7 @@ func TestRotationUnderAdminLockWithRacingWriterAppendingToArchive(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer racer.Close()
+	defer func() { _ = racer.Close() }()
 	for i := 0; i < 3; i++ {
 		if err := f.ev.Stage(ctx, "s", "p", 0); err != nil {
 			t.Fatal(err)
@@ -360,7 +360,7 @@ func TestRotationSkippedWhileAnotherHoldsTheAdminLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer set.Release(ctx)
+	defer func() { _ = set.Release(ctx) }()
 	for i := 0; i < 6; i++ {
 		if err := f.ev.Stage(ctx, "s", "p", 0); err != nil {
 			t.Fatal(err)
@@ -535,7 +535,7 @@ func TestPruneNamedKeepsLogsThatLockRecordsName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer set.Release(ctx)
+	defer func() { _ = set.Release(ctx) }()
 	for _, id := range []string{"named-op", "unnamed-op"} {
 		l, err := Open(f.common, id, "feature/x", "main", f.clock)
 		if err != nil {
@@ -564,7 +564,7 @@ func TestAttachEmitsLockWaitAndHolderConverted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	Attach(f.layer, l, f.ev)
 
 	// a live holder: waiting ends busy
@@ -586,7 +586,7 @@ func TestAttachEmitsLockWaitAndHolderConverted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer set.Release(ctx)
+	defer func() { _ = set.Release(ctx) }()
 
 	got := f.lines(f.ev.Path)
 	var types []string

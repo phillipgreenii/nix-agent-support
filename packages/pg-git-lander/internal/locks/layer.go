@@ -171,8 +171,6 @@ func zeroOID(like string) string {
 	return strings.Repeat("0", 40)
 }
 
-func isZero(oid string) bool { return strings.Trim(oid, "0") == "" }
-
 func (l *Layer) hashBlob(ctx context.Context, rec Record) (string, error) {
 	b, err := rec.MarshalJSON()
 	if err != nil {

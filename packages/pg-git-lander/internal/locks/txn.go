@@ -91,34 +91,32 @@ func (l *Layer) Transact(ctx context.Context, edits []Edit) error {
 // nothing-stopped (no record), unreadable-lock, and lost-to-concurrent (the
 // record is running, or another invocation swapped it first).
 func (l *Layer) TakeBack(ctx context.Context, ref string, mutate func(*Record)) (*Held, Record, error) {
-	for {
-		st, err := l.Read(ctx, ref)
-		if err != nil {
-			return nil, Record{}, err
-		}
-		switch {
-		case st.Unreadable != nil:
-			return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefUnreadableLock, Cause: st.Unreadable}
-		case st.Absent:
-			return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefNothingStopped}
-		case st.Rec.State != StateStopped:
-			holder, _ := l.holderOf(ctx, st.Rec)
-			return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefLostToConcurrent, Holder: holder}
-		}
-		prior := st.Rec.Clone()
-		rec := st.Rec.Clone()
-		mutate(&rec)
-		rec.State = StateRunning
-		l.stamp(&rec)
-		oid, err := l.write(ctx, ref, rec, st.OID, nil)
-		if err != nil {
-			if isTaken(err) {
-				return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefLostToConcurrent, Cause: err}
-			}
-			return nil, Record{}, err
-		}
-		return &Held{l: l, Ref: ref, rec: rec, oid: oid, lastRenew: l.Clock.Now(), prior: &prior}, prior, nil
+	st, err := l.Read(ctx, ref)
+	if err != nil {
+		return nil, Record{}, err
 	}
+	switch {
+	case st.Unreadable != nil:
+		return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefUnreadableLock, Cause: st.Unreadable}
+	case st.Absent:
+		return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefNothingStopped}
+	case st.Rec.State != StateStopped:
+		holder, _ := l.holderOf(ctx, st.Rec)
+		return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefLostToConcurrent, Holder: holder}
+	}
+	prior := st.Rec.Clone()
+	rec := st.Rec.Clone()
+	mutate(&rec)
+	rec.State = StateRunning
+	l.stamp(&rec)
+	oid, err := l.write(ctx, ref, rec, st.OID, nil)
+	if err != nil {
+		if isTaken(err) {
+			return nil, Record{}, &RefusedError{Ref: ref, Reason: outcome.RefLostToConcurrent, Cause: err}
+		}
+		return nil, Record{}, err
+	}
+	return &Held{l: l, Ref: ref, rec: rec, oid: oid, lastRenew: l.Clock.Now(), prior: &prior}, prior, nil
 }
 
 func isTaken(err error) bool { return errors.Is(err, ErrTaken) }

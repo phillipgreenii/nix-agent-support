@@ -609,7 +609,7 @@ func TestRevalidateKey(t *testing.T) {
 		t.Parallel()
 		f := newFx(t)
 		f.commit("cfg", map[string]string{config.RepoFileName: "revalidate = 3\n"})
-		asErr(t, mustFail(t, f, land))
+		_ = asErr(t, mustFail(t, f, land))
 	})
 	t.Run("the repo file beats the XDG defaults", func(t *testing.T) {
 		t.Parallel()

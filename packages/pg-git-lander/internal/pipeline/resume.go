@@ -759,10 +759,10 @@ func (rs *resumer) resume(ctx context.Context, skip bool) (*outcome.Outcome, err
 		if err != nil {
 			return rs.failed(ctx, nil, err)
 		}
-		switch {
-		case path == rebase.UpToDate:
+		switch path {
+		case rebase.UpToDate:
 			path = rebase.FastForward // a rebase whose result is already on top of ONTO still has to move BRANCH
-		case path == rebase.NothingToLand:
+		case rebase.NothingToLand:
 			if err := p.Op.SetTips(ctx, func(t *locks.Tips) { v := workTip; t.Result = &v }); err != nil {
 				return rs.failed(ctx, nil, err)
 			}
