@@ -22440,6 +22440,13 @@
             # re-executed, so they are not listed) and fails when the listing is
             # empty, when a test does not report PASS, or when any test is skipped,
             # so a gate that silently ran nothing cannot pass.
+            # cmd/pg-router/ack_after_accept_integration_test.go is the end-to-end
+            # check of source acknowledgement after handler acceptance: a real
+            # router, the real pg-router-source-pg-connector adapter (built by the
+            # test with `go build`) with --deferred-ack against a /bin/sh fake
+            # pg-connector, and a /bin/sh fake dispatcher that declines past the
+            # retry window and then accepts; plus a router SIGKILL between accept
+            # and settle.
             # PG_ROUTER_TEST_REQUIRE_COMMAND_ADAPTER turns the adapter tests' skip
             # into a failure. The unit-tier guard that keeps these tests out of the
             # unit gate is TestUnitTierHasNoIntegrationTests in cmd/pg-router.
