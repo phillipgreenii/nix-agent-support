@@ -91,8 +91,10 @@ type Stats struct {
 	Events      int64
 	ToolCalls   int64
 	ToolResults int64
-	Errors      int64
-	Narration   int64
+	// Errors counts tool_results with is_error set (printed as tool_errors=), not
+	// ingest failures; those are Failed.
+	Errors    int64
+	Narration int64
 	// UserProse counts user records carrying prose (a turn, not a tool result).
 	UserProse int64
 	// HumanTurns counts the subset whose text was stored in full — the typed and
@@ -111,7 +113,7 @@ func (s Stats) Changed() int { return s.Fresh + s.Resumed + s.Reingested }
 func (s Stats) Summary() string {
 	return fmt.Sprintf(
 		"ingest complete: scanned=%d changed=%d unchanged=%d fresh=%d resumed=%d reingested=%d failed=%d "+
-			"bytes=%d lines_ok=%d lines_bad=%d events=%d tool_calls=%d tool_results=%d errors=%d narration=%d "+
+			"bytes=%d lines_ok=%d lines_bad=%d events=%d tool_calls=%d tool_results=%d tool_errors=%d narration=%d "+
 			"user_prose=%d human_turns=%d interruptions=%d thinking=%d elapsed=%s",
 		s.Scanned, s.Changed(), s.Unchanged, s.Fresh, s.Resumed, s.Reingested, s.Failed,
 		s.BytesParsed, s.LinesOK, s.LinesBad, s.Events, s.ToolCalls, s.ToolResults, s.Errors,
@@ -194,7 +196,7 @@ func Run(ctx context.Context, db *sql.DB, opt Options) (Stats, error) {
 		stats.Scanned++
 		if opt.Progress != nil && (i+1)%progressEvery == 0 {
 			fmt.Fprintf(opt.Progress,
-				"progress: scanned=%d/%d changed=%d bytes=%d lines_ok=%d lines_bad=%d errors=%d elapsed=%s\n",
+				"progress: scanned=%d/%d changed=%d bytes=%d lines_ok=%d lines_bad=%d tool_errors=%d elapsed=%s\n",
 				stats.Scanned, len(paths), stats.Changed(), stats.BytesParsed,
 				stats.LinesOK, stats.LinesBad, stats.Errors,
 				time.Since(start).Round(time.Millisecond))

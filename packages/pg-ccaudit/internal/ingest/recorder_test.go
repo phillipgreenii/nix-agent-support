@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pg-ccaudit/internal/store"
@@ -59,7 +60,7 @@ func TestRecorderIngestSnapshotThenOnlyNewRecords(t *testing.T) {
 	c := env.Dial(context.Background())
 
 	first := recSweep(t, db, c)
-	if first.ToolCalls != 2 || first.ToolResult != 2 || first.Errors != 1 {
+	if first.ToolCalls != 2 || first.ToolResult != 2 || first.ToolErrors != 1 {
 		t.Fatalf("first sweep stats: %+v", first)
 	}
 	if n := rowCount(t, db, `SELECT COUNT(*) FROM tool_calls`); n != 2 {
@@ -322,5 +323,17 @@ func TestRecorderIngestRestartsASnapshotWithAnExpiredPosition(t *testing.T) {
 	}
 	if n := rowCount(t, db, `SELECT COUNT(*) FROM events`); n != 2 {
 		t.Fatalf("events=%d, want 2", n)
+	}
+}
+
+// The summary label for is_error tool results MUST NOT read as an ingest failure
+// count: a real failure returns a Go error and exits non-zero.
+func TestRecorderSummaryLabelsToolErrors(t *testing.T) {
+	got := RecorderStats{ToolCalls: 2, ToolResult: 2, ToolErrors: 13}.Summary()
+	if !strings.Contains(got, "tool_results=2 tool_errors=13 ") {
+		t.Errorf("summary = %q, want tool_errors=13 after tool_results=2", got)
+	}
+	if strings.Contains(strings.ReplaceAll(got, "tool_errors=", ""), "errors=") {
+		t.Errorf("summary still carries a bare errors= label: %q", got)
 	}
 }

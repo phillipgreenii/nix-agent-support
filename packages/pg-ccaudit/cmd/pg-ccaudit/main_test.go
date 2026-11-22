@@ -70,7 +70,7 @@ func TestIngestThenQueryEndToEnd(t *testing.T) {
 	if !strings.Contains(out, "ingest complete: ") {
 		t.Fatalf("no summary line:\n%s", out)
 	}
-	if !strings.Contains(out, "errors=1") {
+	if !strings.Contains(out, "tool_errors=1") {
 		t.Errorf("summary does not report the single error:\n%s", out)
 	}
 

@@ -77,14 +77,16 @@ type RecorderStats struct {
 	Texts      int
 	ToolCalls  int64
 	ToolResult int64
-	Errors     int64
+	// ToolErrors counts tool_results with is_error set. It is NOT an ingest
+	// failure count: a real failure returns a Go error and exits non-zero.
+	ToolErrors int64
 	Elapsed    time.Duration
 }
 
 // Summary is one flat key=value line.
 func (s RecorderStats) Summary() string {
-	return fmt.Sprintf("ingest complete: entries=%d resets=%d resyncs=%d lines=%d texts=%d lines_read=%d tool_calls=%d tool_results=%d errors=%d elapsed=%s",
-		s.Entries, s.Resets, s.Resyncs, s.Lines, s.Texts, s.LinesRead, s.ToolCalls, s.ToolResult, s.Errors, s.Elapsed.Round(time.Millisecond))
+	return fmt.Sprintf("ingest complete: entries=%d resets=%d resyncs=%d lines=%d texts=%d lines_read=%d tool_calls=%d tool_results=%d tool_errors=%d elapsed=%s",
+		s.Entries, s.Resets, s.Resyncs, s.Lines, s.Texts, s.LinesRead, s.ToolCalls, s.ToolResult, s.ToolErrors, s.Elapsed.Round(time.Millisecond))
 }
 
 type subscription struct {
@@ -532,7 +534,7 @@ func tally(sub, typ string, en client.Entry, st *RecorderStats) {
 	case sub == SubTools && typ == "tool_result":
 		st.ToolResult++
 	case sub == SubErrors && typ == "tool_result" && fieldBool(en.Fields, "is_error"):
-		st.Errors++
+		st.ToolErrors++
 	case sub == SubText:
 		st.Texts++
 	}
