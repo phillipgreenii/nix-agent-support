@@ -593,3 +593,57 @@ MOCK
     echo "$output" | grep -q "git fetch failed"
     ! git branch | grep -q "merged-after-refused-fetch"
 }
+
+# Install a counting git shim ahead of the real git: every invocation's argv
+# is appended to $GIT_CALL_LOG (fetch is still short-circuited like the setup
+# mock). Returns the log path in GIT_CALL_LOG.
+install_counting_git() {
+    export GIT_CALL_LOG="$MOCK_DIR/git-calls.log"
+    : > "$GIT_CALL_LOG"
+    cat > "$MOCK_DIR/git" <<MOCK
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$GIT_CALL_LOG"
+if [[ "\$1" == "fetch" ]]; then
+    exit 0
+fi
+exec "$REAL_GIT" "\$@"
+MOCK
+    chmod +x "$MOCK_DIR/git"
+}
+
+@test "the merged set and worktree list are computed once per run regardless of branch count" {
+    local i
+    for i in 1 2 3 4 5 6 7 8; do
+        git branch "merged-$i" main
+    done
+    git branch -f unmerged-1 test-branch
+    install_counting_git
+
+    run_git_branch_maintenance --delete-merged
+    [ "$status" -eq 0 ]
+
+    # Behaviour: merged branches deleted, the unmerged one kept
+    [ -z "$(git branch --list merged-1)" ]
+    git branch | grep -q "unmerged-1"
+
+    local merged_calls worktree_calls
+    merged_calls=$(grep -cE '^(branch|for-each-ref) .*--merged' "$GIT_CALL_LOG" || true)
+    worktree_calls=$(grep -cE '^worktree list' "$GIT_CALL_LOG" || true)
+    [ "$merged_calls" -eq 1 ]
+    [ "$worktree_calls" -eq 1 ]
+}
+
+@test "a stale branch fast-forwarded in the same run is deleted as merged" {
+    # behind: base moves ahead of this branch
+    git branch behind main
+    git checkout -q -b advance main
+    echo more > more.txt && git add more.txt && git commit -qm advance
+    git update-ref refs/remotes/origin/main advance
+    git checkout -q main
+    install_counting_git
+
+    run_git_branch_maintenance --ff --delete-merged
+    [ "$status" -eq 0 ]
+    [ -z "$(git branch --list behind)" ]
+    echo "$output" | grep -q "• behind"
+}

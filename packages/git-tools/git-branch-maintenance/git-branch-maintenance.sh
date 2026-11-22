@@ -100,19 +100,55 @@ PROTECTED_WORKTREES=()
 # Utility Functions
 # ============================================================================
 
+load_worktree_list() {
+  # One `git worktree list --porcelain` per run, cached in WORKTREE_LIST:
+  # every later lookup (per-branch worktree path, primary worktree, leftover
+  # temporary worktree) reads the cache instead of spawning git again.
+  WORKTREE_LIST=$(git worktree list --porcelain)
+}
+
 get_branch_worktree() {
   local branch="$1"
   # Get worktree path for branch, or empty if not in worktree
-  git worktree list --porcelain | awk -v branch="$branch" '
+  awk -v branch="$branch" '
     /^worktree / { path=$2 }
     /^branch / && $2 == "refs/heads/"branch { print path; exit }
-  '
+  ' <<<"$WORKTREE_LIST"
 }
 
 get_primary_worktree() {
   # git worktree list --porcelain always lists the main working tree first,
   # followed by any linked worktrees.
-  git worktree list --porcelain | awk '/^worktree / { print $2; exit }'
+  awk '/^worktree / { print $2; exit }' <<<"$WORKTREE_LIST"
+}
+
+load_merged_set() {
+  # One merged-set computation per run (the expensive call in a big clone),
+  # instead of one `git branch --merged` per branch. Keys are short branch
+  # names under refs/heads that are ancestors of BASE_BRANCH. Branches this
+  # run moves (fast-forward, rebase) are re-checked individually, see
+  # mark_branch_moved.
+  MERGED_SET=()
+  MOVED_BRANCHES=()
+  local b
+  while IFS= read -r b; do
+    [[ -n $b ]] && MERGED_SET["$b"]=1
+  done < <(git for-each-ref --merged "$BASE_BRANCH" --format='%(refname:short)' refs/heads)
+}
+
+mark_branch_moved() {
+  MOVED_BRANCHES["$1"]=1
+}
+
+is_branch_merged() {
+  local branch="$1"
+  if [[ -n ${MOVED_BRANCHES[$branch]:-} ]]; then
+    # The branch tip changed after the set was computed: ancestry of this one
+    # branch is exactly what `git branch --merged` would report for it.
+    git merge-base --is-ancestor "refs/heads/$branch" "$BASE_BRANCH" 2>/dev/null
+    return
+  fi
+  [[ -n ${MERGED_SET[$branch]:-} ]]
 }
 
 canonicalize_path() {
@@ -215,7 +251,7 @@ create_tmp_worktree() {
   # This handles cases where the script was interrupted
   # Look for any worktree with the tmp-gbm branch (from any previous PID)
   local existing_worktree
-  existing_worktree=$(git worktree list --porcelain | awk '/^worktree / { path=$2 } /^branch / && $2 == "refs/heads/'"$TMP_BRANCH"'" { print path }')
+  existing_worktree=$(awk '/^worktree / { path=$2 } /^branch / && $2 == "refs/heads/'"$TMP_BRANCH"'" { print path }' <<<"$WORKTREE_LIST")
   if [[ -n $existing_worktree ]]; then
     git worktree remove "$existing_worktree" --force 2>/dev/null || true
   fi
@@ -259,10 +295,7 @@ get_branch_status() {
     echo "up-to-date"
   elif git merge-base --is-ancestor "$branch_hash" "$base_hash" 2>/dev/null; then
     echo "can-fast-forward"
-  elif git branch --merged "$BASE_BRANCH" | grep -q "^[*+ ] $branch$"; then
-    # The character class matches the three prefixes git uses in `branch`
-    # output: "*" (current branch of this worktree), "+" (checked out in a
-    # different worktree), or a plain space (not checked out anywhere).
+  elif is_branch_merged "$branch"; then
     echo "merged"
   else
     echo "diverged"
@@ -448,10 +481,8 @@ try_delete_merged() {
     return 2 # protected
   fi
 
-  # Check if merged. The character class matches "*" (current branch of this
-  # worktree), "+" (checked out in a different worktree), or a plain space
-  # (not checked out anywhere) - the three prefixes `git branch` uses.
-  if ! git branch --merged "$BASE_BRANCH" | grep -q "^[*+ ] $branch$"; then
+  # Check if merged (from the once-per-run merged set).
+  if ! is_branch_merged "$branch"; then
     return 3 # not merged
   fi
 
@@ -659,6 +690,10 @@ fi
 
 # The primary worktree (the main working tree) is implicitly protected -
 # see is_protected_worktree.
+declare -A MERGED_SET=()
+declare -A MOVED_BRANCHES=()
+WORKTREE_LIST=""
+load_worktree_list
 PRIMARY_WORKTREE=$(get_primary_worktree)
 
 # Base branch for operations
@@ -697,6 +732,9 @@ fi
 # Create temporary worktree
 echo "Creating temporary worktree..."
 create_tmp_worktree
+
+# Merged set, computed once after the fetch and the temporary worktree setup
+load_merged_set
 
 echo ""
 echo "Processing branches..."
@@ -758,7 +796,8 @@ for branch in "${branches_to_process[@]}"; do
   # class matches "*"/"+"/" " - the three prefixes `git branch` uses
   # depending on whether/where the branch is checked out.
   if [[ $status == "fast-forwarded" || $status == "rebased" ]]; then
-    if git branch --merged "$BASE_BRANCH" | grep -q "^[*+ ] $branch$"; then
+    mark_branch_moved "$branch"
+    if is_branch_merged "$branch"; then
       SUMMARY_MERGED_BRANCHES+=("$branch")
     fi
   fi
@@ -772,7 +811,8 @@ for branch in "${branches_to_process[@]}"; do
     if [[ $rebase_result -eq 0 ]]; then
       status="rebased"
       # Check if branch is now merged after rebase
-      if git branch --merged "$BASE_BRANCH" | grep -q "^[*+ ] $branch$"; then
+      mark_branch_moved "$branch"
+      if is_branch_merged "$branch"; then
         SUMMARY_MERGED_BRANCHES+=("$branch")
       fi
     else
