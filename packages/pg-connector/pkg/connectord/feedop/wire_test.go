@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store/storetest"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -27,7 +28,7 @@ var storeIdentityShape = regexp.MustCompile(`^[0-9a-f]{32}$`)
 // newWatchedRig is newRig over a registration spec set up in the test itself.
 func newWatchedRig(t *testing.T) *rig {
 	t.Helper()
-	return newRigOverSpec(t, filepath.Join(t.TempDir(), "store.db"), testSpec())
+	return newRigOverStore(t, storetest.Open(t), testSpec())
 }
 
 // newRigOverSpec opens the store at path and serves view viewAll of spec.
