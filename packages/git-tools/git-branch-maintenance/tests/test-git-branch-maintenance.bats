@@ -753,3 +753,57 @@ MOCK
     [ "$status" -eq 0 ]
     [ ! -e "$GBM_TMP_ROOT/git-branch-maintenance-777" ]
 }
+
+# Shim that records, when the temporary worktree is removed, whether tracked
+# files were checked out in it. Result lands in $WT_STATE_LOG.
+install_worktree_state_git() {
+    export WT_STATE_LOG="$MOCK_DIR/wt-state.log"
+    : > "$WT_STATE_LOG"
+    cat > "$MOCK_DIR/git" <<MOCK
+#!/usr/bin/env bash
+if [[ "\$1" == "fetch" ]]; then exit 0; fi
+if [[ "\$1" == "worktree" && "\$2" == "remove" && "\$3" == */git-branch-maintenance-* ]]; then
+    if [[ -e "\$3/test.txt" ]]; then echo present >> "$WT_STATE_LOG"; else echo absent >> "$WT_STATE_LOG"; fi
+fi
+exec "$REAL_GIT" "\$@"
+MOCK
+    chmod +x "$MOCK_DIR/git"
+}
+
+@test "the temporary worktree is created without checking out files for delete-only runs" {
+    use_private_tmp_root
+    git branch merged-one main
+    install_worktree_state_git
+
+    run_git_branch_maintenance --delete-merged
+    [ "$status" -eq 0 ]
+
+    # Behaviour unchanged: the merged branch is deleted, the unmerged one kept
+    [ -z "$(git branch --list merged-one)" ]
+    [ -n "$(git branch --list test-branch)" ]
+    # No file was ever checked out in the temporary worktree
+    run grep -c '^absent$' "$WT_STATE_LOG"
+    [ "$output" -ge 1 ]
+    ! grep -q '^present$' "$WT_STATE_LOG"
+}
+
+@test "rebasing a branch that is not checked out anywhere still works (checkout happens for that step only)" {
+    use_private_tmp_root
+    # feature branches off the initial commit; origin/main moves ahead
+    git checkout -q -b feature main
+    echo feat > feature.txt && git add feature.txt && git commit -qm feature
+    git checkout -q main
+    echo ahead > ahead.txt && git add ahead.txt && git commit -qm ahead
+    git update-ref refs/remotes/origin/main main
+    install_worktree_state_git
+
+    run_git_branch_maintenance --rebase feature
+    [ "$status" -eq 0 ]
+
+    # feature is now based on origin/main and keeps its own commit
+    git merge-base --is-ancestor origin/main feature
+    git show feature:feature.txt | grep -q feat
+    git show feature:ahead.txt | grep -q ahead
+    # Files were checked out in the temporary worktree for the rebase
+    grep -q '^present$' "$WT_STATE_LOG"
+}

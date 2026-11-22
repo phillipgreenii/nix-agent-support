@@ -272,10 +272,21 @@ create_tmp_worktree() {
     echo "Error: git branch -f $TMP_BRANCH $BASE_BRANCH failed: $err" >&2
     exit 1
   fi
-  if ! err=$(git worktree add "$TMP_WORKTREE" "$TMP_BRANCH" 2>&1); then
+  if ! err=$(git worktree add --no-checkout "$TMP_WORKTREE" "$TMP_BRANCH" 2>&1); then
     echo "Error: git worktree add $TMP_WORKTREE $TMP_BRANCH failed: $err" >&2
     exit 1
   fi
+}
+
+ensure_tmp_checkout() {
+  # The temporary worktree is created with --no-checkout (a big repository
+  # would otherwise write every tracked file to disk for every run). Only
+  # rebase needs file content (git checkout + git rebase there), so populate
+  # the index and files on first need. Delete, fast-forward and status steps
+  # use the worktree only as a place to run git from.
+  [[ ${TMP_CHECKED_OUT:-false} == "true" ]] && return 0
+  git -C "$TMP_WORKTREE" reset --hard -q "$TMP_BRANCH" || return 1
+  TMP_CHECKED_OUT=true
 }
 
 remove_orphaned_tmp_worktrees() {
@@ -477,6 +488,7 @@ try_rebase() {
       )
     else
       # Worktree path doesn't exist, treat as not in worktree
+      ensure_tmp_checkout || return 1
       (
         cd "$TMP_WORKTREE"
         git checkout "$branch" 2>/dev/null
@@ -496,6 +508,7 @@ try_rebase() {
     fi
   else
     # Not in worktree - checkout in tmp-gbm, rebase, return
+    ensure_tmp_checkout || return 1
     (
       cd "$TMP_WORKTREE"
       git checkout "$branch" 2>/dev/null
