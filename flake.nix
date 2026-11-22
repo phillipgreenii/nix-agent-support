@@ -848,6 +848,9 @@
             pkgs.coreutils
             pkgs.diffutils
             pkgs.gnused
+            # tests/go-work.bats and tests/refresh-go-work-sum.bats build a
+            # fixture module proxy with `zip`; without it they fail, not skip.
+            pkgs.zip
           ];
           text = ''
             # Inside the nix sandbox that builds checks.pre-commit the
