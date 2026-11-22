@@ -22463,6 +22463,11 @@
                     ./packages/ccpool
                     ./packages/pg-connector
                     ./packages/claude-transcript
+                    # The tests build cmd/pg-router-handler-command with `go build`,
+                    # which needs the modules its local replaces name.
+                    ./packages/pg-failsig
+                    ./packages/pg-claude-code-recorder
+                    ./packages/pg-sqlite
                   ];
                 };
                 modRoot = "pg-router";
@@ -22518,6 +22523,63 @@
                       exit 1
                     fi
                     echo "pg-router-integration-tests: $total tests in $(echo "$pkgs" | wc -l) packages, each with a PASS line, none skipped"
+                    runHook postBuild
+                  '';
+                });
+
+            # Source acknowledgement after handler acceptance, end to end (integration
+            # tier, on demand, never a `checks` attribute; build with
+            # `nix build --no-link .#integration-checks.pg-router-ack-after-accept-integration-tests`).
+            # It runs ONLY the two TestAckAfterAccept tests of cmd/pg-router (a real
+            # router, the real source adapter built by the test, a /bin/sh fake
+            # pg-connector and a /bin/sh fake dispatcher), so it is narrower and
+            # faster than pg-router-integration-tests, whose other members need
+            # extra tools (bd, tmux, ccpool). Like it, it fails when a named test
+            # does not report PASS or is skipped.
+            pg-router-ack-after-accept-integration-tests =
+              (pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-ack-after-accept-integration-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
+                    ./packages/ccpool
+                    ./packages/pg-connector
+                    ./packages/claude-transcript
+                  ];
+                };
+                modRoot = "pg-router";
+                gomod2nixToml = ./packages/pg-router/gomod2nix.toml;
+                # coreutils: the fake dispatcher and fake pg-connector use cat and sleep.
+                testDeps = [
+                  pkgs.git
+                  pkgs.coreutils
+                ];
+              }).overrideAttrs
+                (_: {
+                  buildPhase = ''
+                    runHook preBuild
+                    export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                    export GOFLAGS=''${GOFLAGS//-trimpath/}
+                    log="$TMPDIR/ack-integration.log"
+                    if ! go test -tags integration -count=1 -v -timeout 30m -run '^TestAckAfterAccept_' ./cmd/pg-router > "$log" 2>&1; then
+                      cat "$log"
+                      echo "pg-router-ack-after-accept-integration-tests: FAILED" >&2
+                      exit 1
+                    fi
+                    for t in TestAckAfterAccept_DeclinePastRetryWindowThenAccept TestAckAfterAccept_CrashBetweenAcceptAndSettle; do
+                      if ! grep -q -- "^--- PASS: $t " "$log"; then
+                        cat "$log"
+                        echo "pg-router-ack-after-accept-integration-tests: $t did not report PASS (skipped or not run)" >&2
+                        exit 1
+                      fi
+                    done
+                    if grep -q -- '^--- SKIP' "$log"; then
+                      cat "$log"
+                      echo "pg-router-ack-after-accept-integration-tests: a test was SKIPPED" >&2
+                      exit 1
+                    fi
+                    echo "pg-router-ack-after-accept-integration-tests: 2 tests, each with a PASS line, none skipped"
                     runHook postBuild
                   '';
                 });
