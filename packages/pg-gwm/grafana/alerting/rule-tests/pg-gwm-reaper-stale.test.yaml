@@ -206,3 +206,61 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
+
+  - name: a dark wake with both host_power gauges and the reaper age aged out is Normal, not no data
+    interval: 1m
+    input_series:
+      # The 2026-11-21 sequence: everything is scraped or pushed until minute 10, then the host
+      # sleeps. At minute 16 (a dark wake, over 5 minutes after the last push) only the transition
+      # counters were pushed again; both gauges, the reaper age and up have no sample in the
+      # 5 minute lookback.
+      - series: host_power_last_wake_timestamp_seconds{kind="full"}
+        values: "200x10 stale _x20"
+      - series: host_power_last_sleep_timestamp_seconds
+        values: "100x10 stale _x20"
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "0+60x10 stale _x20"
+      - series: up{job="pg-gwm"}
+        values: "1x10 stale _x20"
+      - series: host_power_transitions_total
+        values: "3x10 stale _x5 4x10"
+    promql_expr_test:
+      - expr: raw:pg_gwm_reaper_stale
+        eval_time: 16m
+        exp_samples:
+          - labels: "raw:pg_gwm_reaper_stale"
+            value: 0
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts: []
+
+  - name: awake and scraped with no gauges still fires on an age over 1800 seconds
+    interval: 1m
+    input_series:
+      # Prometheus scrapes every minute (up is continuous) and the counters exist, but the gauges
+      # have not been pushed: the "neither gauge exported" arm of the gate still opens.
+      - series: up{job="pg-gwm"}
+        values: "1x200"
+      - series: host_power_transitions_total
+        values: "3x200"
+      - series: pg_gwm_reaper_last_success_age_seconds
+        values: "2100+60x120"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: pg-gwm-reaper-stale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: awake and scraped with no gauges and no reaper series is empty, which noDataState Alerting fires
+    interval: 1m
+    input_series:
+      - series: up{job="pg-gwm"}
+        values: "1x200"
+      - series: host_power_transitions_total
+        values: "3x200"
+    promql_expr_test:
+      - expr: raw:pg_gwm_reaper_stale
+        eval_time: 60m
+        exp_samples: []

@@ -23,11 +23,23 @@
 # healthy. The expression is
 #   (<ages> and on() <settled>) or (vector(0) unless on() <settled>)
 # where <settled> is host-activity's full-wake timestamp newer than its last-sleep timestamp (or
-# no sleep ever recorded, or neither gauge exported while host_power_transitions_total is present)
+# no sleep ever recorded, or neither gauge exported while host_power_transitions_total is present
+# AND Prometheus has scraped pg-gwm continuously: count_over_time(up{job="pg-gwm"}[5m]) >= 4)
 # AND that wake more than 600 seconds ago (one reaper interval, so the reaper has had one run since
 # the wake before a wall-clock age counts). While the host sleeps, or has just woken, <settled> is
-# empty and the second branch returns a single 0 sample: Normal, not NoData. While the host is
-# awake and settled, the first branch applies unchanged: an age over 1800 fires, and no age series
+# empty and the second branch returns a single 0 sample: Normal, not NoData.
+#
+# Dark wake (chosen fix: gate on Prometheus's own scrape continuity, the alert-side direction).
+# The "neither gauge exported" arm used to be true whenever both host_power gauges had aged out of
+# the 5 minute lookback while the counters were present, which is exactly a dark wake more than
+# 5 minutes after the last push: the gate then read "awake and settled", the age branch was empty
+# (no pg-gwm scrape during the sleep) and noDataState fired. That arm now also requires at least 4
+# samples of up{job="pg-gwm"} in the last 5 minutes (up is written on every scrape, failed ones
+# included). A sleep, a dark wake or a Prometheus restart leaves too few samples and closes the
+# gate (Normal, via the vector(0) branch), while an exporter that is down or a reaper that never
+# ran, with the host awake and Prometheus scraping, still fires.
+#
+# While the host is awake and settled, the first branch applies unchanged: an age over 1800 fires, and no age series
 # at all (the reaper never ran) is empty, so noDataState Alerting fires. Cases:
 # rule-tests/pg-gwm-reaper-stale.test.yaml.
 apiVersion: 1
@@ -60,7 +72,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: '(max by (repo) (last_over_time({__name__=~"pg_gwm_reaper_last_success_age_seconds|pg_gwm_last_reap_age_seconds"}[5m])) and on() (((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or ((host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total)))) or (vector(0) unless on() (((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or ((host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total))))'
+              expr: '(max by (repo) (last_over_time({__name__=~"pg_gwm_reaper_last_success_age_seconds|pg_gwm_last_reap_age_seconds"}[5m])) and on() (((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or ((host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total) and on() (count_over_time(up{job="pg-gwm"}[5m]) >= 4)))) or (vector(0) unless on() (((host_power_last_wake_timestamp_seconds{kind="full"} > on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or ((host_power_last_wake_timestamp_seconds{kind="full"} unless on() host_power_last_sleep_timestamp_seconds) and on() (time() - host_power_last_wake_timestamp_seconds{kind="full"} > 600)) or (absent(host_power_last_wake_timestamp_seconds{kind="full"}) and on() absent(host_power_last_sleep_timestamp_seconds) and on() count(host_power_transitions_total) and on() (count_over_time(up{job="pg-gwm"}[5m]) >= 4))))'
           - refId: B
             datasourceUid: __expr__
             model:
