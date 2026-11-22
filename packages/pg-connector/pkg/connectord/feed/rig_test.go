@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -16,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store/storetest"
 )
 
 var t0 = time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
@@ -196,11 +196,7 @@ type rig struct {
 
 func newRig(t *testing.T, opts ...func(*Config)) *rig {
 	t.Helper()
-	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := storetest.Open(t)
 	clk := governor.NewManualClock(t0)
 	q := newFakeQueries()
 	q.set("mine", true, refA)

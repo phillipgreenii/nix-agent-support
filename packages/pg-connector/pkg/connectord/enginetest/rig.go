@@ -2,7 +2,6 @@ package enginetest
 
 import (
 	"context"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store/storetest"
 )
 
 // Start is the manual clock's first reading.
@@ -84,11 +84,8 @@ func NewRig(t *testing.T, opts ...RigOption) *Rig {
 	}
 	reg := NewRegistration(cfg.reg...)
 
-	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := storetest.Open(t)
+	var err error
 	clk := governor.NewManualClock(Start)
 
 	r := &Rig{

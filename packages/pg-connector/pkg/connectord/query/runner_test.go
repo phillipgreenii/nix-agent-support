@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store/storetest"
 )
 
 // The invented registration every test of this package runs on: one entity kind
@@ -307,11 +307,7 @@ func newRig(t *testing.T) *rig { return newRigWith(t) }
 // runner is built.
 func newRigWith(t *testing.T, opts ...func(*Config)) *rig {
 	t.Helper()
-	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := storetest.Open(t)
 	clk := governor.NewManualClock(t0)
 	gov, err := governor.New(governor.Config{
 		GraphQL:         governor.Limits{Cap: 1500, Reserve: 100},

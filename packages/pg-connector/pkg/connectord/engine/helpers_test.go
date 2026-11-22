@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store/storetest"
 )
 
 // The invented registration every test of this package runs on: one entity kind,
@@ -217,11 +217,7 @@ func newEngine(t testing.TB, clk governor.Clock) *Engine {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
-	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := storetest.Open(t)
 	clk := governor.NewManualClock(t0)
 	e := newEngine(t, clk)
 	obs := &recorder{}

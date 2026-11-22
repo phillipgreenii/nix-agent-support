@@ -3,7 +3,6 @@ package groupsvc_test
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/groupsvc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/groupsvc/groupsvctest"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store/storetest"
 )
 
 // The invented connectors: they share no entity kind, group, stamp or message.
@@ -31,11 +31,7 @@ var (
 
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := storetest.Open(t)
 	return st
 }
 

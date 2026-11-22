@@ -3,7 +3,6 @@ package groupsvc
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +16,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/registry"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store/storetest"
 )
 
 // The invented connectors of the shared tests: kind "alpha" and kind "beta".
@@ -197,11 +197,7 @@ var t0 = time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
 
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
-	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
+	st := storetest.Open(t)
 	return st
 }
 
