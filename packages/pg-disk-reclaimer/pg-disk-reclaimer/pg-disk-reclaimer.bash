@@ -1480,17 +1480,23 @@ cmd_reclaim() {
     rm_status=0
     m_free0=$(pgdr_metric_free_kb)
     m_t0=$(pgdr_now_us)
+    # stderr goes to a temp file so a failed item's bounded tail can be
+    # recorded in its metric row, then is replayed to the real stderr.
+    m_errf=$(mktemp "${TMPDIR:-/tmp}/pgdr-item-err.XXXXXX")
     if [[ ${PGDR_ITEM_TIMEOUT_SECONDS:-0} =~ ^[1-9][0-9]*$ ]]; then
       # Bounded (scheduled `auto` runs): a bash child under `timeout`, which
       # kills the command's whole process group, so a hung registry command
       # cannot hold the run (and the launchd job) for hours.
-      timeout -k 30 "$PGDR_ITEM_TIMEOUT_SECONDS" bash -c "${r_remove[i]}" </dev/null || rm_status=$?
+      timeout -k 30 "$PGDR_ITEM_TIMEOUT_SECONDS" bash -c "${r_remove[i]}" </dev/null 2>"$m_errf" || rm_status=$?
       if [[ $rm_status -eq 124 || $rm_status -eq 137 ]]; then
         echo "pg-disk-reclaimer: remove command for '$id' timed out after ${PGDR_ITEM_TIMEOUT_SECONDS}s" >&2
       fi
     else
-      (eval "${r_remove[i]}") </dev/null || rm_status=$?
+      (eval "${r_remove[i]}") </dev/null 2>"$m_errf" || rm_status=$?
     fi
+    cat "$m_errf" >&2
+    m_errtail=$(pgdr_stderr_tail "$m_errf")
+    rm -f "$m_errf"
     m_t1=$(pgdr_now_us)
     m_free1=$(pgdr_metric_free_kb)
     m_freed=$(pgdr_freed_bytes "$m_free0" "$m_free1")
@@ -1508,7 +1514,7 @@ cmd_reclaim() {
       fi
     else
       echo "pg-disk-reclaimer: remove command for '$id' exited non-zero" >&2
-      pgdr_metric_item "$id" "${r_level[i]}" failed "$m_t0" "$m_t1" "$m_freed"
+      pgdr_metric_item "$id" "${r_level[i]}" failed "$m_t0" "$m_t1" "$m_freed" "$m_errtail"
       overall_status=1
       failed_count=$((failed_count + 1))
     fi
@@ -1904,11 +1910,19 @@ pgdr_metrics_begin() {
   fi
 }
 
-# pgdr_metric_item <id> <level> <outcome> <t0-us> <t1-us> <freed-bytes>
+# pgdr_stderr_tail <file>: the last 20 lines of FILE, capped at the last 2000
+# bytes, so a failed item's row stays bounded.
+pgdr_stderr_tail() {
+  tail -n 20 "$1" | tail -c 2000
+}
+
+# pgdr_metric_item <id> <level> <outcome> <t0-us> <t1-us> <freed-bytes> [stderr-tail]
+# A non-empty stderr-tail adds a stderr_tail field to the row.
 pgdr_metric_item() {
   PGDR_ITEM_RECORDS+=("$("$PGDR_TOOL_JQ" -cn --arg id "$1" --arg level "$2" --arg outcome "$3" \
-    --argjson dur "$(pgdr_duration_s "$4" "$5")" --argjson freed "$6" \
-    '{id: $id, level: ($level | tonumber), outcome: $outcome, duration_s: $dur, freed_bytes: $freed}')")
+    --argjson dur "$(pgdr_duration_s "$4" "$5")" --argjson freed "$6" --arg tail "${7:-}" \
+    '{id: $id, level: ($level | tonumber), outcome: $outcome, duration_s: $dur, freed_bytes: $freed}
+     + (if $tail != "" then {stderr_tail: $tail} else {} end)')")
 }
 
 # pgdr_auto_run_points <end-us>: the run-level points of an APPLIED auto run.

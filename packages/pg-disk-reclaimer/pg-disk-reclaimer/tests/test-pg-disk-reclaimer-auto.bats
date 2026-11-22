@@ -246,3 +246,21 @@ stub_pmset() {
   [[ $stderr == *"timed out after 1s"* ]]
   [ "$(jq -r .duration_s <<<"$output" | cut -d. -f1)" -lt 20 ]
 }
+
+@test "auto records a bounded stderr tail in a failed item's row, and replays stderr" {
+  jq -n --arg path "$TEST_DIR/area" '[
+    {id: "bad", description: "fails", path: $path, displayCommand: "true", sizeCommand: "echo 1",
+     variants: [{aggressiveness: 1, variantDescription: "v", dryRunCommand: "echo dry",
+                 removeCommand: "for i in $(seq 1 100); do echo \"line-$i\" >&2; done; exit 3"}]},
+    {id: "good", description: "ok", path: $path, displayCommand: "true", sizeCommand: "echo 1",
+     variants: [{aggressiveness: 1, variantDescription: "v", dryRunCommand: "echo dry",
+                 removeCommand: "echo noise >&2"}]}]' \
+    >"$HOME/.config/pg-disk-reclaimer/registry.json"
+  PGDR_AUTO_FREE_KB=$((50 * GB)) run --separate-stderr cmd_auto --apply
+  tail_txt=$(jq -r '[.items[]|select(.id=="bad")|.stderr_tail][0]' <<<"$output")
+  [[ $tail_txt == *"line-100"* ]]
+  [[ $tail_txt != *"line-50"$'\n'* ]]
+  [ "$(jq -r '[.items[]|select(.id=="bad")|.stderr_tail|split("\n")|length][0]' <<<"$output")" -le 20 ]
+  [ "$(jq -r '[.items[]|select(.id=="good")|has("stderr_tail")][0]' <<<"$output")" = false ]
+  [[ $stderr == *"line-1"$'\n'* ]]
+}
