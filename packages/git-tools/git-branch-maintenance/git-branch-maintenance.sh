@@ -34,6 +34,10 @@ The repository's own primary worktree (its main working tree) is always
 implicitly protected from deletion, in addition to any worktrees protected
 via configuration or --protect-worktree.
 
+At start, leftover git-branch-maintenance-<pid> directories from killed runs
+are removed from GBM_TMP_ROOT (default /tmp) when they are not registered
+worktrees and are older than GBM_ORPHAN_MIN_AGE_MIN minutes (default 1440).
+
 Configuration (per-repository):
   # Protect branches from deletion
   git config --local --add git-branch-maintenance.protectedBranch "staging"
@@ -261,9 +265,50 @@ create_tmp_worktree() {
     git branch -D "$TMP_BRANCH" 2>/dev/null || true
   fi
 
-  # Create branch and worktree
-  git branch -f "$TMP_BRANCH" "$BASE_BRANCH" 2>/dev/null
-  git worktree add "$TMP_WORKTREE" "$TMP_BRANCH" 2>/dev/null
+  # Create branch and worktree. stderr is kept (not discarded) so a failure
+  # such as a full disk or a ref lock reaches the log with git's own words.
+  local err
+  if ! err=$(git branch -f "$TMP_BRANCH" "$BASE_BRANCH" 2>&1); then
+    echo "Error: git branch -f $TMP_BRANCH $BASE_BRANCH failed: $err" >&2
+    exit 1
+  fi
+  if ! err=$(git worktree add "$TMP_WORKTREE" "$TMP_BRANCH" 2>&1); then
+    echo "Error: git worktree add $TMP_WORKTREE $TMP_BRANCH failed: $err" >&2
+    exit 1
+  fi
+}
+
+remove_orphaned_tmp_worktrees() {
+  # A killed run leaves its temporary checkout behind (the EXIT trap never
+  # ran). Remove directories directly under GBM_TMP_ROOT that are all of:
+  #   - a real directory (never a symlink) named git-branch-maintenance-<digits>,
+  #   - not a registered worktree of this repository,
+  #   - not a linked worktree of any repository (a .git file whose gitdir still
+  #     exists), so another repository's live run is never touched,
+  #   - last modified more than GBM_ORPHAN_MIN_AGE_MIN minutes ago (default
+  #     1440, one day: far longer than any run, short enough to bound the leak).
+  local dir base canonical gitdir listed
+  listed=$(awk '/^worktree / { sub(/^worktree /, ""); print }' <<<"$WORKTREE_LIST")
+  [[ -d $GBM_TMP_ROOT ]] || return 0
+  while IFS= read -r -d '' dir; do
+    base=${dir##*/}
+    [[ $base =~ ^git-branch-maintenance-[0-9]+$ ]] || continue
+    [[ -L $dir ]] && continue
+    canonical=$(canonicalize_path "$dir")
+    if grep -qxF -e "$dir" -e "$canonical" <<<"$listed"; then
+      continue
+    fi
+    if [[ -f $dir/.git ]]; then
+      gitdir=$(sed -n 's/^gitdir: //p' "$dir/.git" 2>/dev/null)
+      [[ -n $gitdir && -e $gitdir ]] && continue
+    fi
+    if [[ $DRY_RUN == "true" ]]; then
+      echo "[DRY-RUN] Would remove orphaned temporary worktree directory: $dir"
+    else
+      echo "Removing orphaned temporary worktree directory: $dir"
+      rm -rf "$dir"
+    fi
+  done < <(find "$GBM_TMP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'git-branch-maintenance-*' -mmin "+$GBM_ORPHAN_MIN_AGE_MIN" ! -name "git-branch-maintenance-$$" -print0 2>/dev/null)
 }
 
 cleanup_tmp_worktree() {
@@ -703,7 +748,11 @@ BASE_BRANCH="origin/main"
 # The pg-gwm standing exceptions for this directory (zrGwmExceptions in nix-ziprecruiter,
 # machines/phillipg-mbp-02/default.nix) match /tmp/git-branch-maintenance-* and its contents;
 # keep the prefix here and there in agreement.
-TMP_WORKTREE="/tmp/git-branch-maintenance-$$"
+# GBM_TMP_ROOT (default /tmp) and GBM_ORPHAN_MIN_AGE_MIN (default 1440) exist so
+# tests never touch a real /tmp directory; the default root must stay /tmp.
+GBM_TMP_ROOT="${GBM_TMP_ROOT:-/tmp}"
+GBM_ORPHAN_MIN_AGE_MIN="${GBM_ORPHAN_MIN_AGE_MIN:-1440}"
+TMP_WORKTREE="$GBM_TMP_ROOT/git-branch-maintenance-$$"
 TMP_BRANCH="tmp-gbm"
 
 # Summary tracking
@@ -729,7 +778,8 @@ if ! git fetch --all --prune; then
   echo "Warning: git fetch failed; continuing with local remote-tracking data" >&2
 fi
 
-# Create temporary worktree
+# Remove leftovers of killed earlier runs, then create the temporary worktree
+remove_orphaned_tmp_worktrees
 echo "Creating temporary worktree..."
 create_tmp_worktree
 

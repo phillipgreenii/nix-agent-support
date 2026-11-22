@@ -647,3 +647,109 @@ MOCK
     [ -z "$(git branch --list behind)" ]
     echo "$output" | grep -q "• behind"
 }
+
+# The temporary-worktree root is overridable so no test can ever touch a real
+# /tmp/git-branch-maintenance-* directory on the machine running the suite.
+use_private_tmp_root() {
+    export GBM_TMP_ROOT="$MOCK_DIR/tmp-root"
+    mkdir -p "$GBM_TMP_ROOT"
+}
+
+@test "git worktree add stderr reaches the output when the temporary worktree cannot be created" {
+    use_private_tmp_root
+    cat > "$MOCK_DIR/git" <<MOCK
+#!/usr/bin/env bash
+if [[ "\$1" == "fetch" ]]; then exit 0; fi
+if [[ "\$1" == "worktree" && "\$2" == "add" ]]; then
+    echo "fatal: simulated no space left on device" >&2
+    exit 128
+fi
+exec "$REAL_GIT" "\$@"
+MOCK
+    chmod +x "$MOCK_DIR/git"
+
+    run_git_branch_maintenance
+    [ "$status" -ne 0 ]
+    echo "$output" | grep -q "simulated no space left on device"
+    echo "$output" | grep -q "git worktree add"
+}
+
+@test "git branch -f stderr reaches the output when the temporary branch cannot be created" {
+    use_private_tmp_root
+    cat > "$MOCK_DIR/git" <<MOCK
+#!/usr/bin/env bash
+if [[ "\$1" == "fetch" ]]; then exit 0; fi
+if [[ "\$1" == "branch" && "\$2" == "-f" ]]; then
+    echo "fatal: simulated ref lock failure" >&2
+    exit 128
+fi
+exec "$REAL_GIT" "\$@"
+MOCK
+    chmod +x "$MOCK_DIR/git"
+
+    run_git_branch_maintenance
+    [ "$status" -ne 0 ]
+    echo "$output" | grep -q "simulated ref lock failure"
+    echo "$output" | grep -q "git branch -f"
+}
+
+@test "orphaned temporary worktree directories are removed at start, and only those" {
+    use_private_tmp_root
+    local root="$GBM_TMP_ROOT"
+    local old_stamp="202001010000"
+
+    # Orphan: matching name, not registered, old
+    mkdir -p "$root/git-branch-maintenance-111/sub"
+    echo data > "$root/git-branch-maintenance-111/sub/file"
+    touch -t "$old_stamp" "$root/git-branch-maintenance-111"
+
+    # Too young: matching name, not registered, fresh
+    mkdir -p "$root/git-branch-maintenance-222"
+
+    # Old but not our name
+    mkdir -p "$root/other-dir-333"
+    touch -t "$old_stamp" "$root/other-dir-333"
+
+    # Old, matching, but a still-registered worktree of this repo
+    git worktree add -q --detach "$root/git-branch-maintenance-444" main
+    touch -t "$old_stamp" "$root/git-branch-maintenance-444"
+
+    # Old, matching, a linked worktree of ANOTHER repository whose gitdir exists
+    local other="$MOCK_DIR/other-repo"
+    gfh_init_repo "$other" "gbm-other"
+    git -C "$other" commit -q --allow-empty -m other
+    git -C "$other" worktree add -q --detach "$root/git-branch-maintenance-555"
+    touch -t "$old_stamp" "$root/git-branch-maintenance-555"
+
+    # Old, matching, but a symlink: never followed or removed
+    mkdir -p "$MOCK_DIR/symlink-target"
+    ln -s "$MOCK_DIR/symlink-target" "$root/git-branch-maintenance-666"
+
+    run_git_branch_maintenance --dry-run
+    [ "$status" -eq 0 ]
+    [ -d "$root/git-branch-maintenance-111" ]
+    echo "$output" | grep -q "Would remove orphaned.*git-branch-maintenance-111"
+
+    run_git_branch_maintenance
+    [ "$status" -eq 0 ]
+
+    [ ! -e "$root/git-branch-maintenance-111" ]
+    [ -d "$root/git-branch-maintenance-222" ]
+    [ -d "$root/other-dir-333" ]
+    [ -d "$root/git-branch-maintenance-444" ]
+    [ -d "$root/git-branch-maintenance-555" ]
+    [ -L "$root/git-branch-maintenance-666" ]
+    [ -d "$MOCK_DIR/symlink-target" ]
+    echo "$output" | grep -q "Removing orphaned.*git-branch-maintenance-111"
+}
+
+@test "the orphan age threshold is configurable" {
+    use_private_tmp_root
+    mkdir -p "$GBM_TMP_ROOT/git-branch-maintenance-777"
+    export GBM_ORPHAN_MIN_AGE_MIN=0
+    # mtime is "now"; make it clearly older than 0 minutes
+    touch -t 202001010000 "$GBM_TMP_ROOT/git-branch-maintenance-777"
+    run_git_branch_maintenance
+    [ "$status" -eq 0 ]
+    [ ! -e "$GBM_TMP_ROOT/git-branch-maintenance-777" ]
+}
