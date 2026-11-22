@@ -22487,7 +22487,9 @@
                     export GOFLAGS=''${GOFLAGS//-trimpath/}
                     log="$TMPDIR/integration.log"
                     : > "$log"
-                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | xargs -n1 dirname | sort -u)
+                    # The handler packages need real ccpool, tmux, bd and jq plus the spec fixtures;
+                    # pg-router-handlers-integration-tests owns them, so they are not scanned here.
+                    pkgs=$(grep -rl --include='*_test.go' '^//go:build integration' . | grep -v -e '^./cmd/pg-router-handler-' -e '^./internal/handlers/' -e '^./conformance/handlers/' | xargs -n1 dirname | sort -u)
                     if [ -z "$pkgs" ]; then
                       echo "pg-router-integration-tests: no test file carries //go:build integration" >&2
                       exit 1
