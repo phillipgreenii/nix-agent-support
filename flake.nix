@@ -11141,6 +11141,31 @@
                     esac
                   '';
 
+              # pg-review execs pg-ccaudit and ccpool (and its own provider binaries)
+              # by bare name; the router role payload env has no per-user profile
+              # PATH. Resolve them through pg-review's wrapper under a system-only
+              # PATH, with a negative control that they are absent without it.
+              test-pg-review-resolves-runtime-tools = pkgs.runCommand "pg-review-resolves-runtime-tools" { } ''
+                pr=${pkgs.pg-review}/bin/pg-review
+                for t in pg-ccaudit ccpool pg-review-provider-ccaudit; do
+                  if env -i PATH=/usr/bin:/bin ${pkgs.bash}/bin/bash -c "command -v $t" >/dev/null; then
+                    echo "negative control broken: $t resolves without the wrapper" >&2
+                    exit 1
+                  fi
+                done
+                for t in pg-ccaudit ccpool pg-review-provider-ccaudit pg-review-provider-config-inventory pg-review-provider-hook-decisions; do
+                  got=$(env -i PATH=/usr/bin:/bin ${pkgs.bash}/bin/bash -c "exec() { command -v $t; }; . $pr") || {
+                    echo "pg-review cannot resolve $t without the profile PATH" >&2
+                    exit 1
+                  }
+                  case "$got" in
+                    /nix/store/*/bin/$t) ;;
+                    *) echo "unexpected $t resolution: '$got'" >&2; exit 1 ;;
+                  esac
+                done
+                touch "$out"
+              '';
+
               # Same guard for the pg-router-handler-ccpool binary (versionPath in
               # packages/pg-router-handlers/default.nix).
               test-pg-router-handler-ccpool-version-stamped =
