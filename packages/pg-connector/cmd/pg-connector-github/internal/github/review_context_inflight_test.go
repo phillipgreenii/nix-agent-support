@@ -70,6 +70,9 @@ func newStallRunner(t *testing.T, stall func(kind string, idx int) bool) *stallR
 // review threads complete and the reviews still read afterwards. The second
 // page of the 5 never answers.
 func TestListCommentsReport_SlowIssueCommentPageIsCutAtItsShare(t *testing.T) {
+	// The stalled page waits out its share in real time and uses no CPU, so
+	// these three overlap their waits instead of adding them up.
+	t.Parallel()
 	const budget = 2 * time.Second
 	r := newStallRunner(t, func(kind string, idx int) bool { return kind == "issues" && idx >= 1 })
 	p := NewWithRunner(r)
@@ -116,6 +119,9 @@ func TestListCommentsReport_SlowIssueCommentPageIsCutAtItsShare(t *testing.T) {
 // as truncated (the connection total is unknown then, so Total is the lower
 // bound Returned+1).
 func TestListCommentsReport_StalledFirstIssueCommentPageIsReportedTruncated(t *testing.T) {
+	// The stalled page waits out its share in real time and uses no CPU, so
+	// these three overlap their waits instead of adding them up.
+	t.Parallel()
 	r := newStallRunner(t, func(kind string, _ int) bool { return kind == "issues" })
 	p := NewWithRunner(r)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -139,6 +145,9 @@ func TestListCommentsReport_StalledFirstIssueCommentPageIsReportedTruncated(t *t
 // the threads read so far are returned as a truncated connection and the issue
 // comments, whose time was not eaten, are read complete.
 func TestListCommentsReport_SlowThreadPageIsCutAtItsShare(t *testing.T) {
+	// The stalled page waits out its share in real time and uses no CPU, so
+	// these three overlap their waits instead of adding them up.
+	t.Parallel()
 	// The stalled page waits out half the budget in real time, and the pages
 	// before it (20 threads) and the issue-comment pages after it (5) must fit in
 	// the first half and the 30 percent of the budget left behind it. A 2 s budget

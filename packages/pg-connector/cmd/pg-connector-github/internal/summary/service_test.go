@@ -800,10 +800,10 @@ func TestAfterARestartTheQueueIsRebuiltAndSpendStaysInsideTheCap(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	clk := governor.NewManualClock(t0)
 
-	// A daemon that has been down for days: 200 entities in the set, every
+	// A daemon that has been down for days: 60 entities in the set (well over the 4 windows x cap of 5 that the test drains), every
 	// summary long stale.
 	const cap = 5
-	all := ids("pr-", 200)
+	all := ids("pr-", 60)
 	for _, id := range all {
 		if err := st.PutEntity(ctx, store.EntityRow{Kind: entity.KindPR, ID: id, LastAccess: t0.Add(-time.Hour)}); err != nil {
 			t.Fatal(err)
@@ -825,8 +825,8 @@ func TestAfterARestartTheQueueIsRebuiltAndSpendStaysInsideTheCap(t *testing.T) {
 
 	// The restart: a NEW scheduler and service over the same store.
 	r := newRig(t, rigOpts{st: st, clk: clk, gov: gov, workers: 4, batchSize: 10})
-	if n, err := r.svc.Rebuild(ctx); err != nil || n != 200 {
-		t.Fatalf("Rebuild queued %d (%v), want 200", n, err)
+	if n, err := r.svc.Rebuild(ctx); err != nil || n != len(all) {
+		t.Fatalf("Rebuild queued %d (%v), want %d", n, err, len(all))
 	}
 	spent := func() int64 {
 		bs, _ := gov.State().Bucket(governor.BucketGraphQL)
