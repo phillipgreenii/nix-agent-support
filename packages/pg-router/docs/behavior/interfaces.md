@@ -848,6 +848,8 @@ sequenceDiagram
   retention ended while that handler matched it and never accepted it (a post-expiry decline, or a
   requirement drop), counted once per event and handler, so a handler that declines for the whole time to
   live shows it where the gauges show a sawtooth (`DEC-OBS-13`; no alert).
+  An event held by a deferred-ack lane is not retired at its expiry (the next poll re-opens its attempt window), so
+  it counts only if the hold limit abandons it.
 
   Both gauges read the queue and are derived from it, so a restart does **not** reset them, and a scrape
   before the core has built its queue reads no series for them, not a zero (`DEC-OBS-12`).

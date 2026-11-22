@@ -517,10 +517,11 @@ sum by (query) (increase(pg_router_source_settle_failures_total[7d]))
 max by (role) (pg_router_listener_oldest_pending_age_seconds)
 ```
 
-Success criterion: `pg_router_source_ack_abandoned_total` stays 0 over a 7 day window that contains at least one
-dispatcher outage shorter than `ack_hold_limit`, while `expired_pending` over the same window is non-zero (events
-expired and were replayed, not lost). A flat `expired_pending` is NOT the criterion: after the change a redelivered
-row can expire and count again, so the counter is expected to stay at or above the baseline during a handler outage.
+Success criterion: `pg_router_source_ack_abandoned_total` and `pg_router_listener_expired_pending_total{type="pr.changed"}`
+both stay 0 over a 7 day window that contains at least one dispatcher outage shorter than `ack_hold_limit`. A lane-held
+event is never retired at its expiry (the next poll re-opens its attempt window), and `expired_pending` counts only at
+retirement, which for such an event happens only through hold-limit abandonment. A non-zero `expired_pending` is
+therefore NOT expected after the change; it signals a loss.
 
 #### Recorded baseline
 
@@ -531,9 +532,9 @@ row can expire and count again, so the counter is expected to stay at or above t
   `type="pr.changed"` series exists in the store, so no `pr.changed` event expired unaccepted in the retained window.
   The only series of the counter were `role="drain-pg2"` (`type="drain.pg2"`, value 37) and `role="repo-verify"`
   (`type="repo.tip"`, value 1), neither a pull `pr.changed` source.
-- Reading: the 7 day baseline per role for `pr.changed` is 0 (series absent). The "non-zero `expired_pending`"
-  half of the success criterion therefore needs a window in which a handler outage actually occurs; the store holds
-  at most one week, so re-read the baseline immediately before the opt-in lands.
+- Reading: the 7 day baseline per role for `pr.changed` is 0 (series absent). After the change the same flat zero
+  is the success reading; re-read the baseline immediately before the opt-in lands, since the store holds at most
+  one week.
 
 ### Queue log compaction
 

@@ -445,13 +445,17 @@ unit `{event}`, exposed as `pg_router_listener_expired_pending_total`, no alert,
 - **Before (baseline).** Every count for a pull `pr.changed` source is a loss that nothing replays, because the cursor
   had already passed it. Read `increase(pg_router_listener_expired_pending_total{type="pr.changed"}[7d])` per `role` for
   the baseline, per role so that a single stuck handler is visible.
-- **After.** Each count is now a retirement, not a loss: the same row is re-offered at the next poll with a new window.
-  The counter MUST therefore be expected to stay at or above baseline during a handler outage (a redelivered row
-  expires again and counts again), so a flat counter is not the success criterion.
+- **After.** An event of a held (deferred-ack) lane is never retired at its expiry: the next poll re-opens its attempt
+  window and re-offers it, and the counter counts only at retirement, which for such an event happens only through
+  hold-limit abandonment (where `ack_abandoned_total` also counts it). The counter therefore MUST be expected to stay
+  flat for a pull `pr.changed` source during a handler outage shorter than `ack_hold_limit`; a flat counter is the
+  success signal there, and a non-zero count after the change is a loss.
 - **The loss signal after the change** is the new `pg_router_source_ack_abandoned_total{query,type}`. Success is:
-  `increase(pg_router_source_ack_abandoned_total[7d])` stays 0 across a 7 day window containing at least one dispatcher
-  outage shorter than `ack_hold_limit`, while `expired_pending` over the same window is non-zero (events expired and
-  were replayed, not lost).
+  `increase(pg_router_source_ack_abandoned_total[7d])` and `increase(pg_router_listener_expired_pending_total{type="pr.changed"}[7d])`
+  both stay 0 across a 7 day window containing at least one dispatcher outage shorter than `ack_hold_limit`. That the
+  held events survived past their retry window and were then accepted is shown by the end-to-end check (the event
+  is offered again after its window and the cursor moves only after acceptance), not by a non-zero
+  `expired_pending`.
 - **Existing consumer alerts.** The consumer-stuck rules of the two daemon feeds (`pg-conn-github-consumer-stuck`,
   `pg-conn-jira-consumer-stuck`) fire when a consumer's oldest unacked row is older than 15 minutes and escalate to
   beads, so any decline longer than 15 minutes of a settle consumer would page. Those rules MUST exclude the settle
