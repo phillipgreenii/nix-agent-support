@@ -93,6 +93,14 @@ func TestWindowDrivenQueriesEqualTheirOldSQL(t *testing.T) {
 	}
 }
 
+// head trims a row set to its first three rows so a mismatch message stays readable.
+func head(rows [][]any) [][]any {
+	if len(rows) > 3 {
+		return rows[:3]
+	}
+	return rows
+}
+
 // The old statement is the one whose plan scanned every tool call: keep that
 // visible so the plan assertion in the unit tier cannot pass vacuously.
 func TestOldSQLScannedEveryToolCall(t *testing.T) {
