@@ -231,8 +231,8 @@ func fromDocument(doc map[string]any) (Config, error) {
 		ok = b.float("kill", &pts.Kill) && ok
 		if ok {
 			if key, msg := checkPoints(pts); key != "" {
-				b.problem(key, msg+fmt.Sprintf("; [blocks] uses the default points %g/%g/%g",
-					DefaultBlocksNudge, DefaultBlocksInterrupt, DefaultBlocksKill))
+				b.problem(key, msg+fmt.Sprintf("%s; [blocks] uses the default points %g/%g/%g",
+					writtenKeys(b, key), DefaultBlocksNudge, DefaultBlocksInterrupt, DefaultBlocksKill))
 				ok = false
 			}
 		}
@@ -655,6 +655,22 @@ func (t *table) tmuxPassable(key, v string) bool {
 // checkPoints applies 0 < nudge < interrupt <= kill and returns the key of the
 // first point that breaks it, with the reason. Each comparison is written so
 // that a NaN fails it.
+// writtenKeys words which [blocks] keys the user wrote next to the key
+// checkPoints reported, which can be a defaulted key the user never wrote.
+func writtenKeys(b *table, reported string) string {
+	var written []string
+	for _, k := range []string{"nudge", "interrupt", "kill"} {
+		if _, ok := b.m[k]; ok {
+			written = append(written, k)
+		}
+	}
+	if len(written) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (checked key %q, with the key(s) you wrote: %s; the others are defaults)",
+		reported, strings.Join(written, ", "))
+}
+
 func checkPoints(p Points) (key, msg string) {
 	switch {
 	case !(p.Nudge > 0):

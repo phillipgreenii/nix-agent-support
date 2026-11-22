@@ -462,6 +462,24 @@ func TestGlobalProblemFallsBackToDefault(t *testing.T) {
 	}
 }
 
+func TestBlocksProblemNamesWrittenAndReportedKeys(t *testing.T) {
+	cfg := load(t, "[blocks]\nnudge = 0.99\n"+pathsTOML+assistant("example-a"))
+	var msg string
+	for _, p := range cfg.Problems {
+		if p.Field == "blocks.interrupt" {
+			msg = p.Msg
+		}
+	}
+	if msg == "" {
+		t.Fatalf("Problems = %v, want one for blocks.interrupt (a defaulted key)", cfg.Problems)
+	}
+	for _, want := range []string{`"interrupt"`, "you wrote: nudge"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q does not contain %q", msg, want)
+		}
+	}
+}
+
 func TestUnknownKeysAreProblems(t *testing.T) {
 	body := "tikc = \"1m\"\n[grace]\nkil = \"1m\"\n" + pathsTOML + assistant("example-a", `promt = "x"`, `context.kil = 1.0`)
 	cfg := load(t, body)
@@ -671,6 +689,11 @@ func TestContextWindowExactIDsOnly(t *testing.T) {
 		{"claude-opus-9-9", 0, false},
 		{"claude-sonnet-9[1m]", 0, false},
 		{"claude-sonnet-4-5[2m]", 0, false},
+		// A recorded family prefix resolves without an explicit context.window.
+		{"claude-mythos-5", 1_000_000, true},
+		{"claude-mythos-5-20261101", 1_000_000, true},
+		{"claude-mythos-", 1_000_000, true},
+		{"claude-mythos", 0, false},
 		{"", 0, false},
 	}
 	for _, tc := range cases {

@@ -37,6 +37,18 @@ var windows = map[string]int64{
 	"claude-haiku-4-5-20251001": 200_000,
 }
 
+// familyWindows sizes a model id by family prefix when the exact table has no
+// entry. It holds only families whose window is recorded in pa-monitor's
+// `internal/core/models/windows.go` and that have no exact ids here; the other
+// families stay exact-only, so an unknown opus, sonnet, fable or haiku id is
+// still unknown. Refresh with the same runbook as the table above.
+var familyWindows = []struct {
+	prefix string
+	window int64
+}{
+	{"claude-mythos-", 1_000_000},
+}
+
 // oneMillionSuffix is Claude Code's explicit 1M-context marker on a model id.
 const oneMillionSuffix = "[1m]"
 
@@ -46,6 +58,14 @@ const oneMillionSuffix = "[1m]"
 func ContextWindow(model string) (int64, bool) {
 	base, oneMillion := strings.CutSuffix(model, oneMillionSuffix)
 	w, ok := windows[base]
+	if !ok {
+		for _, f := range familyWindows {
+			if strings.HasPrefix(base, f.prefix) {
+				w, ok = f.window, true
+				break
+			}
+		}
+	}
 	if !ok {
 		return 0, false
 	}
