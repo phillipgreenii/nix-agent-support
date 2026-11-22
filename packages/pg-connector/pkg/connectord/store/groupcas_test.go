@@ -17,7 +17,7 @@ func casGroup(content string, gen int64) GroupRow {
 }
 
 func TestPutGroupIfInsertsWhenAbsentAtZero(t *testing.T) {
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	ctx := context.Background()
 	ok, err := s.PutGroupIf(ctx, casGroup("a", 1), 0)
 	if err != nil || !ok {
@@ -30,7 +30,7 @@ func TestPutGroupIfInsertsWhenAbsentAtZero(t *testing.T) {
 }
 
 func TestPutGroupIfWrongGenerationWritesNothing(t *testing.T) {
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	ctx := context.Background()
 	if err := s.PutGroup(ctx, casGroup("old", 3)); err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestPutGroupIfWrongGenerationWritesNothing(t *testing.T) {
 }
 
 func TestPutGroupIfZeroMatchesStoredGenerationZero(t *testing.T) {
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	ctx := context.Background()
 	if err := s.PutGroup(ctx, casGroup("old", 0)); err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestPutGroupIfZeroMatchesStoredGenerationZero(t *testing.T) {
 }
 
 func TestBumpGroupKeepsContentAndSetsFreshUntil(t *testing.T) {
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	ctx := context.Background()
 	if err := s.PutGroup(ctx, casGroup("keep", 2)); err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestBumpGroupKeepsContentAndSetsFreshUntil(t *testing.T) {
 }
 
 func TestBumpGroupCreatesEmptyRowExceptSummary(t *testing.T) {
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	ctx := context.Background()
 	now := time.UnixMilli(1760000100000).UTC()
 	gen, err := s.BumpGroup(ctx, "pr", "PR_1", "detail", now)
@@ -123,7 +123,7 @@ func TestBumpGroupCreatesEmptyRowExceptSummary(t *testing.T) {
 }
 
 func TestPutGroupIfOneWinnerUnderConcurrency(t *testing.T) {
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	ctx := context.Background()
 	if err := s.PutGroup(ctx, casGroup("base", 1)); err != nil {
 		t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -34,6 +35,54 @@ func dbPath(t *testing.T) string {
 // tableNames returns it. A migration that adds a table changes this list.
 var currentTables = []string{
 	"alias", "budget", "change_log", "consumer", "entity", "entity_group", "job", "pending_change", "posted_review", "query", "store_meta",
+}
+
+var (
+	freshOnce  sync.Once
+	freshBytes []byte
+	freshErr   error
+)
+
+// openFresh opens a store at the latest schema version for a test that does
+// not assert the open itself: the Result, a new store identity, or the
+// move-aside and backup behaviour. It climbs the ladder once per test binary
+// and gives each test a copy of the finished file, so every copy shares one
+// store identity. A test about the open path MUST call mustOpen instead. The
+// storetest package does the same for other packages, but it imports this
+// package and so cannot be used from inside it.
+func openFresh(t *testing.T) *Store {
+	t.Helper()
+	freshOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "store-fresh-template-")
+		if err != nil {
+			freshErr = err
+			return
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		path := filepath.Join(dir, "store.db")
+		s, _, err := Open(path, fastOpts())
+		if err != nil {
+			freshErr = err
+			return
+		}
+		// Close checkpoints the WAL, so the file alone is the whole store.
+		if freshErr = s.Close(); freshErr != nil {
+			return
+		}
+		freshBytes, freshErr = os.ReadFile(path)
+	})
+	if freshErr != nil {
+		t.Fatalf("build the template store: %v", freshErr)
+	}
+	path := dbPath(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, freshBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := mustOpen(t, path, fastOpts())
+	return s
 }
 
 func mustOpen(t *testing.T, path string, opts Options) (*Store, Result) {

@@ -71,7 +71,7 @@ func TestLadderRung8IsNamed(t *testing.T) {
 // populated alias table, and neither plan scans it.
 func TestAliasFoldLookupsSearchTheIndexAndDoNotScan(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	for i := range 200 {
 		if err := s.PutAlias(ctx, AliasRow{
 			NodeID: fmt.Sprintf("N%d", i), Ref: fmt.Sprintf("Example/Item#%d", i), SeenAt: time.UnixMilli(int64(i)),
@@ -94,7 +94,7 @@ func TestAliasFoldLookupsSearchTheIndexAndDoNotScan(t *testing.T) {
 // TestAliasFoldPlanWithoutTheIndexScans is the negative control: with the index
 // dropped the same statements scan the table, so the plan check above can fail.
 func TestAliasFoldPlanWithoutTheIndexScans(t *testing.T) {
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if _, err := s.DB().ExecContext(context.Background(), `DROP INDEX alias_ref_fold`); err != nil {
 		t.Fatal(err)
 	}

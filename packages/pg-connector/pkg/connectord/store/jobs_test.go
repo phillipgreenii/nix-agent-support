@@ -125,7 +125,7 @@ func TestJobsRoundTripInOrderAndSurviveAReopen(t *testing.T) {
 
 func TestPutJobsReplacesTheSameRunAndAttemptAndNothingElse(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	t0 := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
 
 	// Two attempts of one run and the same attempt number of another run are
@@ -161,7 +161,7 @@ func TestPutJobsReplacesTheSameRunAndAttemptAndNothingElse(t *testing.T) {
 
 func TestGetJobsForAnUnknownRunAndAttemptIsNotFound(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 
 	if got, ok, err := s.GetJobs(ctx, "100", 1); err != nil || ok || !sameJobRow(got, JobRow{}) {
 		t.Fatalf("empty store: row = %+v ok=%v err=%v, want the zero row, not found, no error", got, ok, err)
@@ -190,7 +190,7 @@ func TestGetJobsForAnUnknownRunAndAttemptIsNotFound(t *testing.T) {
 // fetched".
 func TestAnEmptyJobListIsAFetchedRowNotAMissingOne(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 
 	if err := s.PutJobs(ctx, jobRow("300", 1, time.UnixMilli(5000))); err != nil { // a nil list
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestAnEmptyJobListIsAFetchedRowNotAMissingOne(t *testing.T) {
 
 func TestPruneJobsBeforeDeletesOnlyOlderRowsAndCountsThem(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	horizon := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
 
 	if n, err := s.PruneJobsBefore(ctx, horizon); err != nil || n != 0 {
@@ -251,7 +251,7 @@ func TestPruneJobsBeforeDeletesOnlyOlderRowsAndCountsThem(t *testing.T) {
 // "not found": a caller that took it for "never fetched" would refetch forever.
 func TestGetJobsReportsAMalformedJobsColumnAsAnError(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if _, err := s.DB().ExecContext(context.Background(), `INSERT INTO job (run_id, attempt, jobs, fetched_at) VALUES ('400', 1, 'not json', 1)`); err != nil {
 		t.Fatal(err)
 	}

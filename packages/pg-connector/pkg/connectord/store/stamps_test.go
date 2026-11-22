@@ -11,7 +11,7 @@ import (
 // real store.
 func TestStampAccessorsRoundTripTheStampColumns(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 
 	var c ChangeRow
 	c.Kind, c.ID, c.Version, c.At = "example-kind", "example-1", 1, ms(1)

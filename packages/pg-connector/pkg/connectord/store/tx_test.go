@@ -18,7 +18,7 @@ func sampleGroup(gen int64) GroupRow {
 
 func TestInTxCommitsOnNil(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	err := s.InTx(ctx, func(tx *Tx) error {
 		if err := tx.PutEntity(ctx, EntityRow{Kind: "pr", ID: "PR_1", Version: 4}); err != nil {
 			return err
@@ -43,7 +43,7 @@ func TestInTxCommitsOnNil(t *testing.T) {
 
 func TestInTxRollsBackOnErrorAndReturnsItUnwrapped(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	boom := errors.New("boom")
 	err := s.InTx(ctx, func(tx *Tx) error {
 		if err := tx.PutEntity(ctx, EntityRow{Kind: "pr", ID: "PR_1", Version: 4}); err != nil {
@@ -67,7 +67,7 @@ func TestInTxRollsBackOnErrorAndReturnsItUnwrapped(t *testing.T) {
 
 func TestInTxRollsBackOnPanicAndThePanicPropagates(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	func() {
 		defer func() {
 			if r := recover(); r != "kaboom" {
@@ -93,7 +93,7 @@ func TestInTxRollsBackOnPanicAndThePanicPropagates(t *testing.T) {
 
 func TestTwoInTxCallsSerialiseWithoutDeadlock(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if err := s.PutEntity(ctx, EntityRow{Kind: "pr", ID: "PR_1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestTwoInTxCallsSerialiseWithoutDeadlock(t *testing.T) {
 
 func TestPutGroupIfThenCallsThenOnlyWhenStored(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 
 	calls := 0
 	then := func(tx *Tx) error {
@@ -183,7 +183,7 @@ func TestPutGroupIfThenCallsThenOnlyWhenStored(t *testing.T) {
 
 func TestPutGroupIfThenRollsBackTheGroupWhenThenFails(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	boom := errors.New("then failed")
 	stored, err := s.PutGroupIfThen(ctx, sampleGroup(1), 0, func(tx *Tx) error {
 		if _, err := tx.AppendChange(ctx, ChangeRow{Kind: "pr", ID: "org/repo#1", At: time.UnixMilli(1)}); err != nil {
@@ -204,7 +204,7 @@ func TestPutGroupIfThenRollsBackTheGroupWhenThenFails(t *testing.T) {
 
 func TestTxPutGroupIfIsTheSameCompareAndSwap(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	err := s.InTx(ctx, func(tx *Tx) error {
 		if ok, err := tx.PutGroupIf(ctx, sampleGroup(1), 0); err != nil || !ok {
 			t.Errorf("insert at 0: ok=%v err=%v", ok, err)
@@ -227,7 +227,7 @@ func TestTxPutGroupIfIsTheSameCompareAndSwap(t *testing.T) {
 
 func TestTxQueryAccessorsAndBaselineIsNeverCleared(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	base := time.UnixMilli(1760000000000).UTC()
 
 	if err := s.InTx(ctx, func(tx *Tx) error {
@@ -283,7 +283,7 @@ func TestTxQueryAccessorsAndBaselineIsNeverCleared(t *testing.T) {
 
 func TestBumpEntityVersionChangesOnlyVersion(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	want := EntityRow{
 		Kind: "pr", ID: "PR_1", Version: 7, LastAccess: time.UnixMilli(1760000000000).UTC(),
 		KeepAlive: true, LastKnownMergeable: "MERGEABLE", TombstonedAt: time.UnixMilli(1760000009000).UTC(),
@@ -309,7 +309,7 @@ func TestBumpEntityVersionChangesOnlyVersion(t *testing.T) {
 
 func TestBumpEntityVersionOfAMissingEntityIsAnError(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	err := s.InTx(ctx, func(tx *Tx) error {
 		_, err := tx.BumpEntityVersion(ctx, "pr", "PR_missing")
 		return err
@@ -324,7 +324,7 @@ func TestBumpEntityVersionOfAMissingEntityIsAnError(t *testing.T) {
 
 func TestTxEnsureEntityCreatesDefaultsAndLeavesExistingRowsAlone(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	existing := EntityRow{
 		Kind: "pr", ID: "PR_2", Version: 5, LastAccess: time.UnixMilli(1760000000000).UTC(), KeepAlive: true,
 		LastKnownMergeable: "CONFLICTING", TombstonedAt: time.UnixMilli(1760000001000).UTC(),
@@ -365,7 +365,7 @@ func TestTxEnsureEntityCreatesDefaultsAndLeavesExistingRowsAlone(t *testing.T) {
 
 func TestSetKeepAliveChangesOnlyKeepAlive(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	want := EntityRow{
 		Kind: "pr", ID: "PR_1", Version: 7, LastAccess: time.UnixMilli(1760000000000).UTC(),
 		KeepAlive: true, LastKnownMergeable: "MERGEABLE", TombstonedAt: time.UnixMilli(1760000009000).UTC(),

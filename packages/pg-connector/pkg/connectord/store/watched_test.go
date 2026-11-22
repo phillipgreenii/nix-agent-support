@@ -105,7 +105,7 @@ func TestVersion5FixtureCarriesTheWatchedEntity(t *testing.T) {
 
 func TestSetWatchedFirstCauseWinsAndReportsNewlyOnce(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	first := time.UnixMilli(1760000000000).UTC()
 	later := first.Add(time.Hour)
 
@@ -138,7 +138,7 @@ func TestSetWatchedFirstCauseWinsAndReportsNewlyOnce(t *testing.T) {
 
 func TestSetWatchedCreatesAMissingEntityAndIsWatchedReadsTheFlag(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	err := s.InTx(ctx, func(tx *Tx) error {
 		if w, err := tx.IsWatched(ctx, "example-kind", "example-missing"); err != nil || w {
 			t.Errorf("IsWatched of a missing entity = %v err=%v, want false", w, err)
@@ -167,7 +167,7 @@ func TestSetWatchedCreatesAMissingEntityAndIsWatchedReadsTheFlag(t *testing.T) {
 
 func TestListWatchedAndCountWatchedAreScopedToTheKindAndOrdered(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	base := time.UnixMilli(1760000000000).UTC()
 	err := s.InTx(ctx, func(tx *Tx) error {
 		for _, w := range []struct {
@@ -234,7 +234,7 @@ func TestNoExportedMethodClearsTheWatchedFlag(t *testing.T) {
 
 func TestPutEntityOfAnOldCopyLeavesTheWatchedFlagAndDeleteEntityRemovesIt(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	at := time.UnixMilli(1760000000000).UTC()
 
 	if err := s.PutEntity(ctx, EntityRow{Kind: "example-kind", ID: "example-1", Version: 1}); err != nil {
@@ -294,7 +294,7 @@ func TestPutEntityOfAnOldCopyLeavesTheWatchedFlagAndDeleteEntityRemovesIt(t *tes
 
 func TestAppendChangeWritesTheWatchedSnapshotAndItReadsBack(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	at := time.UnixMilli(1760000000000).UTC()
 	if err := s.InTx(ctx, func(tx *Tx) error {
 		for i, watched := range []bool{true, false, false} {

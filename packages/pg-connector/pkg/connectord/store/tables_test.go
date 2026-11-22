@@ -309,7 +309,7 @@ func assertFixtureData(t *testing.T, ctx context.Context, s *Store) {
 
 func TestQueryAccessors(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 
 	if _, ok, err := s.GetQuery(ctx, "missing"); err != nil || ok {
 		t.Fatalf("missing query: ok=%v err=%v", ok, err)
@@ -362,7 +362,7 @@ func TestQueryAccessors(t *testing.T) {
 
 func TestAliasAccessors(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if _, ok, err := s.AliasByNodeID(ctx, "nope"); err != nil || ok {
 		t.Fatalf("missing alias: ok=%v err=%v", ok, err)
 	}
@@ -393,7 +393,7 @@ func TestAliasAccessors(t *testing.T) {
 
 func TestEntityAndGroupAccessors(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	now := time.Date(2026, 10, 11, 1, 2, 3, 0, time.UTC)
 
 	if _, ok, err := s.GetEntity(ctx, "pr", "x"); err != nil || ok {
@@ -473,7 +473,7 @@ func TestEntityAndGroupAccessors(t *testing.T) {
 
 func TestBudgetAccessors(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	t0 := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
 
 	if _, ok, err := s.LatestBudget(ctx, "graphql"); err != nil || ok {
@@ -513,7 +513,7 @@ func TestBudgetAccessors(t *testing.T) {
 
 func TestAliasByRefFold(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	for _, a := range []AliasRow{
 		{NodeID: "N1", Ref: "Org/Repo#7", SeenAt: time.UnixMilli(100)},
 		{NodeID: "N2", Ref: "org/other#7", SeenAt: time.UnixMilli(200)},
@@ -538,7 +538,7 @@ func TestAliasByRefFold(t *testing.T) {
 
 func TestTouchAndEnsureEntityChangeOnlyTheirOwnColumns(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	at := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
 
 	// Touch creates a kept-alive row with the access time.
@@ -580,7 +580,7 @@ func TestTouchAndEnsureEntityChangeOnlyTheirOwnColumns(t *testing.T) {
 
 func TestAliasesByRefFold(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	for _, a := range []AliasRow{
 		{NodeID: "N1", Ref: "Org/Repo#7", SeenAt: time.UnixMilli(100)},
 		{NodeID: "N2", Ref: "org/repo#7", SeenAt: time.UnixMilli(200)}, // newer: wins
@@ -615,7 +615,7 @@ func TestAliasesByRefFold(t *testing.T) {
 // the answers are the same.
 func TestAliasesByRefFoldChunks(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	n := 2*aliasFoldChunk + 7
 	refs := make([]string, 0, n)
 	for i := 0; i < n; i++ {

@@ -25,7 +25,7 @@ func TestLadderRung9IsNamed(t *testing.T) {
 // TestPostedReviewTableShape pins the table the sidecar reads and writes: the
 // five columns, the composite primary key and WITHOUT ROWID.
 func TestPostedReviewTableShape(t *testing.T) {
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if got, want := columnNames(t, t.Context(), s, "posted_review"), []string{"owner", "repo", "number", "state", "updated_at"}; !slices.Equal(got, want) {
 		t.Errorf("columns = %v, want %v", got, want)
 	}

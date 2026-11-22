@@ -145,7 +145,7 @@ func TestVersion7FixtureCarriesTheClosedEntity(t *testing.T) {
 
 func TestSetClosedAtSetsClearsAndTouchesNothingElse(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	row := EntityRow{
 		Kind: "example-kind", ID: "example-1", Version: 4, LastAccess: time.UnixMilli(1760000000000).UTC(),
 		KeepAlive: true,
@@ -193,7 +193,7 @@ func TestSetClosedAtSetsClearsAndTouchesNothingElse(t *testing.T) {
 
 func TestSetClosedAtOnAMissingRowUpdatesNothing(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if err := s.SetClosedAt(ctx, "example-kind", "example-absent", time.UnixMilli(1760000009000)); err != nil {
 		t.Fatalf("SetClosedAt on a missing row = %v, want nil", err)
 	}
@@ -206,7 +206,7 @@ func TestSetClosedAtOnAMissingRowUpdatesNothing(t *testing.T) {
 // SetClosedAt and written back after it leaves closed_at as SetClosedAt set it.
 func TestPutEntityOfAnOldCopyKeepsClosedAt(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if err := s.PutEntity(ctx, EntityRow{Kind: "example-kind", ID: "example-1", Version: 1}); err != nil {
 		t.Fatal(err)
 	}

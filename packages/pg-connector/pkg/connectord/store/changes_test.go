@@ -88,7 +88,7 @@ func TestVersion3FixtureIsAPlainOpenAndReopenIsIdempotent(t *testing.T) {
 
 func TestAppendChangeAssignsDenseIncreasingSeqAndRoundTrips(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 
 	if head, err := s.ChangeHead(ctx); err != nil || head != 0 {
 		t.Fatalf("head of an empty log = %d err=%v, want 0", head, err)
@@ -140,7 +140,7 @@ func TestAppendChangeAssignsDenseIncreasingSeqAndRoundTrips(t *testing.T) {
 
 func TestAppendChangeOfSparseFieldsRoundTripsEmpty(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	appendRow(t, s, ChangeRow{Kind: "ci", ID: "org/repo#2", At: ms(5)})
 	got, err := s.ChangesAfter(ctx, 0, 0)
 	if err != nil || len(got) != 1 {
@@ -153,7 +153,7 @@ func TestAppendChangeOfSparseFieldsRoundTripsEmpty(t *testing.T) {
 
 func TestSequenceNumbersSurvivePruningOfTheNewestRows(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	for i := range 5 {
 		appendRow(t, s, ChangeRow{Kind: "pr", ID: "org/repo#1", At: ms(int64(1000 + i))})
 	}
@@ -182,7 +182,7 @@ func TestSequenceNumbersSurvivePruningOfTheNewestRows(t *testing.T) {
 
 func TestPruneChangesBeforeDeletesOnlyOlderRowsAndCountsThem(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	for _, at := range []int64{100, 200, 300, 400} {
 		appendRow(t, s, ChangeRow{Kind: "pr", ID: "org/repo#1", At: ms(at)})
 	}
@@ -204,7 +204,7 @@ func TestPruneChangesBeforeDeletesOnlyOlderRowsAndCountsThem(t *testing.T) {
 
 func TestARolledBackAppendConsumesNoNumber(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	appendRow(t, s, ChangeRow{Kind: "pr", ID: "org/repo#1", At: ms(1)})
 
 	err := s.InTx(ctx, func(tx *Tx) error {
@@ -228,7 +228,7 @@ func TestARolledBackAppendConsumesNoNumber(t *testing.T) {
 
 func TestChangesAfterHonorsAfterSeqAndLimit(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	for i := range 6 {
 		appendRow(t, s, ChangeRow{Kind: "pr", ID: "org/repo#1", Version: int64(i), At: ms(int64(i))})
 	}
@@ -261,7 +261,7 @@ func TestChangesAfterHonorsAfterSeqAndLimit(t *testing.T) {
 
 func TestLastChangesIsNewestFirstPerEntity(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	appendRow(t, s, ChangeRow{Kind: "pr", ID: "org/repo#1", Version: 1, At: ms(1)}) // seq 1
 	appendRow(t, s, ChangeRow{Kind: "pr", ID: "org/repo#2", Version: 1, At: ms(2)}) // seq 2
 	appendRow(t, s, ChangeRow{Kind: "ci", ID: "org/repo#1", Version: 1, At: ms(3)}) // seq 3: another log kind
@@ -288,7 +288,7 @@ func TestLastChangesIsNewestFirstPerEntity(t *testing.T) {
 
 func TestPendingRowsRoundTripReplaceAndDelete(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	p := PendingChange{
 		Kind: "pr", ID: "PR_1", Kinds: []string{"title_changed"},
 		Fields:  json.RawMessage(`[{"name":"title","before":"A","after":"B"}]`),
@@ -348,7 +348,7 @@ func TestPendingRowsRoundTripReplaceAndDelete(t *testing.T) {
 
 func TestListPendingIsOrderedByDeadlineAndCountMatches(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if err := s.InTx(ctx, func(tx *Tx) error {
 		for _, p := range []PendingChange{
 			{Kind: "pr", ID: "c", Deadline: ms(300)},
@@ -376,7 +376,7 @@ func TestListPendingIsOrderedByDeadlineAndCountMatches(t *testing.T) {
 
 func TestConsumerRowsRoundTripAndAreOrdered(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	rows := []ConsumerRow{
 		{Consumer: "zeta", View: "pr", Scope: "", AckedSeq: 3, SeenAt: ms(100)},
 		{Consumer: "alpha", View: "pr", Scope: "q2", AckedSeq: 1, SeenAt: ms(200)},
@@ -433,7 +433,7 @@ func TestConsumerRowsRoundTripAndAreOrdered(t *testing.T) {
 
 func TestDeleteConsumersSeenBeforeRemovesOnlyOlderOnesAndCountsThem(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	for i, at := range []int64{100, 200, 300, 400} {
 		if err := s.PutConsumer(ctx, ConsumerRow{Consumer: fmt.Sprintf("c%d", i), View: "pr", SeenAt: ms(at)}); err != nil {
 			t.Fatal(err)
@@ -454,7 +454,7 @@ func TestDeleteConsumersSeenBeforeRemovesOnlyOlderOnesAndCountsThem(t *testing.T
 
 func TestConsumerTxFormsMatchTheStoreForms(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if err := s.InTx(ctx, func(tx *Tx) error {
 		for i, at := range []int64{100, 200, 300} {
 			if err := tx.PutConsumer(ctx, ConsumerRow{Consumer: fmt.Sprintf("c%d", i), View: "pr", Scope: "q", SeenAt: ms(at)}); err != nil {
@@ -487,7 +487,7 @@ func TestConsumerTxFormsMatchTheStoreForms(t *testing.T) {
 
 func TestMetaRoundTripAndMissingKey(t *testing.T) {
 	ctx := context.Background()
-	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	s := openFresh(t)
 	if v, ok, err := s.GetMeta(ctx, "k"); err != nil || ok || v != "" {
 		t.Fatalf("missing key = %q ok=%v err=%v, want (\"\", false, nil)", v, ok, err)
 	}
