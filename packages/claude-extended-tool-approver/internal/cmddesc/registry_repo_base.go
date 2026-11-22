@@ -456,7 +456,7 @@ var pgGitLanderSchema = func() CommandSchema {
 				EndOfOptions: true,
 				Subcommands: map[string]CommandSchema{
 					"check": pgGitLanderVerb("check", map[string]FlagSpec{
-						"--file": {Arity: ArityOne, Operand: PathRead}, "--json": inert, "-h": inert, "--help": inert,
+						"--file": {Arity: ArityOne, Operand: PathRead}, "--repo": {Arity: ArityOne, Operand: PathRead}, "--json": inert, "-h": inert, "--help": inert,
 					}, PositionalSpec{}),
 				},
 			},

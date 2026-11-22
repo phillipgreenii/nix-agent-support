@@ -19,7 +19,7 @@
 // # Classification
 //
 //   - APPROVE read-only: `status [BRANCH] [--json] [--repo P]`, `log [BRANCH]
-//     [--json] [--tail N] [--repo P]`, `config check [--json] [--file P]`; each
+//     [--json] [--tail N] [--repo P]`, `config check [--json] [--file P] [--repo P]`; each
 //     path must be readable by the path evaluator.
 //   - APPROVE resume: `land|rebase [BRANCH]` with exactly one of --abort,
 //     --quit, --continue, --skip, plus optional --json, --wait DURATION and
@@ -98,7 +98,7 @@ var (
 	readOnlyFlags = map[string]map[string]flagKind{
 		"status":       {"--json": boolFlag, "--repo": readPathFlag},
 		"log":          {"--json": boolFlag, "--tail": valueFlag, "--repo": readPathFlag},
-		"config check": {"--json": boolFlag, "--file": readPathFlag},
+		"config check": {"--json": boolFlag, "--file": readPathFlag, "--repo": readPathFlag},
 	}
 	resumeVerbFlags = map[string]flagKind{"--json": boolFlag, "--wait": valueFlag, "--repo": writePathFlag}
 )

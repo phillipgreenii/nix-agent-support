@@ -178,6 +178,18 @@
                   "source": "pg-git-lander --help (pg-git-lander 0.0.0-32f61716): usage line \"[--json]\": \"output: one line per outcome, or one JSON object with --json.\""
                 }
               },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"pg-git-lander\"]"
+                }
+              },
               "-h": {
                 "arity": "none",
                 "operand": {
