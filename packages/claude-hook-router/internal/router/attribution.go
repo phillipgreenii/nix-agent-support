@@ -69,7 +69,7 @@ func NewAttributionLogger(dataDir string) (*AttributionLogger, error) {
 // maxAttributionLogBytes. A nil *AttributionLogger is a safe no-op, so
 // callers that couldn't construct one (e.g. CLAUDE_PLUGIN_DATA unset) can
 // still call Log unconditionally.
-func (l *AttributionLogger) Log(entry AttributionEntry) error {
+func (l *AttributionLogger) Log(entry AttributionEntry) (err error) {
 	if l == nil {
 		return nil
 	}
@@ -83,10 +83,14 @@ func (l *AttributionLogger) Log(entry AttributionEntry) error {
 	if err != nil {
 		return fmt.Errorf("open attribution log %q: %w", l.path, err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close attribution log %q: %w", l.path, cerr)
+		}
+	}()
 	line = append(line, '\n')
-	if _, err := f.Write(line); err != nil {
-		return fmt.Errorf("write attribution log %q: %w", l.path, err)
+	if _, werr := f.Write(line); werr != nil {
+		return fmt.Errorf("write attribution log %q: %w", l.path, werr)
 	}
 	return nil
 }
