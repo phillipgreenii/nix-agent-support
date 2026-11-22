@@ -503,7 +503,13 @@ func (d *daemon) openStore(ctx context.Context) error {
 		ladder := store.BuiltinMigrations()
 		first := ladder[0].Apply
 		ladder[0].Apply = func(tx *sql.Tx, report func(string)) error {
-			time.Sleep(delay)
+			// The wait ends early when the daemon is cancelled, so a
+			// cancellation test pays only for the time it needs to observe
+			// the migrating state, not for the whole delay.
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+			}
 			return first(tx, report)
 		}
 		opts.Migrations = ladder

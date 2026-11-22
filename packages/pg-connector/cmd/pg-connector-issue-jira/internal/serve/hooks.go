@@ -17,8 +17,9 @@ type Hooks struct {
 	RetryDelay time.Duration
 	// PollInterval replaces the scheduler's 1-second poll.
 	PollInterval time.Duration
-	// MigrationDelay makes the first migration step sleep this long before it
-	// runs, so the daemon is observably migrating.
+	// MigrationDelay makes the first migration step wait this long (or until
+	// the daemon is cancelled) before it runs, so the daemon is observably
+	// migrating.
 	MigrationDelay time.Duration
 	// SweepInterval replaces the 10-minute expiry sweep.
 	SweepInterval time.Duration
