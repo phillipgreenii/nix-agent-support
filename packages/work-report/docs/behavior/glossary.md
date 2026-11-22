@@ -43,7 +43,7 @@ least two other places in this set (`INV-14`). See [actors](actors.md) for who u
   entries were **rejected** for schema reasons, how many were **unchanged** (re-observed
   identically and not appended), and whether the pull was **truncated** (the source could not
   cover the whole range; its entries may lack enrichment, see `INV-ENRICH-1`). A source that stored entries and rejected others is **succeeded**, not
-  degraded. Never merged into one pass/fail signal for the whole pull request (`INV-DEGRADE-1`). A source that ran out of time, or whose backend was temporarily unavailable, is retried once before it is reported **degraded**; a source refused by a request-rate cap is retried only after the cap's one-minute window has passed.
+  degraded. Never merged into one pass/fail signal for the whole pull request (`INV-DEGRADE-1`). A source that ran out of time, or whose backend was temporarily unavailable, is retried once before it is reported **degraded**; a source refused by a request-rate cap is retried only after the cap's one-minute window has passed; a source refused for a connector config hash mismatch (an apply restarting the daemon) is retried once after at least two minutes.
 - **Latest-wins resolution** — the rule a read applies when more than one entry shares a unique
   identifier: the entry with the latest occurred-at wins; a tie is broken by the latest ingestion
   time (`INV-LATEST-1`).

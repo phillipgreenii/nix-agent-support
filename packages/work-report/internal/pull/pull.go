@@ -61,6 +61,13 @@ const DefaultRetryWait = 30 * time.Second
 // the full window. A longer RetryWait still wins.
 const CapWindowWait = 60 * time.Second
 
+// ConfigRestartWait is the wait before the retry when a source was refused
+// because the request's config hash did not match the connector daemon's (an
+// apply switched the umbrella's rendered config before launchd restarted the
+// daemon onto it). Observed restart windows ran 59 to 99 seconds, so the retry
+// waits two minutes. A longer RetryWait still wins.
+const ConfigRestartWait = 120 * time.Second
+
 // Deps are a pull's collaborators. Log may be nil. RetryWait (zero means
 // DefaultRetryWait) and Sleep (nil means a real, context-aware timer) are the
 // seam through which tests wait without sleeping.
@@ -203,7 +210,7 @@ func disabledRow(source string) OutcomeRow {
 // pending is one outcome row waiting to be persisted: it carries the timing of
 // the attempt that produced it, so holding it back (see Run) never skews the
 // logged duration. retry marks a degraded row whose failure was a deadline or an
-// unavailable backend; it is the only kind of row Run holds back for a second
+// unavailable backend, or a connector config hash mismatch; it is the only kind of row Run holds back for a second
 // attempt. retried is set
 // on the row that replaced such a row after the retry.
 type pending struct {
@@ -359,7 +366,7 @@ func (r *run) handleDoc(ctx context.Context, u unit, doc wireDoc, unitStart time
 // unavailable reason.
 func retryable(wr wireRow, row OutcomeRow) bool {
 	return row.Status == StatusDegraded && wr.Status == StatusDegraded &&
-		(isDeadlineReason(row.Reason) || isUnavailableReason(row.Reason))
+		(isDeadlineReason(row.Reason) || isUnavailableReason(row.Reason) || isConfigMismatchReason(row.Reason))
 }
 
 // The source rows carry no structured failure code (pg-connector's sources[]
@@ -408,6 +415,18 @@ var capRefusalReason = regexp.MustCompile(`scriptout: unavailable: \S+ cap reach
 
 func isCapRefusalReason(reason string) bool { return capRefusalReason.MatchString(reason) }
 
+// configMismatchReason matches the daemon's refusal of a request whose
+// backends block was rendered from a different config than the one the daemon
+// runs: the wire-taxonomy "invalid argument" carrying "config hash mismatch"
+// (pg-connector daemoncfg ErrConfigHashMismatch), the same text pg-desk's
+// RefreshClass treats as transient. The full "invalid argument: config hash
+// mismatch" shape is matched, not a bare "invalid argument", so every other
+// invalid-argument row stays non-retryable. If pg-connector rewords it the
+// retry silently stops; the tests pin today's wording.
+var configMismatchReason = regexp.MustCompile(`scriptout: invalid argument: config hash mismatch`)
+
+func isConfigMismatchReason(reason string) bool { return configMismatchReason.MatchString(reason) }
+
 // retryDeadlines waits once, then re-invokes each held retryable (deadline- or
 // unavailable-degraded) source once, pinned to that source, replacing its held row with the retry's
 // row. A retry that yields no row for the source (cannot run, no decodable
@@ -423,13 +442,19 @@ func (r *run) retryDeadlines(ctx context.Context, held []pending) ([]pending, er
 	if len(sources) == 0 {
 		return held, nil
 	}
-	capRefused := false
+	floor := time.Duration(0)
 	for _, p := range held {
-		if p.retry && isCapRefusalReason(p.row.Reason) {
-			capRefused = true
+		if !p.retry {
+			continue
+		}
+		if isCapRefusalReason(p.row.Reason) && floor < CapWindowWait {
+			floor = CapWindowWait
+		}
+		if isConfigMismatchReason(p.row.Reason) && floor < ConfigRestartWait {
+			floor = ConfigRestartWait
 		}
 	}
-	if err := r.wait(ctx, capRefused); err != nil {
+	if err := r.wait(ctx, floor); err != nil {
 		return held, err
 	}
 	for _, u := range plan(r.d.Cfg, sources) {
@@ -455,14 +480,14 @@ func (r *run) retryDeadlines(ctx context.Context, held []pending) ([]pending, er
 
 // wait sleeps RetryWait (DefaultRetryWait when zero) through the injectable
 // Sleep, or a real timer that ends early with ctx.
-// When capRefused, the wait is at least CapWindowWait.
-func (r *run) wait(ctx context.Context, capRefused bool) error {
+// The wait is at least floor (the longest window a held reason needs).
+func (r *run) wait(ctx context.Context, floor time.Duration) error {
 	d := r.d.RetryWait
 	if d <= 0 {
 		d = DefaultRetryWait
 	}
-	if capRefused && d < CapWindowWait {
-		d = CapWindowWait
+	if d < floor {
+		d = floor
 	}
 	if r.d.Sleep != nil {
 		return r.d.Sleep(ctx, d)

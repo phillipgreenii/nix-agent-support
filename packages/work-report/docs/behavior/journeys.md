@@ -49,7 +49,11 @@ Extensions:
   pulls continue (`INV-DEGRADE-1`). A source that merely ran out of time, or whose backend was temporarily unavailable, is first given one more attempt after a short
   wait, and is reported degraded only if that attempt also fails. A source refused by a request-rate cap
   (its reason names a "cap reached" refusal) waits at least the cap's one-minute window instead, so the
-  failed attempt's own spend has left the window before the retry.
+  failed attempt's own spend has left the window before the retry. A source refused because the
+  connector daemon runs a different config than the request was rendered from (its reason names a
+  "config hash mismatch": an apply is restarting the daemon) waits at least two minutes, long
+  enough to cover that restart, before its one retry; if the retry still mismatches the source is
+  reported degraded, so a daemon that never restarts onto the new config stays visible.
 - 2b. A source is disabled: reported disabled; never attempted.
 - 3a. An entry fails its type's schema: rejected and reported, never stored (`INV-TYPE-1`); the
   source's other entries are still stored and its outcome is succeeded, with the rejections

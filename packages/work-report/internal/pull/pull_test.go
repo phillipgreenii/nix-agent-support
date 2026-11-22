@@ -821,6 +821,8 @@ func TestNonDeadlineFailuresAreNotRetried(t *testing.T) {
 		"a deadline word, wrong shape": "deadline exceeded after a while",
 		"unavailable only in prose":    "calendar unavailable while offline",
 		"another taxonomy code":        "scriptout: invalid argument: unavailable is not a valid state",
+		"other invalid argument":       "scriptout: invalid argument: unknown backend",
+		"mismatch in prose":            "the config hash mismatch was reported by a source",
 	}
 	for name, reason := range reasons {
 		t.Run(name, func(t *testing.T) {
@@ -1191,5 +1193,70 @@ func TestOtherUnavailableReasonsKeepTheOrdinaryWait(t *testing.T) {
 				t.Errorf("waits = %v; want the ordinary %v", sl.waits, pull.DefaultRetryWait)
 			}
 		})
+	}
+}
+
+const configMismatch = `scriptout: invalid argument: pg-connector-pr-github: scriptout: invalid argument: config hash mismatch: the request's backends block was rendered from config /nix/store/a-pg-connector-github-config.json (hash 517de5c9) but the daemon runs config /nix/store/b-pg-connector-github-config.json (hash f77567c1)`
+
+func TestConfigHashMismatchWaitsOutTheDaemonRestartAndRecovers(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"":          {listDoc([]string{srcRow("pr-github", "degraded", configMismatch)})},
+		"pr-github": {listDoc([]string{srcRow("pr-github", "succeeded", "")}, goodItem("pr-github", "p"))},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{})
+
+	if got, want := conn.backends(), []string{"", "pr-github"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("invocations = %q; want the fan-out then one pinned retry", got)
+	}
+	if len(sl.waits) != 1 || sl.waits[0] < 120*time.Second || sl.waits[0] != pull.ConfigRestartWait {
+		t.Errorf("waits = %v; want one wait of at least 120s (%v)", sl.waits, pull.ConfigRestartWait)
+	}
+	if r := rowsBySource(res)["pr-github"]; r.Status != pull.StatusSucceeded || r.Count != 1 {
+		t.Errorf("pr-github = %+v; want succeeded after the retry", r)
+	}
+	lines := linesFor(logLines(t, e), "pr-github")
+	if len(lines) != 1 || lines[0]["retried"] != true {
+		t.Errorf("pr-github log = %v; want one line marked retried", lines)
+	}
+}
+
+func TestConfigHashMismatchThatPersistsEndsDegradedAfterOneRetry(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"":          {listDoc([]string{srcRow("pr-github", "degraded", configMismatch)})},
+		"pr-github": {listDoc([]string{srcRow("pr-github", "degraded", configMismatch)})},
+	}}
+	e, sl := retryEnv(t, conn)
+
+	res := run(t, e, pull.Opts{})
+
+	if got, want := conn.backends(), []string{"", "pr-github"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("invocations = %q; want exactly one retry", got)
+	}
+	if len(sl.waits) != 1 {
+		t.Errorf("waits = %v; want one", sl.waits)
+	}
+	if r := rowsBySource(res)["pr-github"]; r.Status != pull.StatusDegraded || r.Reason != configMismatch {
+		t.Errorf("pr-github = %+v; want degraded with the mismatch reason", r)
+	}
+	if res.ExitCode() == 0 {
+		t.Errorf("ExitCode = 0; a persistent mismatch must stay visible")
+	}
+}
+
+func TestConfigMismatchWaitIsNotShortenedByMixedReasons(t *testing.T) {
+	conn := &scriptedConn{answers: map[string][]string{
+		"": {listDoc([]string{
+			srcRow("pr-github", "degraded", configMismatch),
+			srcRow("src-x", "degraded", capRefusal),
+		})},
+		"pr-github": {listDoc([]string{srcRow("pr-github", "succeeded", "")})},
+		"src-x":     {listDoc([]string{srcRow("src-x", "succeeded", "")})},
+	}}
+	e, sl := retryEnv(t, conn)
+	run(t, e, pull.Opts{})
+	if len(sl.waits) != 1 || sl.waits[0] != pull.ConfigRestartWait {
+		t.Errorf("waits = %v; want one wait of %v", sl.waits, pull.ConfigRestartWait)
 	}
 }
