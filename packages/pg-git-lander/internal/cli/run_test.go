@@ -36,7 +36,7 @@ type fx struct {
 
 func newFx(t *testing.T) *fx {
 	t.Helper()
-	repo := gittest.New(t, gitfixture.RepoOptions{InitialCommit: true})
+	repo := gittest.FromTemplate(t, tpl, "")
 	root := repo.Root()
 	var genv []string
 	for _, kv := range os.Environ() {

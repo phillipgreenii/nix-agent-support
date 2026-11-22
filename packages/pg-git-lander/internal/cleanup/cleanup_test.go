@@ -42,7 +42,7 @@ type fx struct {
 // on feat and now sits on the work branch.
 func newFx(t *testing.T) *fx {
 	t.Helper()
-	repo := gittest.New(t, gitfixture.RepoOptions{InitialCommit: true})
+	repo := gittest.FromTemplate(t, tpl, "")
 	root := repo.Root()
 	env := append(os.Environ(), "HOME="+filepath.Join(root, "home"), "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL="+filepath.Join(root, "home", ".gitconfig"))
