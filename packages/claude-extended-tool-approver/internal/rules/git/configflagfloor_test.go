@@ -274,3 +274,24 @@ func TestGit_ConfigFlagFloor_ChdirDemotionStillComposes(t *testing.T) {
 		}
 	}
 }
+
+// TestGit_HooksPathIndirectionNeverApproves pins the legacy rule's side of the same
+// contract the effect engine pins: a `-c core.hooksPath=...` that reaches git through a
+// shell variable, a command substitution or an unknown wrapper's argv is invisible to the
+// pre-subcommand screen, so the rule must not Approve it (it abstains).
+func TestGit_HooksPathIndirectionNeverApproves(t *testing.T) {
+	for _, c := range []string{
+		"G='-c core.hooksPath=/dev/null'; git $G status",
+		"G='-c core.hooksPath=/dev/null'; git $G commit -m x",
+		"git ${G} status",
+		"git $(echo -c core.hooksPath=/dev/null) status",
+		"pg-rescue git -c core.hooksPath=/dev/null status",
+	} {
+		if got := evalCmd(t, c); got.Decision == hookio.Approve {
+			t.Errorf("%q Approved (%s); an indirect hook-bypass key must not be approved", c, got.Reason)
+		}
+	}
+	if got := evalCmd(t, "git -c core.hooksPath=/dev/null status"); got.Decision != hookio.Reject {
+		t.Errorf("typed form: got %s, want Reject", got.Decision)
+	}
+}

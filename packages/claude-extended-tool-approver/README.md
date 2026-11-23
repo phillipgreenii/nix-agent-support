@@ -244,6 +244,18 @@ gate to apply returns NO-OPINION, which is terminal. See
 `docs/adr/0043-ceta-rule-verdict-vocabulary.md`.
 
 `internal/setup.RuleChain` is the single source of truth for this list and its order.
+
+### Indirect spellings of a gated git config key
+
+A hook-bypass key such as `core.hooksPath` typed in `git -c` is Rejected. When the same key
+reaches git by indirection, the verdict is Abstain, never Approve: a shell variable
+(`G='-c core.hooksPath=/dev/null'; git $G status`, `git ${G} ...`), a command substitution, or the
+argv of a wrapper the engine has no schema for (for example `pg-rescue git -c ...`). The effect
+engine treats a runtime expansion in a flag or subcommand slot as unknown (ADR 0075 P3), and the
+legacy `git` rule abstains on the same shapes. Static resolution of shell variables is deliberately
+out of scope. Abstain hands the verdict to Claude Code, so such a command prompts in `default` mode
+and can be auto-approved in an auto-approving mode; that is the documented consequence of every
+Abstain, not a classifier allow. Pinned by `TestHooksPathIndirectionNeverApproves`.
 Register a new rule **there and nowhere else**: the engine integration suite
 (`internal/engine/engine_integration_test.go`) derives its chain from that same
 function, so a new rule is automatically exercised by every integration case in its
