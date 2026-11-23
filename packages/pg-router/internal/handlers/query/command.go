@@ -17,7 +17,6 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/phillipgreenii/pg-router/procenv"
 	"github.com/phillipgreenii/x/cmdrun"
 )
 
@@ -90,8 +89,7 @@ func ExitDetail(err error) (code int, stderr []byte, ok bool) {
 }
 
 // OSCommander is the default Commander: it runs the command through
-// x/cmdrun, except a payload that must inherit open files (RunEnvFiles with
-// files), which stays on os/exec.
+// x/cmdrun.
 type OSCommander struct {
 	// Exec runs the call; nil means cmdrun.Exec. Tests inject cmdruntest.Fake.
 	Exec cmdrun.Runner
@@ -139,13 +137,13 @@ func (o OSCommander) runCall(ctx context.Context, call cmdrun.Call) ([]byte, err
 }
 
 // RunEnvFiles is RunEnv with files inherited by the payload as fd 3 onward.
-// With no files it is RunEnv. With files it runs through os/exec and NOT
-// x/cmdrun: cmdrun.Call has no way to pass extra descriptors, and the command
-// executor hands the payload the per-(role, event) dispatch lock that way, so
-// the lock outlives the adapter for as long as the payload group lives. The
-// run is still bounded by ctx (the dispatch root is uncancelled by design, so a
-// payload ends on its own or with the adapter) and signals its group the same
-// way.
+// With no files it is RunEnv. With files it runs through x/cmdrun with
+// ExtraFiles: the command executor hands the payload the per-(role, event)
+// dispatch lock that way, so the lock outlives the adapter for as long as the
+// payload group lives. Unlike RunEnv it has no Timeout (the dispatch root is
+// uncancelled by design, so a payload ends on its own or with the adapter), but
+// a cancelled ctx signals the group the same way, and ReapGroupAfterCancel ends
+// any descendant that ignored SIGTERM before returning (ADR 0130).
 func (o OSCommander) RunEnvFiles(ctx context.Context, argv []string, env []string, files []*os.File) ([]byte, error) {
 	if len(files) == 0 {
 		return o.RunEnv(ctx, argv, env)
@@ -153,16 +151,10 @@ func (o OSCommander) RunEnvFiles(ctx context.Context, argv []string, env []strin
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("empty argv")
 	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Env = env
-	cmd.ExtraFiles = files
-	procenv.Group(cmd, CancelGrace)
-	out, err := cmd.Output()
-	// A cancelled run returns as soon as the leader exits, which would take the
-	// group's SIGKILL timer with this process: end any descendant that ignored
-	// SIGTERM before returning (ADR 0130).
-	if ctx.Err() != nil && cmd.Process != nil {
-		procenv.ReapGroup(cmd.Process.Pid, CancelGrace)
-	}
-	return out, err
+	//cmdrun:unbounded the dispatch root is uncancelled by design; a payload holding the dispatch lock ends on its own or with the adapter
+	return o.runCall(ctx, cmdrun.Call{
+		Name: argv[0], Args: argv[1:], Env: env, EnvMode: cmdrun.EnvExact,
+		ExtraFiles: files, OwnProcGroup: true, TermGrace: CancelGrace,
+		ReapGroupAfterCancel: true,
+	})
 }

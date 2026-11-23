@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-sqlite v0.0.0
-	github.com/phillipgreenii/x v0.0.0-20261118145935-46d6423c44db
+	github.com/phillipgreenii/x v0.0.0-20261123062853-466f5b647dbb
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
 	github.com/spf13/cobra v1.10.2

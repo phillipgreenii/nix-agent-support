@@ -97,20 +97,28 @@ func TestOSCommander_FailureShapes(t *testing.T) {
 	}
 }
 
-// With files the payload keeps os/exec (cmdrun cannot pass descriptors), so the
-// fake must NOT be consulted.
-func TestOSCommanderRunEnvFiles_WithFilesBypassesRunner(t *testing.T) {
+// With files the payload runs through cmdrun with ExtraFiles, its own group,
+// the post-cancel reap and no Timeout (the dispatch root is uncancelled).
+func TestOSCommanderRunEnvFiles_WithFilesCallShape(t *testing.T) {
 	c, f := fakeCommander(t)
+	f.On(cmdruntest.Any).Return(cmdruntest.Out("ok"))
 	fh, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = fh.Close() }()
-	out, err := c.RunEnvFiles(context.Background(), []string{"/usr/bin/true"}, []string{}, []*os.File{fh})
-	if err != nil || len(out) != 0 {
+	out, err := c.RunEnvFiles(context.Background(), []string{"tool", "a"}, []string{"K=v"}, []*os.File{fh})
+	if err != nil || string(out) != "ok" {
 		t.Fatalf("out=%q err=%v", out, err)
 	}
-	if n := len(f.Calls()); n != 0 {
-		t.Fatalf("runner consulted %d times for a files run", n)
+	calls := f.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("runner consulted %d times, want 1", len(calls))
+	}
+	got := calls[0]
+	if got.Name != "tool" || len(got.ExtraFiles) != 1 || got.ExtraFiles[0] != fh || !got.OwnProcGroup ||
+		got.TermGrace != CancelGrace || !got.ReapGroupAfterCancel || got.Timeout != 0 ||
+		got.EnvMode != cmdrun.EnvExact {
+		t.Fatalf("call shape = %+v", got)
 	}
 }

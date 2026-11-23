@@ -5,7 +5,7 @@ go 1.26.10
 require (
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk v0.0.0-00010101000000-000000000000
-	github.com/phillipgreenii/x v0.0.0-20261118145935-46d6423c44db
+	github.com/phillipgreenii/x v0.0.0-20261123062853-466f5b647dbb
 	github.com/spf13/cobra v1.10.2
 	pgregory.net/rapid v1.3.0
 )
