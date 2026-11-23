@@ -229,6 +229,8 @@ type Store struct {
 	livePend    atomic.Bool   // a write in flight stored a live-Process input (see NoteLiveInput)
 	modelSeq    atomic.Uint64 // commits that may have changed the lifecycle model inputs (see ModelInputSeq)
 	modelPend   atomic.Bool   // a write in flight stored a lifecycle model input (see NoteModelInput)
+	histSeq     atomic.Uint64 // commits that may have changed the history or end-reason rows (see HistoryInputSeq)
+	histPend    atomic.Bool   // a write in flight stored a history or end-reason record, or removed rows
 	removeSeq   atomic.Uint64 // commits that removed record rows (see RemovalSeq)
 	removePend  atomic.Bool   // a write in flight removed record rows (see NoteRowsRemoved)
 	jf          fsx.File
@@ -874,7 +876,14 @@ func (s *Store) ModelInputSeq() uint64 { return s.modelSeq.Load() }
 // NoteModelInput marks the write in flight as storing a lifecycle model input
 // that is not a live-Process input (a history or control-end record, or rows
 // cleared from a generation); the commit of that write moves ModelInputSeq.
-func (s *Store) NoteModelInput() { s.modelPend.Store(true) }
+func (s *Store) NoteModelInput() { s.modelPend.Store(true); s.histPend.Store(true) }
+
+// HistoryInputSeq counts the commits that may have changed the history records,
+// the control-end records or the rows removed from a generation: the part of the
+// lifecycle model that registry records, Process observations and stage rows
+// never change. It follows the read-before-query rule of LiveInputSeq and
+// issues no query.
+func (s *Store) HistoryInputSeq() uint64 { return s.histSeq.Load() }
 
 // RemovalSeq counts the commits that may have removed record rows (a rewritten
 // generation's cleared rows). Only such a commit can take away a record a
@@ -885,13 +894,20 @@ func (s *Store) RemovalSeq() uint64 { return s.removeSeq.Load() }
 
 // NoteRowsRemoved marks the write in flight as removing record rows; the commit
 // of that write moves RemovalSeq (and ModelInputSeq, as NoteModelInput does).
-func (s *Store) NoteRowsRemoved() { s.removePend.Store(true); s.modelPend.Store(true) }
+func (s *Store) NoteRowsRemoved() {
+	s.removePend.Store(true)
+	s.modelPend.Store(true)
+	s.histPend.Store(true)
+}
 
 // bumpLive moves LiveInputSeq when a committed write was marked by NoteLiveInput
 // and ModelInputSeq when it was marked by either mark.
 func (s *Store) bumpLive() {
 	l := s.livePend.Swap(false)
 	m := s.modelPend.Swap(false)
+	if s.histPend.Swap(false) {
+		s.histSeq.Add(1)
+	}
 	if s.removePend.Swap(false) {
 		s.removeSeq.Add(1)
 	}

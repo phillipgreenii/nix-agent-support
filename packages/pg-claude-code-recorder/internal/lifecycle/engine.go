@@ -43,6 +43,12 @@ type Engine struct {
 	// full is the last complete model with the store state it was read at.
 	full atomic.Pointer[modelEntry]
 
+	// hist is the last history, slash-command and end-reason read with the
+	// store state it was read at. A reload of the full model that was caused by a
+	// registry record, a Process observation or a stage row reuses it instead of
+	// scanning the history again.
+	hist atomic.Pointer[histEntry]
+
 	// list is the last Process-list model with the store state it was read at.
 	list atomic.Pointer[listEntry]
 
@@ -98,6 +104,19 @@ type modelEntry struct {
 	data, epoch uint64
 	ready       bool
 	m           *model
+}
+
+// histEntry is the cached history part of the model: the /clear and /exit
+// times and the end reasons. It is a function of the history and control-end
+// records alone, so it stays valid while the store has committed none of them,
+// removed no rows and rolled back no write since it was read. It MUST be
+// treated as read-only; models share its maps.
+type histEntry struct {
+	seq, epoch uint64
+	ready      bool
+	clears     map[string][]int64
+	exits      map[string][]int64
+	ends       map[string]string
 }
 
 // listEntry is a cached Process-list model, valid while the store has committed
@@ -251,10 +270,13 @@ func (e *Engine) loadWith(ctx context.Context, liveOnly bool) (*model, error) {
 		return nil, err
 	}
 	defer e.regMu.Unlock()
+	// The history counters are read BEFORE the snapshot opens: a write that
+	// lands after them moves them, and the next load re-reads the history.
+	hk := histEntry{seq: e.St.HistoryInputSeq(), epoch: e.St.RollbackEpoch(), ready: e.St.SessionRefReady()}
 	var m *model
 	err := e.St.ReadTxCtx(ctx, func(rd *store.Reader) error {
 		var e2 error
-		m, e2 = e.loadFrom(rd, liveOnly)
+		m, e2 = e.loadFrom(rd, liveOnly, hk)
 		return e2
 	})
 	return m, err
@@ -262,7 +284,7 @@ func (e *Engine) loadWith(ctx context.Context, liveOnly bool) (*model, error) {
 
 // loadFrom builds the model over rd. The caller MUST hold e.regMu, taken before rd's
 // transaction opened.
-func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool) (*model, error) {
+func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool, hk histEntry) (*model, error) {
 	m := &model{
 		vers: map[pkey][]regRow{}, segs: map[string][]seg{}, deleted: map[pkey]int64{}, procs: map[pkey]store.Proc{},
 		clears: map[string][]int64{}, exits: map[string][]int64{}, ends: map[string]string{}, stages: map[string]string{},
@@ -310,7 +332,9 @@ func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool) (*model, error) {
 	for k, t := range e.reg.deleted {
 		m.deleted[k] = t
 	}
-	if !liveOnly {
+	if h := e.hist.Load(); !liveOnly && h != nil && h.seq == hk.seq && h.epoch == hk.epoch && h.ready == hk.ready {
+		m.clears, m.exits, m.ends = h.clears, h.exits, h.ends
+	} else if !liveOnly {
 		hrows, err := db.Query(pick(slashCommandQuery))
 		if err != nil {
 			return nil, err
@@ -347,6 +371,9 @@ func (e *Engine) loadFrom(rd *store.Reader, liveOnly bool) (*model, error) {
 		if err := erows.Close(); err != nil {
 			return nil, err
 		}
+		e.hist.Store(&histEntry{seq: hk.seq, epoch: hk.epoch, ready: hk.ready, clears: m.clears, exits: m.exits, ends: m.ends})
+	}
+	if !liveOnly {
 		srows, err := rd.Stages()
 		if err != nil {
 			return nil, err
