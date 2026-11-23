@@ -61,8 +61,9 @@ interfaces in [interfaces](interfaces.md).
 None. The adapter `pg-router-handler-ccpool` realizes every element of this set: it is its own
 full participant, it reads its settings from the role object strictly and ships a build-time
 `validate`, a role's survival is the role's own TOML key asserted for every role of this adapter,
-and a session the earlier handler started is adopted at a cutover (proved by the conformance test
-`TestAdoptOldHandlerSessionByNewAdapter`).
+and a session left running is adopted by a redelivered dispatch (proved by the conformance test
+`TestAdoptSessionByRedeliveredDispatch`; the cutover from the earlier handler is historical, the
+earlier path having been removed).
 
 ## External references
 
