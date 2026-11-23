@@ -12,15 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/phillipgreenii/x/exitcode"
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/beadref"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
-	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // defaultServeAddr mirrors serve's own default synopsis
@@ -42,8 +41,14 @@ var doctorLookPath = func(name string) (string, error) { return exec.LookPath(na
 // not affect config validate's exit code, so it cannot fail doctor
 // either — doctor does not re-implement or surface it separately.
 var doctorConfigValidate = func(ctx context.Context) error {
-	_, err := connector.Output(ctx, cmdrun.Call{Name: "pg-connector", Args: []string{"config", "validate"}, Timeout: connectorCallTimeout})
-	return err
+	out, err := client.Client{Run: connector.Run, Timeout: connectorCallTimeout}.ConfigValidate(ctx)
+	if err != nil {
+		return err
+	}
+	if code := out.ExitCode(); code != client.ExitOK {
+		return fmt.Errorf("pg-connector config validate: exit %d: a source is degraded or none is healthy", code)
+	}
+	return nil
 }
 
 // Serve probe timing. serve's /metrics handler is cheap, but on a loaded host
@@ -119,18 +124,11 @@ const doctorWorkBeadsQuery = "work-beads"
 // cfg's configured beads_dir the same way internal/gather's Gatherer and
 // internal/sync's issueClient do (PG_CONNECTOR_ISSUE_BEADS_DIR).
 var doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
-	call := cmdrun.Call{Name: "pg-connector", Args: []string{"issue", "list", "--query", doctorWorkBeadsQuery}, Timeout: connectorCallTimeout}
+	cl := client.Client{Run: connector.Run, Timeout: connectorCallTimeout}
 	if dir := cfg.BeadsDirFor(cfg.PrimaryRepo()); dir != "" {
-		call.Env = []string{"PG_CONNECTOR_ISSUE_BEADS_DIR=" + dir}
+		cl.Env = []string{"PG_CONNECTOR_ISSUE_BEADS_DIR=" + dir}
 	}
-	res := connector.Run(ctx, call)
-	if res.StartErr == nil && res.CtxErr == nil && res.Signal == "" {
-		if res.Code == 0 || res.Code == exitcode.Degraded {
-			return res.Stdout, nil // exit 5 is partial degradation; stdout is still usable
-		}
-		return nil, fmt.Errorf("pg-connector issue list --query %s: exit %d: %s", doctorWorkBeadsQuery, res.Code, strings.TrimSpace(string(res.Stderr)))
-	}
-	return nil, fmt.Errorf("exec pg-connector issue list --query %s: %w", doctorWorkBeadsQuery, connector.ResultError(res))
+	return cl.FanOutStdout(ctx, "issue", "list", "--query", doctorWorkBeadsQuery)
 }
 
 // doctorWorkBeadEntity is the minimal subset of an `issue list` entity this
@@ -146,10 +144,6 @@ type doctorWorkBeadEntity struct {
 	State    string            `json:"state"`
 	Labels   []string          `json:"labels"`
 	Metadata map[string]string `json:"metadata"`
-}
-
-type doctorWorkBeadsFanOut struct {
-	Entities []doctorWorkBeadEntity `json:"entities"`
 }
 
 // doctorHasLabel mirrors internal/sync/rules.go's own hasLabel exactly
@@ -193,7 +187,7 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 	if err != nil {
 		return nil, err
 	}
-	var fanOut doctorWorkBeadsFanOut
+	var fanOut client.ListOutcome[doctorWorkBeadEntity]
 	if err := json.Unmarshal(raw, &fanOut); err != nil {
 		return nil, fmt.Errorf("decode work-beads fan-out: %w", err)
 	}

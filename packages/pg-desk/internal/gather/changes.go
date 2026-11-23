@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 )
 
 // ListChangesSource is one row of pg-connector's `<type> changes` sources[]:
@@ -28,21 +30,6 @@ type ListedChange struct {
 type ListChangesResult struct {
 	Sources []ListChangesSource
 	Changes []ListedChange
-}
-
-// changesWireOut is the subset of pg-connector's `<type> changes` response
-// ({"sources":[{"backend","status","reason"}],"changes":[{"change","source",
-// "entity"}]}) this package decodes.
-type changesWireOut struct {
-	Sources []struct {
-		Backend string `json:"backend"`
-		Status  string `json:"status"`
-		Reason  string `json:"reason"`
-	} `json:"sources"`
-	Changes []struct {
-		Change string          `json:"change"`
-		Entity json.RawMessage `json:"entity"`
-	} `json:"changes"`
 }
 
 // changesEntityWire is the part of a changes[] entity this package reads. A
@@ -77,7 +64,7 @@ func (g *Gatherer) ListChanges(ctx context.Context, entityType, query, consumer 
 	if err != nil {
 		return ListChangesResult{}, err
 	}
-	var wire changesWireOut
+	var wire client.ChangesOutcome
 	if err := json.Unmarshal(stdout, &wire); err != nil {
 		return ListChangesResult{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}
@@ -86,7 +73,7 @@ func (g *Gatherer) ListChanges(ctx context.Context, entityType, query, consumer 
 		Changes: make([]ListedChange, 0, len(wire.Changes)),
 	}
 	for _, s := range wire.Sources {
-		out.Sources = append(out.Sources, ListChangesSource{Backend: s.Backend, Status: s.Status, Reason: s.Reason})
+		out.Sources = append(out.Sources, ListChangesSource{Backend: s.Backend, Status: string(s.Status), Reason: s.Reason})
 	}
 	for _, c := range wire.Changes {
 		var ent changesEntityWire
@@ -185,7 +172,7 @@ func (g *Gatherer) ListFingerprints(ctx context.Context, entityType, query strin
 		out.Fingerprints = map[string]string{}
 	}
 	for _, s := range wire.Sources {
-		out.Sources = append(out.Sources, ListChangesSource{Backend: s.Source, Status: s.Status, Reason: s.Reason})
+		out.Sources = append(out.Sources, ListChangesSource{Backend: s.Source, Status: string(s.Status), Reason: s.Reason})
 	}
 	for _, e := range wire.Entities {
 		if e.ID == "" {

@@ -303,6 +303,14 @@ type MemberList struct {
 	Truncated bool
 }
 
+// memberEntity is the part of a listed entity ListQueryMembers reads.
+type memberEntity struct {
+	ID         string `json:"id"`
+	EntityMeta struct {
+		Watched *bool `json:"watched"`
+	} `json:"entity_meta"`
+}
+
 // ListQueryMembers runs `pg-connector issue list --query <query> --backend
 // <backend> --output json` and decodes entities[].id, each entity's stated
 // entity_meta.watched and the truncated flag. Exit 0 and 5 (degraded) are answers; the
@@ -316,15 +324,7 @@ func (g *Gatherer) ListQueryMembers(ctx context.Context, query, backend string) 
 	if err != nil {
 		return MemberList{}, err
 	}
-	var wire struct {
-		Entities []struct {
-			ID         string `json:"id"`
-			EntityMeta struct {
-				Watched *bool `json:"watched"`
-			} `json:"entity_meta"`
-		} `json:"entities"`
-		Truncated bool `json:"truncated"`
-	}
+	var wire client.ListOutcome[memberEntity]
 	if err := json.Unmarshal(stdout, &wire); err != nil {
 		return MemberList{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}

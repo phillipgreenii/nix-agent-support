@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
+	"github.com/phillipgreenii/x/cmdrun"
+
 	"github.com/phillipgreenii/pg-router/internal/handlers/beads"
 	"github.com/phillipgreenii/pg-router/internal/handlers/complete"
 	"github.com/phillipgreenii/pg-router/internal/handlers/item"
@@ -205,44 +208,59 @@ func (c ConnectorReader) binary() string {
 	return c.Binary
 }
 
-// run executes one pg-connector verb and returns its wire envelope's result,
-// or an error for a failed process or an error envelope.
+// run executes one pg-connector verb through the published client and returns
+// its wire envelope's result, or an error for a failed process or an error
+// envelope. The client runs over the executor's argv seam (query.Commander):
+// the process error and stdout are handed to it as an exit code and stdout.
 func (c ConnectorReader) run(ctx context.Context, args ...string) (json.RawMessage, error) {
 	ctx, cancel := context.WithTimeout(ctx, connectorCallTimeout)
 	defer cancel()
-	out, runErr := c.Cmd.Run(ctx, append([]string{c.binary()}, args...))
 	what := c.binary() + " " + strings.Join(args, " ")
-	var env struct {
-		Result json.RawMessage `json:"result"`
-		Error  *struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
+	var runErr error
+	var stdout []byte
+	cl := client.Client{
+		Binary:  c.binary(),
+		Timeout: connectorCallTimeout,
+		Run: func(ctx context.Context, call cmdrun.Call) cmdrun.Result {
+			stdout, runErr = c.Cmd.Run(ctx, append([]string{call.Name}, call.Args...))
+			res := cmdrun.Result{Stdout: stdout}
+			if runErr != nil {
+				res.Code = 1
+				var ec interface{ ExitCode() int }
+				if errors.As(runErr, &ec) && ec.ExitCode() > 0 {
+					res.Code = ec.ExitCode()
+				}
+			}
+			return res
+		},
 	}
-	decodeErr := json.Unmarshal(out, &env)
-	if runErr != nil {
-		// The connector exits non-zero for an error answer and still writes the
-		// envelope to stdout, so an "unavailable" class is read from the output
-		// even when the process failed. Any other failure (missing binary, a call
-		// that outlived its bound, another error class) is a plain error.
-		if decodeErr == nil && env.Error != nil && env.Error.Code == connectorErrorUnavailable {
-			return nil, fmt.Errorf("%s: %w: %s", what, ErrConnectorUnavailable, env.Error.Message)
+	raw, err := cl.Targeted(ctx, args...)
+	if err == nil {
+		if len(raw) > 0 {
+			return raw, nil
 		}
+		// An exit-0 answer that carries an error member (or nothing) has no result.
+		err = client.NewExitError(args, client.ExitOK, stdout)
+	}
+	var ce *client.Error
+	if !errors.As(err, &ce) {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	// The connector exits non-zero for an error answer and still writes the
+	// envelope to stdout, so an "unavailable" class is read from the output even
+	// when the process failed. Any other failure (missing binary, a call that
+	// outlived its bound, another error class) is a plain error.
+	switch {
+	case ce.Code == connectorErrorUnavailable:
+		return nil, fmt.Errorf("%s: %w: %s", what, ErrConnectorUnavailable, ce.Message)
+	case runErr != nil:
 		return nil, fmt.Errorf("%s: %w", what, runErr)
+	case ce.Cause != nil:
+		return nil, fmt.Errorf("%s: decode output: %w", what, ce.Cause)
+	case ce.Code != "":
+		return nil, fmt.Errorf("%s: connector error %q: %s", what, ce.Code, ce.Message)
 	}
-	if decodeErr != nil {
-		return nil, fmt.Errorf("%s: decode output: %w", what, decodeErr)
-	}
-	if env.Error != nil {
-		if env.Error.Code == connectorErrorUnavailable {
-			return nil, fmt.Errorf("%s: %w: %s", what, ErrConnectorUnavailable, env.Error.Message)
-		}
-		return nil, fmt.Errorf("%s: connector error %q: %s", what, env.Error.Code, env.Error.Message)
-	}
-	if len(env.Result) == 0 {
-		return nil, fmt.Errorf("%s: output carries no result", what)
-	}
-	return env.Result, nil
+	return nil, fmt.Errorf("%s: output carries no result", what)
 }
 
 // PRMerged implements PRReader. `pr show` may be answered from the connector's

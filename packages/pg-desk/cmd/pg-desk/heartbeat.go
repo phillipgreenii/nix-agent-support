@@ -10,8 +10,8 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/connector"
-	"github.com/phillipgreenii/x/cmdrun"
 )
 
 // heartbeatNow is the clock; overridable in tests.
@@ -31,7 +31,7 @@ const heartbeatLedgerShowTimeout = 30 * time.Second
 var heartbeatRunLedgerShow = func(ctx context.Context) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, heartbeatLedgerShowTimeout)
 	defer cancel()
-	return connector.Output(ctx, cmdrun.Call{Name: "pg-connector", Args: []string{"ledger", "show", "--output", "json"}, Timeout: heartbeatLedgerShowTimeout})
+	return client.Client{Run: connector.Run, Timeout: heartbeatLedgerShowTimeout}.LedgerShow(ctx)
 }
 
 // heartbeatCmd implements `pg-desk heartbeat`: stamps meta.last_heartbeat
