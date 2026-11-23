@@ -91,8 +91,11 @@ Subcommands:
                           machine below OK. A sensor that fails shows its resources as "no reading".
                           Always exits 0 once the config loads.
   doctor [--socket <path>] [--token <tok>]
-                          run "config check" plus quick probes, one verdict line each (ok, FAIL or
-                          info): the state directory is writable, the core's socket is reachable,
+                          run "config check" plus quick probes, one verdict line each (ok, FAIL,
+                          warn or info). A "warn config" line means no config file was found at the
+                          path doctor resolved (set PG_ROUTER_CONFIG to the core's config); a "warn
+                          roles" line means the running core's enabled roles differ from the loaded
+                          config's (run with the core's environment). Neither changes the exit code: the state directory is writable, the core's socket is reachable,
                           the levels and the roles paused by levels, the roles the core marked unavailable (with the reason),
                           per-role progress (age since last progress, unsuccessful and busy counts),
                           and each enabled role's handler "validate". A handler without "validate" is

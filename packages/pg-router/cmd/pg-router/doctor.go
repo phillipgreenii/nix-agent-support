@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -115,12 +116,19 @@ func (r *doctorReport) line(verdict, probe, format string, a ...any) {
 func doctor(stdout io.Writer, socket, token string) int {
 	rep := &doctorReport{w: stdout}
 
+	noConfig := false
 	cfg, cfgErr := config.Load()
 	if cfgErr != nil {
 		rep.configFailed = true
 		for _, line := range errorLines(cfgErr) {
 			rep.line(verdictFail, "config", "%s", textsafe.Sanitize(line))
 		}
+	} else if _, statErr := os.Stat(cfg.ConfigPath); os.IsNotExist(statErr) {
+		// The no-config fallback: nothing was loaded, so "config ok" would
+		// vouch for a config that does not exist. A warn, not a FAIL, keeps the
+		// exit code of this path unchanged.
+		noConfig = true
+		rep.line(verdictWarn, "config", "no config file at %s, so doctor sees zero roles; run it with the core's environment (set PG_ROUTER_CONFIG to the core's config path)", textsafe.Sanitize(cfg.ConfigPath))
 	} else {
 		rep.line(verdictOK, "config", "config ok")
 	}
@@ -131,7 +139,11 @@ func doctor(stdout io.Writer, socket, token string) int {
 	}
 
 	st, ok := doctorSocket(rep, socket, token)
+	mismatch := false
 	if ok {
+		if cfgErr == nil {
+			mismatch = doctorRoleSetMismatch(rep, cfg, st)
+		}
 		doctorLevels(rep, st, time.Now())
 		doctorUnavailable(rep, st)
 		doctorProgress(rep, st)
@@ -144,7 +156,7 @@ func doctor(stdout io.Writer, socket, token string) int {
 	if cfgErr != nil {
 		rep.line(verdictInfo, "validate", "skipped: the config did not load, so the roles are unknown")
 	} else {
-		doctorValidate(rep, cfg)
+		doctorValidate(rep, cfg, noConfig || mismatch)
 	}
 
 	switch {
@@ -295,9 +307,50 @@ func doctorProgress(rep *doctorReport, st doctorStatus) {
 	}
 }
 
+// doctorRoleSetMismatch warns when the running core's enabled roles differ from
+// the loaded config's enabled roles, and reports whether they do. It is a warn,
+// so the exit code is unchanged.
+func doctorRoleSetMismatch(rep *doctorReport, cfg config.Config, st doctorStatus) bool {
+	loaded := map[string]bool{}
+	for _, r := range cfg.Roles {
+		if r.Enabled {
+			loaded[r.Name] = true
+		}
+	}
+	running := map[string]bool{}
+	for _, l := range st.Listeners {
+		if l.Enabled {
+			running[l.Role] = true
+		}
+	}
+	var onlyCore, onlyConfig []string
+	for n := range running {
+		if !loaded[n] {
+			onlyCore = append(onlyCore, textsafe.Sanitize(n))
+		}
+	}
+	for n := range loaded {
+		if !running[n] {
+			onlyConfig = append(onlyConfig, textsafe.Sanitize(n))
+		}
+	}
+	if len(onlyCore) == 0 && len(onlyConfig) == 0 {
+		return false
+	}
+	sort.Strings(onlyCore)
+	sort.Strings(onlyConfig)
+	rep.line(verdictWarn, "roles", "the running core has %d roles the loaded config does not (%s) and the loaded config has %d the core does not (%s); run with the core's environment (PG_ROUTER_CONFIG)",
+		len(onlyCore), strings.Join(onlyCore, ", "), len(onlyConfig), strings.Join(onlyConfig, ", "))
+	return true
+}
+
 // doctorValidate runs every enabled role's handler `validate` concurrently, each
 // under its own doctorValidateTimeout, and reports in config order.
-func doctorValidate(rep *doctorReport, cfg config.Config) {
+//
+// suspect is true when the loaded config is known not to be the core's (no config
+// file, or a role set that differs from the running core's): a result for zero
+// roles then must not read as a clean pass.
+func doctorValidate(rep *doctorReport, cfg config.Config, suspect bool) {
 	var enabled []roles.Role
 	for _, r := range cfg.Roles {
 		if r.Enabled {
@@ -305,6 +358,10 @@ func doctorValidate(rep *doctorReport, cfg config.Config) {
 		}
 	}
 	if len(enabled) == 0 {
+		if suspect {
+			rep.line(verdictWarn, "validate", "nothing validated: no enabled role in the loaded config, which is not the running core's")
+			return
+		}
 		rep.line(verdictInfo, "validate", "no enabled role")
 		return
 	}

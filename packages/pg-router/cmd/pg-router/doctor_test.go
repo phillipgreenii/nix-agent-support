@@ -367,3 +367,78 @@ func TestCLIExitCodeNumbers(t *testing.T) {
 		}
 	}
 }
+
+// With no config file at the resolved path, doctor warns (exit code unchanged
+// from the no-core case) naming the path and PG_ROUTER_CONFIG, and the validate
+// line does not read as a clean pass.
+func TestDoctor_NoConfigFileWarns(t *testing.T) {
+	w := newDoctorWorkspace(t, "/bin/echo")
+	missing := filepath.Join(w.dir, "absent.toml")
+	t.Setenv("PG_ROUTER_CONFIG", missing)
+
+	var out strings.Builder
+	if code := doctor(&out, "", ""); code != exitUnavailable {
+		t.Fatalf("exit = %d, want 3 (only the socket probe fails):\n%s", code, out.String())
+	}
+	for _, want := range []string{
+		"warn config: no config file at " + missing,
+		"PG_ROUTER_CONFIG",
+		"warn validate: nothing validated",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "ok   config:") {
+		t.Errorf("a missing config must not report config ok:\n%s", out.String())
+	}
+}
+
+// A loaded config whose enabled roles differ from the running core's gets a
+// roles warning naming both sides; the exit code is the unavailable-role one.
+func TestDoctor_RoleSetMismatchWithRunningCore(t *testing.T) {
+	f := bootWithValidate(t, failsRole("bad"))
+	ctx, cancel := context.WithCancel(context.Background())
+	accepted := make(chan error, 1)
+	go func() { accepted <- f.svc.Accept(ctx) }()
+	t.Cleanup(func() { cancel(); <-accepted })
+	deadline := time.Now().Add(2 * time.Second)
+	for f.svc.State() != participant.Started && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	w := newDoctorWorkspace(t, "/bin/echo")
+	w.writeStub(t, "handler", `echo '{"schemaVersion":"1","problems":[],"warnings":[]}'; exit 0`)
+
+	var out strings.Builder
+	doctor(&out, f.svc.Ref().Socket, f.svc.Ref().Token)
+	for _, want := range []string{
+		"ok   config: config ok",
+		"warn roles: the running core has 2 roles the loaded config does not (bad, good)",
+		"the loaded config has 1 the core does not (k11-live)",
+		"PG_ROUTER_CONFIG",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// The unchanged all-valid path: config ok, no warnings, validate passes, exit 3
+// only because no core runs.
+func TestDoctor_AllValidHasNoWarnings(t *testing.T) {
+	w := newDoctorWorkspace(t, "/bin/echo")
+	w.writeStub(t, "handler", `echo '{"schemaVersion":"1","problems":[],"warnings":[]}'; exit 0`)
+
+	var out strings.Builder
+	if code := doctor(&out, "", ""); code != exitUnavailable {
+		t.Fatalf("exit = %d, want 3:\n%s", code, out.String())
+	}
+	for _, want := range []string{"ok   config: config ok", "ok   validate k11-live: valid"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "warn") {
+		t.Errorf("the all-valid path printed a warning:\n%s", out.String())
+	}
+}

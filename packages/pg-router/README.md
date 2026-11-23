@@ -196,8 +196,10 @@ message naming the required shape, instead of sending nothing to the core. To in
 
 `pg-router doctor` reads the config at the path resolved from the **current directory**
 (`.pg-router/config.toml`), not the running daemon's config. Run from a directory without that file
-it therefore warns "no pg-router config found" and "validate: no enabled role" even when the daemon
-runs from another (for example a store) config. This is intended: doctor validates the config a
+it therefore prints `warn config: no config file at <path>` (naming `PG_ROUTER_CONFIG`) and
+`warn validate: nothing validated` even when the daemon runs from another (for example a store)
+config; when it reaches a running core whose enabled roles differ from the loaded config's it also
+prints `warn roles:`. These warnings do not change the exit code. This is intended: doctor validates the config a
 `pg-router` started from that directory would use. Use `pg-router config --show` or
 `pg-router status` for the daemon's own resolved config.
 

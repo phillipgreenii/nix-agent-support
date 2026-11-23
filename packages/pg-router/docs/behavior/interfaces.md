@@ -1011,7 +1011,12 @@ check` and adds **quick probes** of the system as it stands: the state directory
   each role's **progress** (`INV-OBS-3`) and the result of each handler's own `validate`
   (`INTF-HANDLER`). A handler without `validate` is reported **not supported**, and one that does
   not answer within a short timeout is reported as not answering, so a hung handler never hangs
-  the report. Both only read and change nothing. (Concrete spelling:
+  the report. **`doctor`** also gives a **warning** verdict, which never changes its exit code, when
+  it loaded **no config file** (the line names the path it looked at and `PG_ROUTER_CONFIG`; the
+  validate probe then says it validated nothing) and when the running core's **enabled roles differ**
+  from the loaded config's (the line names the roles on each side and says to run with the core's
+  environment), so a run without the core's environment never reads as a clean pass. Both only read
+  and change nothing. (Concrete spelling:
   `phillipgreenii-nix-agent-support · packages/pg-router/docs/decisions · DEC-CLI-2`.)
   For each **calendar query** (`INV-EVT-6`) `config check` also prints its **resolved schedule** (the
   weekdays, the time and the zone) and its **next fire**; a calendar configuration whose schedule
