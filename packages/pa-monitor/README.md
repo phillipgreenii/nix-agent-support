@@ -46,18 +46,18 @@ pa-monitor config show
 
 ## Subcommands
 
-| Subcommand                                           | Purpose                                                      |
-| ---------------------------------------------------- | ------------------------------------------------------------ |
-| `daemon`                                             | Run the long-running daemon (RPC server + tick loop).        |
-| `tui`                                                | Interactive TUI (always daemon-backed).                      |
-| `status [--json]`                                    | One-shot dump of daemon state (`--json`: see below).         |
-| `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                |
-| `auto-resume on\|off\|toggle`                        | Drive the auto-resume setting (the TUI's `[R]` key).         |
-| `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
-| `info <selector>`                                    | Print session or directory details.                          |
-| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff busy; 20 all idle; 3 daemon down (see caveat).    |
-| `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar. |
-| `config show`                                        | Print loaded config (read-only).                             |
+| Subcommand                                           | Purpose                                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daemon`                                             | Run the long-running daemon (RPC server + tick loop).                                                                                                   |
+| `tui`                                                | Interactive TUI (always daemon-backed).                                                                                                                 |
+| `status [--json]`                                    | One-shot dump of daemon state (`--json`: see below).                                                                                                    |
+| `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                                                                                                           |
+| `auto-resume on\|off\|toggle`                        | Drive the auto-resume setting (the TUI's `[R]` key).                                                                                                    |
+| `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                                                                                                                        |
+| `info <selector>`                                    | Print session or directory details.                                                                                                                     |
+| `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff busy; 20 all idle; 3 daemon down (see caveat).                                                                                               |
+| `cmux-bridge`                                        | Long-running process inside a cmux pane; drives the sidebar. Takes no flags; `-h`/`--help` prints usage and starts nothing, any other argument exits 2. |
+| `config show`                                        | Print loaded config (read-only).                                                                                                                        |
 
 `<selector>` accepts `session:<id>`, `path:<workspace-path>`, `cmux:<workspace-id>`, or a bare value (slash → path, otherwise session).
 

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	ossignal "os/signal"
 	"path/filepath"
@@ -332,13 +334,45 @@ func newBridgeShutdownContext() (context.Context, context.CancelFunc) {
 	return ossignal.NotifyContext(context.Background(), bridgeShutdownSignals...)
 }
 
+// parseCmuxBridgeArgs parses the cmux-bridge arguments with a FlagSet BEFORE
+// anything contacts the daemon. proceed reports whether the bridge should
+// start; when false, code is the process exit code. -h/--help prints usage to
+// stdout and exits 0; an unknown flag or stray positional argument prints usage
+// to stderr and exits exitUsage. cmux-bridge takes no flags or arguments.
+func parseCmuxBridgeArgs(args []string, stdout, stderr io.Writer) (proceed bool, code int) {
+	fs := flag.NewFlagSet("cmux-bridge", flag.ContinueOnError)
+	usage := func(w io.Writer) {
+		fmt.Fprintln(w, "usage: pa-monitor cmux-bridge")
+		fmt.Fprintln(w, "  Run inside a cmux pane (needs CMUX_WORKSPACE_ID); streams daemon state and drives the cmux sidebar.")
+		fmt.Fprintln(w, "  Takes no flags or arguments.")
+	}
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			usage(stdout)
+			return false, 0
+		}
+		fmt.Fprintf(stderr, "cmux-bridge: %v\n", err)
+		usage(stderr)
+		return false, exitUsage
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "cmux-bridge: unexpected argument %q\n", fs.Arg(0))
+		usage(stderr)
+		return false, exitUsage
+	}
+	return true, 0
+}
+
 func runCmuxBridge(args []string) {
+	if proceed, code := parseCmuxBridgeArgs(args, os.Stdout, os.Stderr); !proceed {
+		os.Exit(code)
+	}
 	ws := os.Getenv("CMUX_WORKSPACE_ID")
 	if ws == "" {
 		fmt.Fprintln(os.Stderr, "CMUX_WORKSPACE_ID not set; nothing to bridge")
 		os.Exit(exitUsage)
 	}
-	_ = args
 
 	cfg, _ := config.Load(config.DefaultPath())
 	config.ApplyOTelEnv(cfg.OTel)
