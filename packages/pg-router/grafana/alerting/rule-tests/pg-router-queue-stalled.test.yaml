@@ -430,6 +430,28 @@ tests:
               job: pg-router
               severity: warning
 
+  - name: redrives waiting out their delay are not a stall, the pending gauge counts only offerable events and reads 0
+    interval: 30s
+    input_series:
+      - series: pg_router_binding_info{role="pr-change",type="pr.changed",job="pg-router"}
+        values: "1x2880"
+      # The 2026-11-23 shape: five redrives retained with a notBefore an hour away. The
+      # queue depth counts them, nothing is in flight, and the pending gauge (offerable
+      # now) reads 0 for the whole 20 minutes, so the rule stays quiet.
+      - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
+        values: "5x240"
+      - series: pg_router_listener_in_flight{role="pr-change",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_listener_pending{role="pr-change",job="pg-router"}
+        values: "0x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
   - name: pr-change binds pr.changed only, so it covers that type whether busy or idle and the retired pr.reconcile is not covered
     interval: 30s
     input_series:

@@ -274,3 +274,21 @@ func TestPendingByListenerAllocBudget(t *testing.T) {
 		t.Fatalf("allocs/call = %v, want <= %v", large, budget)
 	}
 }
+
+// A redrive waiting out its NotBefore is not offerable, so it is not pending:
+// the gauge reads 0 until the clock passes NotBefore, then 1 (a deliberate
+// redrive delay must not look like "events waiting, consumer idle").
+func TestPendingByListenerSkipsNotYetEligibleEvents(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := newListener("h", "A")
+	l.neverAccept = true
+	q.Register(l)
+	e := evtUntil("a1", "A", clk.in(3*time.Hour))
+	e.NotBefore = clk.in(time.Hour)
+	e.Generation = 1
+	mustEnqueue(t, q, e)
+	wantPending(t, q, map[string]ListenerPending{"h": {}})
+	clk.advance(time.Hour)
+	wantPending(t, q, map[string]ListenerPending{"h": {Count: 1, OldestAge: time.Hour}})
+}

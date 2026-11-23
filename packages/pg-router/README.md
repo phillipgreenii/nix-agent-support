@@ -477,7 +477,7 @@ hours of arrivals). The same holds for the `backlog` sum. Retention, not backlog
 The backlog signals are the per-listener gauges, one series per registered role:
 
 - `pg_router_listener_pending{role}`: how many retained, matching events the listener has not yet
-  settled (0 when caught up). A normally busy listener shows 1 or 2.
+  settled and could be offered now (0 when caught up; a redrive still waiting out its delay is not counted). A normally busy listener shows 1 or 2.
 - `pg_router_listener_oldest_pending_age_seconds{role}`: age in seconds of the oldest of those (0 when
   nothing is pending).
 

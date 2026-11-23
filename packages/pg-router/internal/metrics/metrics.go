@@ -254,7 +254,9 @@ const (
 	// pg_router_listener_in_flight.
 	MetricListenerInFlight = "pg_router_listener_in_flight"
 	// MetricListenerPending is a gauge, per role: the retained events the listener
-	// matches and has not settled (eventqueue.Queue.PendingByListener; DEC-OBS-12).
+	// matches, has not settled and can be offered now
+	// (eventqueue.Queue.PendingByListener; DEC-OBS-12). An event waiting out its
+	// notBefore (a redrive delay) is not counted.
 	// A caught-up listener reads 0 while pg_router_queue_depth still shows the
 	// events it handled. Unit {event} adds no exporter suffix. No alert reads it.
 	MetricListenerPending = "pg_router_listener_pending"

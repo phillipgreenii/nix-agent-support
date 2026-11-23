@@ -2292,6 +2292,19 @@ type ListenerPending struct {
 // event with no ExpiresAt is born expired, and filtering on it would hide exactly
 // the head-of-line backlog. Idle listeners are present as the zero value.
 //
+// An event whose NotBefore has not arrived (a redrive waiting out its delay,
+// ADR 0121 D3) is NOT counted: dispatch does not offer it either, so the gauge
+// means "offerable now". Counting it made pg-router-queue-stalled page a
+// deliberate redrive delay as "events waiting, consumer idle". Consumers
+// checked: the only caller is daemon.go via metrics.WithListenerPending, which
+// exports pg_router_listener_pending and pg_router_listener_oldest_pending_age;
+// the pg-router-queue-stalled and queue-depth-growing rules read pending to
+// tell a real backlog from retention (the new meaning is what they want), and
+// the oldest-pending-age rule (4 hours) no longer ages a deferred event, so a
+// long redrive delay cannot trip it. pg_router_queue_depth and
+// pg_router_queue_oldest_age come from separate passes and still count deferred
+// events. No consumer needs the deferred count, so no separate gauge is added.
+//
 // Count and OldestAge come from ONE q.mu acquisition, ONE q.now() and ONE pass
 // over q.order, so they cannot disagree (two calls could read count 1 with age 0
 // if a settle landed between them). Cost: another scan under q.mu per scrape
@@ -2310,6 +2323,9 @@ func (q *Queue) PendingByListener() map[string]ListenerPending {
 	for _, id := range q.order {
 		e, ok := q.entries[id]
 		if !ok {
+			continue
+		}
+		if e.evt.NotYetEligible(now) {
 			continue
 		}
 		age := nonNegative(now.Sub(e.evt.At))

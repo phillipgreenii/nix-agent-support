@@ -839,7 +839,7 @@ retained events that are already expired but still owed to a listener, not only 
   - Both are derived from the queue log, so a restart does **not** reset them (unlike the role-progress
     gauges). Settling by post-expiry decline is not persisted, so such an event is pending again after
     a restart. Before the queue exists (startup compaction) the series are absent, not zero.
-- **Metrics.** `pg_router_listener_pending{role}` (a count, unit `{event}`) and
+- **Metrics.** `pg_router_listener_pending{role}` (a count, unit `{event}`, of the events not yet settled whose notBefore has arrived: a redrive waiting out its delay is not counted) and
   `pg_router_listener_oldest_pending_age_seconds{role}` (seconds, 0 when nothing is pending), one series
   per **registered** listener, `0` when idle. `role` is the listener id, the label
   `listener_in_flight` carries (`DEC-OBS-7`), so cardinality is bounded by configured roles (`DEC-OBS-9`

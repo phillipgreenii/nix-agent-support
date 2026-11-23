@@ -836,7 +836,7 @@ sequenceDiagram
   alert** (`DEC-OBS-12`):
   - **listener_pending** — a count: the retained events that role's handler matches and has not
     **settled** (accepted, or given up on at its post-expiry attempt, `INV-FAIL-1`), **whatever
-    their expiry**. A listener that is caught up reads `0` while the per-`type` queue depth still
+    their expiry**, and whose notBefore has arrived (a redrive still waiting out its delay is not counted, because it cannot be offered yet). A listener that is caught up reads `0` while the per-`type` queue depth still
     shows the events it handled; a listener registered after `N` matching events were retained reads
     `N` at once and falls as it settles them;
   - **listener_oldest_pending_age** — in seconds: the age, from the event's own stamped time, of the
