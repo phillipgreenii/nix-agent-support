@@ -12,30 +12,14 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/store"
 )
 
-// This file holds work-report's own decoding of the wire shape of
-// `pg-connector activity list --output json` (the umbrella verb's output): the
-// standard fan-out sources[] rows plus a flat items list, each item carrying
-// its source and an ActivityItem. The activity verb has no published client
-// type, so only the per-source row comes from the client package.
+// This file maps the published client's `activity list` outcome onto the
+// local names this package uses.
 
-// wireRow is one sources[] row: the published per-source row plus the
-// truncated flag the activity verb adds to it.
-type wireRow struct {
-	client.SourceResult
-	Truncated bool `json:"truncated"`
-}
-
-// wireItem is one items[] element; Item is decoded (and may be rejected) per
-// item, so one bad item never costs the rest.
-type wireItem struct {
-	Source string          `json:"source"`
-	Item   json.RawMessage `json:"item"`
-}
-
-type wireDoc struct {
-	Sources []wireRow  `json:"sources"`
-	Items   []wireItem `json:"items"`
-}
+type (
+	wireRow  = client.ActivitySourceResult
+	wireItem = client.ActivityListItem
+	wireDoc  = client.ActivityListOutcome
+)
 
 // decodeDoc decodes stdout as the activity list document. ok is false when
 // stdout is not a JSON object carrying a sources array: such output is "no
@@ -48,21 +32,7 @@ func decodeDoc(stdout []byte) (wireDoc, bool) {
 	return d, true
 }
 
-// wireActivity is the ActivityItem envelope.
-type wireActivity struct {
-	ID          string          `json:"id"`
-	Kind        string          `json:"kind"`
-	EntityType  string          `json:"entity_type"`
-	EntityID    string          `json:"entity_id"`
-	OccurredAt  string          `json:"occurred_at"`
-	Approximate bool            `json:"approximate"`
-	Summary     string          `json:"summary"`
-	URL         string          `json:"url"`
-	Labels      []string        `json:"labels"`
-	Fields      json.RawMessage `json:"fields"`
-	AsOf        string          `json:"as_of"`
-	Stale       bool            `json:"stale"`
-}
+type wireActivity = client.ActivityItem
 
 // toEntry validates raw's envelope and maps it to a store entry for source
 // (design 7.3's mapping table). The kind-specific shape of fields is NOT
