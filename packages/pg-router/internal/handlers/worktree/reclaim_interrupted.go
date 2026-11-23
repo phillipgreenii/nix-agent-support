@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/phillipgreenii/x/cmdrun"
+
+	"github.com/phillipgreenii/pg-router/internal/handlers/gitenv"
 )
 
 // Reclaim rules. An entry in the "<worktreeDir>-interrupted" holding area is
@@ -139,15 +142,13 @@ func decideEntry(ctx context.Context, dir string, de os.DirEntry, repoRoot strin
 
 // patchID returns the first field of `git patch-id --stable` for patch.
 func patchID(ctx context.Context, repoRoot string, patch []byte) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "patch-id", "--stable")
-	cmd.Stdin = bytes.NewReader(patch)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("git patch-id: %w: %s", err, strings.TrimSpace(stderr.String()))
+	call := gitenv.Call(repoRoot, "patch-id", "--stable")
+	call.Stdin = patch
+	res := cmdrun.Exec(ctx, call)
+	if err := gitenv.ResultErr(res); err != nil {
+		return "", fmt.Errorf("git patch-id: %w", err)
 	}
-	f := strings.Fields(string(out))
+	f := strings.Fields(string(res.Stdout))
 	if len(f) == 0 {
 		return "", nil
 	}

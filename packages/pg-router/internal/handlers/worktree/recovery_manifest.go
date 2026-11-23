@@ -1,15 +1,17 @@
 package worktree
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/phillipgreenii/x/cmdrun"
+
+	"github.com/phillipgreenii/pg-router/internal/handlers/gitenv"
 )
 
 const (
@@ -38,15 +40,17 @@ type RecoveryManifest struct {
 var manifestWriter = writeRecoveryManifest
 
 func gitOut(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), env...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	res := cmdrun.Exec(ctx, cmdrun.Call{
+		Name:    "git",
+		Args:    append([]string{"-C", dir}, args...),
+		Env:     env,
+		EnvMode: cmdrun.EnvAppend,
+		Timeout: gitenv.DefaultTimeout,
+	})
+	if err := gitenv.ResultErr(res); err != nil {
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return out, nil
+	return res.Stdout, nil
 }
 
 // writeRecoveryManifest writes ManifestFile and PatchFile into destDir (created
