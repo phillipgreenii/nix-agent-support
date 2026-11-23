@@ -143,3 +143,32 @@ func TestGroupedRuleSecondTickIsSilent(t *testing.T) {
 		t.Fatalf("second tick must be silent: %+v", second)
 	}
 }
+
+// pg-repo-runner-diverged is grouped: a later firing with a NEW label set, while the
+// group bead is already open, comments on it and files no second bead.
+func TestDivergedGroupedRuleNewRepoCommentsOnOpenBead(t *testing.T) {
+	const uid = "pg-repo-runner-diverged"
+	opts := episodeOpts(t)
+	opts.groupRuleUIDs = append([]string{}, defaultGroupRuleUIDs...)
+	first := groupSpy(burstAlerts(uid, "r1"))
+	if err := tick(t, opts, first, t0); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.created) != 1 {
+		t.Fatalf("first firing: want 1 bead, got %d", len(first.created))
+	}
+	bead := connectorIssue{ID: "zr-new", Labels: []string{"escalated"}, Metadata: map[string]string{
+		metaFingerprint: "group:" + uid, metaState: "active", metaEpisodeCount: "1",
+	}}
+	second := groupSpy(burstAlerts(uid, "r1", "r2"))
+	second.listEscalatedByQuery[defaultDedupQuery] = []connectorIssue{bead}
+	if err := tick(t, opts, second, t0.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.created) != 0 {
+		t.Fatalf("want no second bead, got %+v", second.created)
+	}
+	if len(second.commented) != 1 || second.commented[0].id != "zr-new" || !strings.Contains(second.commented[0].body, "repo=r2") {
+		t.Fatalf("want one comment naming repo=r2 on zr-new, got %+v", second.commented)
+	}
+}
