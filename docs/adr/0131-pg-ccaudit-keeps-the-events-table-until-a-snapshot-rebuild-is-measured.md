@@ -1,6 +1,6 @@
 # pg-ccaudit keeps its events table; replacing it waits on a measured snapshot rebuild
 
-**Status**: Proposed (the decider has not ruled)
+**Status**: Accepted (decider ruled 2026-11-23)
 **Date**: 2026-11-21
 **Deciders**: Phillip Green II
 
@@ -52,7 +52,9 @@ predates the recorder feed. This ADR does not substitute an estimate for it.
 | Slim    | Drop `idx_events_src` and `idx_events_side` (about 405 MB measured) after rewriting two lenses | Cheap, reversible, no re-ingest (`DROP INDEX IF EXISTS` on open)                      | Two lens SQL rewrites and a lens version bump; saves under 10% of the file                                                                                     |
 | Replace | Stop storing `events`; lenses read the recorder, and a schema bump rebuilds from its snapshot  | Largest saving (up to about 4.3 GB)                                                   | The recorder lacks `signature`, `lead_cmd`, `prompt_source`, `interrupted`, hook fields, a general join, and has a 25 s read deadline; unmeasured rebuild cost |
 
-## Decision (proposed)
+## Decision
+
+Phillip (the decider) ruled "3) a" on 2026-11-23: accept the KEEP ruling and waive the measured snapshot rebuild.
 
 **Keep `events`.** Do not replace it now. The recorder cannot serve the lenses that read it (the
 column inventory in `packages/pg-ccaudit/docs/events-column-inventory.md`), and the rebuild cost that
