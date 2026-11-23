@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -59,37 +60,17 @@ const (
 	AbandonedAfter = 7 * 24 * time.Hour
 )
 
-// LedgerError mirrors the connector ledger's last_error: when a fetch
-// failed (or came back partial) and a low-cardinality code for why.
-type LedgerError struct {
-	At   time.Time `json:"at"`
-	Code string    `json:"code"`
-}
-
-// LedgerRow is the subset of one `pg-connector ledger show` row the
-// freshness contract reads. RefreshedAt and LastError are null when the
-// connector has recorded none.
-type LedgerRow struct {
-	Type        string       `json:"type"`
-	Backend     string       `json:"backend"`
-	Query       string       `json:"query"`
-	Instance    string       `json:"instance,omitempty"`
-	RefreshedAt *time.Time   `json:"refreshed_at"`
-	LastError   *LedgerError `json:"last_error"`
-	// Consumers maps a consumer name (pg-router) to its cursor state; only
-	// last_seen is read.
-	Consumers map[string]LedgerConsumer `json:"consumers,omitempty"`
-}
-
-// LedgerConsumer is the part of a ledger row's per-consumer state the
-// freshness contract reads: when the consumer last polled the row.
-type LedgerConsumer struct {
-	LastSeen *time.Time `json:"last_seen"`
-}
+// LedgerError, LedgerRow and LedgerConsumer are the published client's ledger
+// show row types: the freshness contract reads the same subset.
+type (
+	LedgerError    = client.LedgerError
+	LedgerRow      = client.LedgerRow
+	LedgerConsumer = client.LedgerConsumer
+)
 
 // lastSeen is the newest consumer last_seen on the row, or nil when no
 // consumer has one (never consumed, or an older ledger without the field).
-func (r LedgerRow) lastSeen() *time.Time {
+func lastSeen(r LedgerRow) *time.Time {
 	var out *time.Time
 	for _, c := range r.Consumers {
 		out = laterTime(out, utc(c.LastSeen))
@@ -204,7 +185,7 @@ func collapse(rows []LedgerRow) []Record {
 		rec := Record{
 			Backend: row.Backend, Query: row.Query, Instance: row.Instance,
 			LastSuccessAt: utc(row.RefreshedAt), LastError: utcError(row.LastError),
-			LastSeenAt: row.lastSeen(),
+			LastSeenAt: lastSeen(row),
 		}
 		k := rec.key()
 		prev, seen := byKey[k]

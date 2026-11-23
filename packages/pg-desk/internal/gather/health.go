@@ -33,11 +33,7 @@ func (g *Gatherer) BaselineOpenAges(ctx context.Context, entityType, backend str
 		return nil, exitError(args, client.ExitOK, stdout)
 	}
 	var wire struct {
-		Sources []struct {
-			Source string `json:"source"`
-			Status string `json:"status"`
-			Reason string `json:"reason"`
-		} `json:"sources"`
+		client.FanOutOutcome
 		Backends []struct {
 			Backend string `json:"backend"`
 			Status  struct {

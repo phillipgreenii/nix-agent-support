@@ -344,10 +344,10 @@ func TestLedgerRowLastSeenIsTheNewestConsumer(t *testing.T) {
 	row := LedgerRow{Consumers: map[string]LedgerConsumer{
 		"a": {LastSeen: ts(-time.Hour)}, "b": {LastSeen: ts(-time.Minute)}, "c": {},
 	}}
-	if got := row.lastSeen(); got == nil || !got.Equal(t0.Add(-time.Minute)) {
+	if got := lastSeen(row); got == nil || !got.Equal(t0.Add(-time.Minute)) {
 		t.Errorf("lastSeen = %v, want the newest consumer's", got)
 	}
-	if (LedgerRow{}).lastSeen() != nil {
+	if lastSeen(LedgerRow{}) != nil {
 		t.Error("lastSeen of a row with no consumers must be nil")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/verdict"
 )
@@ -344,9 +345,7 @@ type depsEntity struct {
 	Labels []string `json:"labels"`
 }
 
-type depsResult struct {
-	Entities []depsEntity `json:"entities"`
-}
+type depsResult = client.ListOutcome[depsEntity]
 
 // computeWaitingOnMe ports pkg/beads.AllNonClosedHumanLabeled: true iff
 // there is at least one non-closed dependency AND every non-closed

@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 )
 
@@ -60,9 +61,7 @@ type Counted struct {
 	Outcome Outcome
 }
 
-type fanOut struct {
-	Runs []Run `json:"runs"`
-}
+type fanOut = client.CIListOutcome[Run]
 
 // CompileExcluder builds the predicate for check names to leave out of the
 // rollup: the union of every check_interpreters entry's Patterns regardless of

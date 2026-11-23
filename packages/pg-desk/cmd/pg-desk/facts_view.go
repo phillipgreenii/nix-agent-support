@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 )
 
@@ -78,12 +79,10 @@ func deskCIStatus(raw json.RawMessage, checksRollup string) string {
 	if len(raw) == 0 {
 		return noRuns
 	}
-	var fo struct {
-		Runs []struct {
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-		} `json:"runs"`
-	}
+	var fo client.CIListOutcome[struct {
+		Status     string `json:"status"`
+		Conclusion string `json:"conclusion"`
+	}]
 	if err := json.Unmarshal(raw, &fo); err != nil {
 		return noRuns
 	}

@@ -88,11 +88,7 @@ func (g *Gatherer) Capabilities(ctx context.Context, entityType, backend string)
 		return CapabilitiesAnswer{}, exitError(args, client.ExitOK, stdout)
 	}
 	var wire struct {
-		Sources []struct {
-			Source string `json:"source"`
-			Status string `json:"status"`
-			Reason string `json:"reason"`
-		} `json:"sources"`
+		client.FanOutOutcome
 		Backends []struct {
 			Backend    string         `json:"backend"`
 			Vocabulary map[string]any `json:"vocabulary"`
@@ -110,7 +106,7 @@ func (g *Gatherer) Capabilities(ctx context.Context, entityType, backend string)
 	}
 	out := CapabilitiesAnswer{}
 	for _, s := range wire.Sources {
-		out.Sources = append(out.Sources, CapSource{Source: s.Source, Status: s.Status, Reason: s.Reason})
+		out.Sources = append(out.Sources, CapSource{Source: s.Source, Status: string(s.Status), Reason: s.Reason})
 	}
 	for _, b := range wire.Backends {
 		cb := CapBackend{Backend: b.Backend, Vocabulary: b.Vocabulary, Queries: map[string]CapQuery{}}

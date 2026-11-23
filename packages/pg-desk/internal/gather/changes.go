@@ -120,21 +120,11 @@ type ListFingerprintsResult struct {
 	Truncated bool
 }
 
-// listWireOut is the subset of pg-connector's `<type> list --fingerprints`
-// outcome this package decodes.
-type listWireOut struct {
-	Entities []struct {
-		ID    string `json:"id"`
-		Title string `json:"title"`
-		Stale bool   `json:"stale"`
-	} `json:"entities"`
-	Sources []struct {
-		Source string `json:"source"`
-		Status string `json:"status"`
-		Reason string `json:"reason"`
-	} `json:"sources"`
-	Truncated    bool              `json:"truncated"`
-	Fingerprints map[string]string `json:"fingerprints"`
+// listWireEntity is the subset of one listed entity this package decodes.
+type listWireEntity struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Stale bool   `json:"stale"`
 }
 
 // ListFingerprints runs `pg-connector <type> list --query <query>
@@ -158,7 +148,7 @@ func (g *Gatherer) ListFingerprints(ctx context.Context, entityType, query strin
 	if err != nil {
 		return ListFingerprintsResult{}, err
 	}
-	var wire listWireOut
+	var wire client.ListOutcome[listWireEntity]
 	if err := json.Unmarshal(stdout, &wire); err != nil {
 		return ListFingerprintsResult{}, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
 	}

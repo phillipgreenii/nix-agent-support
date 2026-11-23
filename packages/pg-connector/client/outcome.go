@@ -171,3 +171,10 @@ func (o ChangesOutcome) ExitCode() int {
 	}
 	return FanOutOutcome{Sources: rows}.ExitCode()
 }
+
+// ChangesAckOutcome is a "changes-ack" verb's answer: the backend's
+// acknowledged position. AckedSeq is a pointer so an answer that omits it is
+// distinguishable from an acknowledgement of 0.
+type ChangesAckOutcome struct {
+	AckedSeq *int64 `json:"acked_seq"`
+}

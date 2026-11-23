@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/client"
 )
 
 // The pr classifier: a Strategy comparing two observed pr snapshots. The
@@ -85,10 +87,7 @@ type prReview struct {
 }
 
 // prCIResult is the ci list fan-out result ({"runs":[...],"sources":[...]}).
-type prCIResult struct {
-	Runs    []prCIRun    `json:"runs"`
-	Sources []prCISource `json:"sources"`
-}
+type prCIResult = client.CIListOutcome[prCIRun]
 
 type prCIRun struct {
 	ID         string `json:"id"`
@@ -97,10 +96,6 @@ type prCIRun struct {
 	Conclusion string `json:"conclusion"`
 	Attempt    int    `json:"attempt"`
 	Stale      bool   `json:"stale"`
-}
-
-type prCISource struct {
-	Status string `json:"status"`
 }
 
 // prObserved is one side of the comparison after decoding.
@@ -185,9 +180,9 @@ func prCIFingerprint(raw json.RawMessage) (string, bool) {
 	succeeded := false
 	for _, s := range ci.Sources {
 		switch s.Status {
-		case "succeeded":
+		case client.SourceSucceeded:
 			succeeded = true
-		case "disabled":
+		case client.SourceDisabled:
 		default:
 			return "", false
 		}

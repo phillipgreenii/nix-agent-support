@@ -241,10 +241,8 @@ func (g *Gatherer) AckFeed(ctx context.Context, entityType, query, consumer, bac
 		return 0, exitError(args, res.exitCode, res.stdout)
 	}
 	var wire struct {
-		AckedSeq *int64 `json:"acked_seq"`
-		Result   *struct {
-			AckedSeq *int64 `json:"acked_seq"`
-		} `json:"result"`
+		client.ChangesAckOutcome
+		Result *client.ChangesAckOutcome `json:"result"`
 	}
 	if err := json.Unmarshal(res.stdout, &wire); err != nil {
 		return 0, fmt.Errorf("decode pg-connector %v stdout: %w", args, err)
