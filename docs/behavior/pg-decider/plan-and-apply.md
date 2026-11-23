@@ -367,8 +367,9 @@ A rule that keeps failing is escalated to a person rather than retried forever.
   counts.
 - **Escalating.** When a rule's count reaches K consecutive failing runs (default `3`, set by
   `escalate_after` in [`config.md`](config.md)), the decider creates one `human`-labeled task
-  naming the rule, the entity and the last error, parented under the anchor when the view links
-  one. It then marks the streak escalated, and a persistently failing rule is not rewritten or
+  naming the rule, the entity and the last error. The task is filed at the tracker root, never
+  under the anchor, so the terminal sweep of a merged or closed PR cannot close it; it stays open
+  until a person closes it. It then marks the streak escalated, and a persistently failing rule is not rewritten or
   re-escalated on every poll until a successful run resets it.
 - **Retry of a failed escalation.** If the create fails, the error is reported, the run exits `5`
   and the streak stays unescalated, so the next failing run tries again. A known residual risk: if

@@ -32,8 +32,13 @@
 //
 // When a failing rule's counter is at or above K (config.Config.K()) and the
 // streak is not yet escalated, one human-labeled task is created naming the
-// rule, the entity and the last error, parented under the entity's anchor when
-// the view links one, and escalated.<rule id> is set to 1. If the create fails
+// rule, the entity and the last error, and escalated.<rule id> is set to 1.
+// The task is deliberately NOT parented under the entity's anchor: the terminal
+// sweep (apply, all.closed) closes every open child of a merged or closed PR's
+// anchor, which would close the escalation of a still-failing all.closed rule
+// within one run while escalated=1 suppresses a new one. Unparented, the task
+// stays open until a person closes it; a later successful run only resets the
+// annotations and never closes it. If the create fails
 // the error is returned (apply exits 5) and escalated stays 0, so the next
 // failing run retries it.
 //
@@ -53,7 +58,6 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/apply"
 	"github.com/phillipgreenii/pg-decider/internal/view"
-	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
 
 // Key prefixes (the <k> part of decider.<name>.<k>).
@@ -222,9 +226,6 @@ func (h *Hook) escalate(ctx context.Context, env apply.Env, rule string, n int, 
 		IssueType:   "task",
 		Description: fmt.Sprintf("Rule %s failed on %d consecutive runs for %s %s.\nLast error: %s\n", rule, n, h.typ, h.id, lastText),
 		Labels:      []string{"human"},
-	}
-	if anchor, ok := workitem.BuildIndex(h.view).Anchor(); ok {
-		f.Parent = anchor.ID
 	}
 	if _, err := apply.CreateIssue(ctx, env, f); err != nil {
 		return fmt.Errorf("escalation of rule %s: %w", rule, err)

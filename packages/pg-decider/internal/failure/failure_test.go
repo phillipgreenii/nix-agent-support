@@ -278,27 +278,21 @@ func TestAnEscalatedRuleWithNoEventIsReset(t *testing.T) {
 	}
 }
 
-func TestTheEscalationIsParentedUnderTheAnchorWhenOneExists(t *testing.T) {
+func TestTheEscalationIsNeverParentedUnderTheAnchor(t *testing.T) {
 	r := "r.fail"
 	k := 1
 	anchor := view.LinkedEntity{
 		Type: "issue", ID: "wb-anchor", State: "open", Title: entity + ": Add retry",
 		Metadata: map[string]string{"dedup_key": "pr:" + entity + ":anchor"},
 	}
-	f := &fake{}
-	if err := finish(t, f, &k, viewWith(nil, anchor), failed(r, 1)); err != nil {
-		t.Fatal(err)
-	}
-	cs := creates(f.execs)
-	if len(cs) != 1 || !strings.Contains(cs[0], "--parent wb-anchor") {
-		t.Fatalf("creates: %q", cs)
-	}
-	f = &fake{}
-	if err := finish(t, f, &k, viewWith(nil), failed(r, 1)); err != nil {
-		t.Fatal(err)
-	}
-	if cs := creates(f.execs); len(cs) != 1 || strings.Contains(cs[0], "--parent") {
-		t.Fatalf("no anchor means no parent: %q", cs)
+	for _, v := range []*view.DeskView{viewWith(nil, anchor), viewWith(nil)} {
+		f := &fake{}
+		if err := finish(t, f, &k, v, failed(r, 1)); err != nil {
+			t.Fatal(err)
+		}
+		if cs := creates(f.execs); len(cs) != 1 || strings.Contains(cs[0], "--parent") {
+			t.Fatalf("the terminal sweep closes the anchor's children, so the escalation has no parent: %q", cs)
+		}
 	}
 }
 

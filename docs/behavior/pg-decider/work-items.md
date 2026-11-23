@@ -363,13 +363,18 @@ item for the current context, open or closed however it was closed, is never rec
   without the child shape, so a PR with several review items leaves none open. With the anchor and all
   children already closed the rule is `already handled`.
 - **Children the PR does not link.** The rule plans closes only for what the view links to the PR. A
-  child filed under the anchor that carries no `repo`/`pr_number` (a bead a review session filed, the
-  decider's own escalation bead) is not in the view, and bd refuses to close an anchor with an open
+  child filed under the anchor that carries no `repo`/`pr_number` (a bead a review session filed) is not in the view, and bd refuses to close an anchor with an open
   child, or a bead another open bead blocks. So when apply reaches the first `all.closed` close of a
   run it reads the anchor's open direct children live and closes every one of them (a focus bead
   excepted), a blocker before the bead it blocks, then the planned closes follow: a merged or closed
   PR ends with the anchor and every child closed in one delivery. When the live read fails the
   planned closes run alone and the run reports the failure.
+- **The escalation bead is not an anchor child.** The `human` task the failure hook files when a
+  rule keeps failing (including `all.closed` itself on a merged PR) is created at the tracker root,
+  without the anchor as parent, and carries the entity in its title and body. The terminal sweep
+  therefore never sees it and never closes it: a still-failing rule's escalation stays open until a
+  person closes it, since `escalated.<rule>=1` suppresses any new one. When the rule later
+  succeeds, the run resets the failure annotations only; it does not close the escalation bead.
 - **Reopen.** An open PR whose anchor is closed has its anchor reopened, and nothing else: the
   rules that create work then decide against the open anchor. A reopened PR does not reopen a closed
   work item of any kind through this rule, and the review rule never reopens one.
