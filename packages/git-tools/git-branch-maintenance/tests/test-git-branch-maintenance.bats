@@ -807,3 +807,29 @@ MOCK
     # Files were checked out in the temporary worktree for the rebase
     grep -q '^present$' "$WT_STATE_LOG"
 }
+
+@test "--remove-orphans-only removes old orphans without fetching or touching branches" {
+    use_private_tmp_root
+    local root="$GBM_TMP_ROOT"
+    mkdir -p "$root/git-branch-maintenance-888/sub"
+    touch -t 202001010000 "$root/git-branch-maintenance-888"
+    mkdir -p "$root/git-branch-maintenance-999"
+
+    # A git that fails on fetch/worktree add proves neither is reached
+    cat > "$MOCK_DIR/git" <<MOCK
+#!/usr/bin/env bash
+if [[ "\$1" == "fetch" || ( "\$1" == "worktree" && "\$2" == "add" ) ]]; then
+    echo "unexpected: git \$*" >&2
+    exit 99
+fi
+exec "$REAL_GIT" "\$@"
+MOCK
+    chmod +x "$MOCK_DIR/git"
+
+    run_git_branch_maintenance --remove-orphans-only
+    [ "$status" -eq 0 ]
+    [ ! -e "$root/git-branch-maintenance-888" ]
+    [ -d "$root/git-branch-maintenance-999" ]
+    echo "$output" | grep -q "git-branch-maintenance-888"
+    ! echo "$output" | grep -q "Fetching all remotes"
+}

@@ -22,6 +22,8 @@ Protection Options:
 
 Options:
   --dry-run                 Show what would happen without making changes
+  --remove-orphans-only     Only remove leftover temporary worktree directories
+                            (see below), then exit: no fetch, no branch work
   --force                   Skip working directory validation
   -h, --help                Show this help message and exit
   -v, --version             Show version information
@@ -95,6 +97,7 @@ DO_REBASE=false
 DO_DELETE_MERGED=false
 DELETE_MERGED_WORKTREES=false
 DRY_RUN=false
+REMOVE_ORPHANS_ONLY=false
 FORCE=false
 SPECIFIC_BRANCHES=()
 PROTECTED_BRANCHES=()
@@ -697,6 +700,9 @@ while [[ $# -gt 0 ]]; do
   --dry-run)
     DRY_RUN=true
     ;;
+  --remove-orphans-only)
+    REMOVE_ORPHANS_ONLY=true
+    ;;
   --force)
     FORCE=true
     ;;
@@ -776,6 +782,13 @@ SUMMARY_DELETED_WORKTREES=()
 # ============================================================================
 # Main Execution
 # ============================================================================
+
+# Callers that skip a full run (for example a pre-filter that finds no merged
+# branches) use this to still bound the leak of killed runs' directories.
+if [[ $REMOVE_ORPHANS_ONLY == "true" ]]; then
+  remove_orphaned_tmp_worktrees
+  exit 0
+fi
 
 # Validate working directory is clean (if doing operations that modify repo)
 if [[ $DO_FF == "true" || $DO_REBASE == "true" || $DO_DELETE_MERGED == "true" ]]; then
