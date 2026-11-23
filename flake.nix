@@ -38,6 +38,8 @@
         nixpkgs.follows = "nixpkgs";
         git-hooks.follows = "git-hooks";
         treefmt-nix.follows = "treefmt-nix";
+        gomod2nix.follows = "gomod2nix";
+        nixpkgs-unstable.follows = "nixpkgs-unstable";
       };
     };
     # flake-parts: framework for the consumed nix-base flakeModules. Deduped onto
@@ -55,16 +57,28 @@
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
     gomod2nix = {
       url = "github:nix-community/gomod2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-utils.follows = "flake-utils";
+      };
     };
     stylix = {
       url = "github:danth/stylix/release-26.05";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-parts.follows = "flake-parts";
+        nur.follows = "phillipgreenii-nix-overlay/nur";
+      };
     };
     serena = {
       url = "github:oraios/serena";
-      inputs.flake-utils.follows = "flake-utils";
-      inputs.nixpkgs.follows = "nixpkgs";
+      inputs = {
+        flake-utils.follows = "flake-utils";
+        nixpkgs.follows = "nixpkgs";
+        pyproject-nix.follows = "phillipgreenii-nix-base/pyproject-nix";
+        uv2nix.follows = "phillipgreenii-nix-base/uv2nix";
+        pyproject-build-systems.follows = "phillipgreenii-nix-base/pyproject-build-systems";
+      };
     };
   };
 
