@@ -10,6 +10,9 @@
   # Sends, interrupts, slash commands and stops go through the control command
   # (docket pg2-v77tsx, phase 9b); tmux stays the holder of the terminal.
   pg-claude-control,
+  # The claude binary ccpool launches by bare name inside tmux (claude.bin
+  # defaults to "claude"). Appended with --suffix so a profile claude still wins.
+  claude-code,
 }:
 
 mkGoApp {
@@ -84,7 +87,7 @@ mkGoApp {
         pa-monitor
         pg-claude-control
       ]
-    }
+    } --suffix PATH : ${lib.makeBinPath [ claude-code ]}
   '';
 
   meta = {

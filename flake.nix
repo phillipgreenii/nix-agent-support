@@ -306,6 +306,11 @@
               };
           ccpool = final.callPackage ./packages/ccpool {
             inherit (goBuilders) mkGoApp;
+            # The claude binary ccpool launches by bare name inside tmux; same
+            # source as the claude-code home module (llm-agents).
+            claude-code =
+              final.llm-agentsPkgs.claude-code
+                or llm-agents.packages.${final.stdenv.hostPlatform.system}.claude-code;
           };
           # pg-wrap: the standalone command-prefix wrapper (design ruling 30).
           # Mutually unaware of pg-router and ccpool, so neither package takes it
@@ -11140,6 +11145,28 @@
                       *) echo "unexpected pg-review resolution: '$got'" >&2; exit 1 ;;
                     esac
                   '';
+
+              # ccpool launches claude by bare name inside tmux (claude.bin defaults to
+              # "claude"); tmux execs it with no shell, so a missing claude is an
+              # immediate exit status 1 before ready. The pg-router role payload env
+              # has no per-user profile PATH, so ccpool's wrapper must carry claude.
+              # Resolve it through the wrapper under a system-only PATH, with a
+              # negative control that it is absent without it.
+              test-ccpool-resolves-claude = pkgs.runCommand "ccpool-resolves-claude" { } ''
+                w=${pkgs.ccpool}/bin/ccpool
+                if env -i PATH=/usr/bin:/bin ${pkgs.bash}/bin/bash -c "command -v claude" >/dev/null; then
+                  echo "negative control broken: claude resolves without the wrapper" >&2
+                  exit 1
+                fi
+                got=$(env -i PATH=/usr/bin:/bin ${pkgs.bash}/bin/bash -c "exec() { command -v claude; }; . $w") || {
+                  echo "ccpool cannot resolve claude without the profile PATH" >&2
+                  exit 1
+                }
+                case "$got" in
+                  /nix/store/*/bin/claude) touch "$out" ;;
+                  *) echo "unexpected claude resolution: '$got'" >&2; exit 1 ;;
+                esac
+              '';
 
               # pg-review execs pg-ccaudit and ccpool (and its own provider binaries)
               # by bare name; the router role payload env has no per-user profile
