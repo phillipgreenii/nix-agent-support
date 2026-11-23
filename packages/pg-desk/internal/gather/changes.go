@@ -168,7 +168,7 @@ func (g *Gatherer) ListFingerprints(ctx context.Context, entityType, query strin
 		if e.ID == "" {
 			return ListFingerprintsResult{}, fmt.Errorf("pg-connector %v listed an entity with no id", args)
 		}
-		out.Entities = append(out.Entities, ListedEntity{ID: e.ID, Title: e.Title, Stale: e.Stale})
+		out.Entities = append(out.Entities, ListedEntity(e))
 	}
 	return out, nil
 }
