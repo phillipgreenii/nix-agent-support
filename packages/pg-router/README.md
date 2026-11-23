@@ -389,6 +389,41 @@ class (retries spent or window closed), for an outage longer than one window (AD
 - A redrive is a new event of the same type, so every role bound to that type is offered it
   (handlers MUST be idempotent per event, as above).
 
+### Why a no-op role is dispatched again every poll
+
+A pull source (a `[[query]]` with a `period` trigger) is a **level** report: each tick it lists every
+item that is still in the state it selects (for example `fix-ci-ready`), and the core turns each one
+into an event whose id is derived from the event type and the item id. The core does **not** remember
+what a role did with an item. Three designed properties combine:
+
+- The default event is born expired (`DEC-EVENT-1`): its one offer is also its last, and the
+  retained-id set that de-duplicates re-emits lives only as long as the event does. So the next tick's
+  re-emit of the same item is **not** absorbed; it is a new offer ("re-emission, not resurrection").
+- The dispatch outcome is opaque to the core (`ADR 0065`, "Wire contract"): it relays `actions=[]`
+  from the handler and never branches on it, and it keeps no per-offer history, so it has no input
+  from which to decide "the last result was empty and nothing changed".
+- Whether an item needs more work is the role's decision, and the source's list is how the role says
+  "done": an item stays in the list until the role (or the world) changes its state.
+
+So a role that exits with `actions=[]` while its item stays selected is dispatched again one poll
+later, forever. That is what the `fix-ci-script` role (bound to `fix-ci.ready`, source
+`fix-ci-source`, every 60s) does for a `fix-ci:` bead whose rerun was already requested and whose CI
+has not changed: one `dispatch result ... actions=[]` line about every 68 seconds per bead (the 60s
+period plus a dispatch) until CI turns green or the shim labels the item `script-gave-up`.
+
+The router deliberately does not suppress these, because a router-side "skip after an empty result"
+would need per-item outcome memory the core does not keep and would starve roles whose inputs live
+outside the event (CI state, a clock, another bead). The fix for a noisy empty cycle belongs where the
+state is known:
+
+- the **source** SHOULD stop listing an item the role has nothing to do for (a label or status the
+  role sets, then excluded by the source's selector), or
+- the **role** SHOULD record its own "waiting on X" marker and exit before doing expensive work, and
+- a source whose cadence is wrong for its work SHOULD lengthen its `period` trigger.
+
+Cost to expect: one command-role process chain per listed item per period. Count `dispatch result` rows per
+`role` and `bead` in `events.jsonl` before changing a cadence.
+
 ## Configuration (pool-wide env)
 
 Pool-wide settings come from `PG_ROUTER_*` environment variables; roles are NOT
