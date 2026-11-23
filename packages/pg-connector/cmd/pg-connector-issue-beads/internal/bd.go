@@ -314,7 +314,7 @@ func classifyBDErrorMessage(msg string) error {
 	if strings.Contains(lower, "no issue found") || strings.Contains(lower, "no issues found") {
 		return scriptout.WrapError(scriptout.ErrNotFound, msg)
 	}
-	if isClaimHeldRefusal(lower) {
+	if isClaimHeldRefusal(lower) || isBlockedCloseRefusal(lower) || isOpenChildCloseRefusal(lower) {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, msg)
 	}
 	return scriptout.WrapError(scriptout.ErrUnavailable, msg)
@@ -333,4 +333,23 @@ func classifyBDErrorMessage(msg string) error {
 // merely mentions an assignee stays unclassified.
 func isClaimHeldRefusal(lower string) bool {
 	return strings.Contains(lower, "assignee is ") && strings.Contains(lower, "actor is ")
+}
+
+// isBlockedCloseRefusal reports whether lower (a lower-cased bd error message)
+// is bd's refusal to close an issue that an open blocker still blocks, e.g.
+// (bd 1.3.1) `cannot close blocked issue: <id> is blocked by [<blocker>] (use
+// --force to override)`. Like the claim refusal it is a standing fact about
+// the tracker, so a retry cannot succeed. The match requires both halves of
+// bd's phrasing so a message that merely mentions "blocked" stays unclassified.
+func isBlockedCloseRefusal(lower string) bool {
+	return strings.Contains(lower, "cannot close blocked issue") && strings.Contains(lower, "is blocked by")
+}
+
+// isOpenChildCloseRefusal reports whether lower (a lower-cased bd error
+// message) is bd's refusal to close an issue that still has open children, e.g.
+// (bd 1.3.1) `cannot close <id>: 2 open child issue(s); close children first or
+// use --force to override`. Both halves of the phrasing are required so a
+// message that merely mentions a child stays unclassified.
+func isOpenChildCloseRefusal(lower string) bool {
+	return strings.Contains(lower, "cannot close ") && strings.Contains(lower, "open child issue")
 }

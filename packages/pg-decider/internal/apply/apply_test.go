@@ -536,6 +536,18 @@ func TestExitCodes(t *testing.T) {
 			t.Fatalf("result %+v", r)
 		}
 	})
+	t.Run("blocked and open-child close refusals exit PartialPermanent", func(t *testing.T) {
+		for name, msg := range map[string]string{
+			"blocked": `cannot close blocked issue: wb-1 is blocked by [wb-9] (use --force to override)`,
+			"child":   `cannot close wb-1: 1 open child issue(s); close children first or use --force to override`,
+		} {
+			d := newDouble(t, respRule{Match: "issue close wb-1", Exit: 1, Stdout: `{"error":{"code":"invalid_argument","message":"` + msg + `"}}`})
+			r := run(t, d, nil, []action.Action{{Op: action.OpClose, Rule: "r", Target: str("wb-1")}})
+			if r.ExitCode != exitcode.PartialPermanent {
+				t.Fatalf("%s: exit %d, want %d", name, r.ExitCode, exitcode.PartialPermanent)
+			}
+		}
+	})
 	t.Run("a permanent refusal beside a retryable failure exits 2", func(t *testing.T) {
 		for name, order := range map[string][]string{"refusal first": {"wb-1", "wb-2"}, "refusal last": {"wb-2", "wb-1"}} {
 			d := newDouble(t,

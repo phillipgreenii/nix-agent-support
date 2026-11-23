@@ -102,3 +102,23 @@ func TestClassifyBDErrorMessage_AssigneeMentionAloneStaysUnavailable(t *testing.
 		t.Fatalf("err = %v, want unavailable", err)
 	}
 }
+
+func TestClassifyBDErrorMessage_StandingCloseRefusals(t *testing.T) {
+	cases := map[string]string{
+		"blocked": "cannot close blocked issue: zr-0gabn.23 is blocked by [zr-5dyjdc] (use --force to override)",
+		"child":   "cannot close zr-0gabn: 1 open child issue(s); close children first or use --force to override",
+	}
+	for name, msg := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := classifyBDErrorMessage(msg)
+			if errors.Is(err, scriptout.ErrUnavailable) || !errors.Is(err, scriptout.ErrInvalidArgument) {
+				t.Fatalf("err = %v, want invalid_argument and not unavailable", err)
+			}
+		})
+	}
+	for _, msg := range []string{"the blocked queue is empty", "failed to list child issue rows", "cannot close: disk full"} {
+		if err := classifyBDErrorMessage(msg); !errors.Is(err, scriptout.ErrUnavailable) {
+			t.Fatalf("%q: err = %v, want unavailable", msg, err)
+		}
+	}
+}

@@ -373,6 +373,11 @@ override`, from `close`, `update` and any other verb that returns it) as `invali
     never `unavailable`. The refusal is a standing fact about the item, so repeating the same call
     cannot succeed, and a caller that retries `unavailable` MUST NOT be sent a refusal under that
     code. Only a changed request (another actor, or an explicit reclaim or force) can succeed.
+    The same holds for bd's two other standing close refusals, each reported as
+    `invalid_argument`, never `unavailable`: closing an issue an open blocker still blocks
+    (`cannot close blocked issue: <id> is blocked by [<blocker>] (use --force to override)`) and
+    closing an issue that still has open children (`cannot close <id>: N open child issue(s);
+    close children first or use --force to override`).
     No eighth `conflict` code exists (`INV-ERR-1`).
   - **`unavailable`** — the backend itself cannot currently be used (down, unreachable, or any
     other backend-health problem).
