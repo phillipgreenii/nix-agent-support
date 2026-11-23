@@ -336,6 +336,10 @@ The daemon emits:
   failed or timed out and the cost totals may be undercounted until a later scan converges; 0 means
   the fold is complete. Absent until the first scan.
 
+- **`pa_monitor.scan.held_files`** (Prometheus `pa_monitor_scan_held_files`) and
+  **`pa_monitor.scan.sessions`** (`pa_monitor_scan_sessions`) — gauges, the transcript and status files
+  the corpus monitor holds and the sessions it resolved after each scan. Absent until the first scan.
+
 - **`pa_monitor.poll.phase.duration`** (Prometheus `pa_monitor_poll_phase_duration`, label `phase`) —
   per-phase duration histogram. Producer phases: `discover`, `pricer`, `limits`, `weekly`, and
   `assemble`, the whole producer cycle. `assemble` is split into sub-phases that name the slow part
@@ -343,7 +347,10 @@ The daemon emits:
   about `assemble` minus the time of `pricer`, `limits` and `weekly`):
   `assemble_scan` (the Monitor's scan: discovery, fold, resolution), of which `assemble_fold` is the
   recorder sync and per-file line fold and `assemble_resolve` is transcript resolution, observer
-  feeding and pruning; `assemble_providers` (per-session subshell, git branch, terminal host);
+  feeding and pruning, itself split into `assemble_resolve_sessions` (per-session resolve and
+  subagents), `assemble_resolve_keep` (keep/cutoff loop over held files), `assemble_resolve_set_records`
+  (feeding the pricing and limits observers) and `assemble_resolve_prune` (path and observer pruning),
+  with `assemble_resolve` kept as the enclosing total; `assemble_providers` (per-session subshell, git branch, terminal host);
   `assemble_pr` (PR lookups); `assemble_reconcile` (repo labels and provider-cache reconcile).
   Mean per scan: `rate(pa_monitor_poll_phase_duration_sum{phase="assemble_fold"}[5m]) / rate(pa_monitor_poll_phase_duration_count{phase="assemble_fold"}[5m])`.
   The pricing record set is no longer copied per refreshed file and the sorted concatenation Block

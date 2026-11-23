@@ -138,6 +138,7 @@ func (m *Monitor) Scan(ctx context.Context, now time.Time) ([]*session.Session, 
 		log.Printf("pa-monitor: fold incomplete: %d files still dirty: %v", dirty, foldErr)
 	}
 
+	loopStart := time.Now()
 	keep := map[string]bool{} // files still wanted (by ref)
 	newTopo := make(map[string]sessionTopology, len(sessions))
 	cutoff := now.Add(-pricingWindow(now))
@@ -164,10 +165,12 @@ func (m *Monitor) Scan(ctx context.Context, now time.Time) ([]*session.Session, 
 		newTopo[s.SessionID] = sessionTopology{resolvedPath: fs.ref, mtime: fs.last, maxActivity: maxAct, ok: true}
 	}
 	m.topo = newTopo
+	recordPhase(m.rec, "assemble_resolve_sessions", time.Since(loopStart))
 
 	// Feed the pricing and limits observers from the same fold, then prune every
 	// Monitor-owned map to the files still wanted: a transcript in the pricing
 	// window, a session's own files, and every status file.
+	keepStart := time.Now()
 	for ref, fs := range m.rd.files {
 		switch fs.kind {
 		case kindStatus:
@@ -178,6 +181,8 @@ func (m *Monitor) Scan(ctx context.Context, now time.Time) ([]*session.Session, 
 			}
 		}
 	}
+	recordPhase(m.rec, "assemble_resolve_keep", time.Since(keepStart))
+	recordStart := time.Now()
 	for ref, fs := range m.rd.files {
 		if !keep[ref] {
 			delete(m.rd.files, ref)
@@ -194,6 +199,8 @@ func (m *Monitor) Scan(ctx context.Context, now time.Time) ([]*session.Session, 
 			}
 		}
 	}
+	recordPhase(m.rec, "assemble_resolve_set_records", time.Since(recordStart))
+	pruneStart := time.Now()
 	if m.pricingObs != nil {
 		m.pricingObs.noteScanErr(foldErr)
 		m.pricingObs.prunePaths(keep)
@@ -204,8 +211,10 @@ func (m *Monitor) Scan(ctx context.Context, now time.Time) ([]*session.Session, 
 	for _, o := range m.observers {
 		o.Prune(activeIDs)
 	}
+	recordPhase(m.rec, "assemble_resolve_prune", time.Since(pruneStart))
 
 	m.lastQueries, m.lastLines, m.lastFiles, m.lastKept = m.rd.queries, m.rd.linesFolded, m.rd.filesFolded, len(m.rd.files)
+	recordHeld(m.rec, m.lastKept, len(sessions))
 	return sessions, nil
 }
 

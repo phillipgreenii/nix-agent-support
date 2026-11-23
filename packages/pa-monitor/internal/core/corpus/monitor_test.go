@@ -281,10 +281,15 @@ func TestNoCodeOpensAClaudeFile(t *testing.T) {
 	}
 }
 
-type dirtyRec struct{ dirty []int }
+type dirtyRec struct {
+	dirty  []int
+	phases []string
+	held   [][2]int
+}
 
 func (*dirtyRec) RecordScan(string, time.Duration, int64) {}
-func (*dirtyRec) RecordPhase(string, time.Duration)       {}
+func (d *dirtyRec) RecordPhase(p string, _ time.Duration) { d.phases = append(d.phases, p) }
+func (d *dirtyRec) RecordScanHeld(f, s int)               { d.held = append(d.held, [2]int{f, s}) }
 func (d *dirtyRec) RecordScanDirtyFiles(n int)            { d.dirty = append(d.dirty, n) }
 
 // Each Scan reports how many files are still dirty after its fold: the files a
@@ -303,5 +308,33 @@ func TestScan_ReportsDirtyFilesAfterEachFold(t *testing.T) {
 	r.scan(t)
 	if len(rec.dirty) != 3 || rec.dirty[0] != 0 || rec.dirty[1] < 1 || rec.dirty[2] != 0 {
 		t.Fatalf("dirty counts per scan = %v, want [0 >=1 0]", rec.dirty)
+	}
+}
+
+// Scan splits assemble_resolve into sub-phases (recorded before the enclosing
+// total, which is deferred) and reports the held-file and session counts.
+func TestScan_RecordsResolveSubPhasesAndHeldGauges(t *testing.T) {
+	r := newRig(t)
+	rec := &dirtyRec{}
+	r.m.SetPhaseRecorder(rec)
+	r.env.Register(111, "s1", cwd, "", true)
+	r.env.Put(corpustest.TranscriptRel(cwd, "s1"), userLine("s1", 0, "hello"))
+	sessions := r.scan(t)
+	want := []string{"assemble_resolve_sessions", "assemble_resolve_keep", "assemble_resolve_set_records", "assemble_resolve_prune", "assemble_resolve"}
+	got := rec.phases
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			found = found || g == w
+		}
+		if !found {
+			t.Errorf("phase %q not recorded; got %v", w, got)
+		}
+	}
+	if got[len(got)-1] != "assemble_resolve" {
+		t.Errorf("assemble_resolve must close the scan, got %v", got)
+	}
+	if len(rec.held) != 1 || rec.held[0][0] != r.m.FilesHeldLastScan() || rec.held[0][1] != len(sessions) || rec.held[0][1] == 0 {
+		t.Errorf("held gauges = %v, want [[%d %d]]", rec.held, r.m.FilesHeldLastScan(), len(sessions))
 	}
 }

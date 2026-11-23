@@ -225,3 +225,22 @@ func TestScanDirtyFilesGauge(t *testing.T) {
 		}
 	}
 }
+
+// TestScanHeldGauges: held_files and sessions are absent until the first push,
+// then report the latest scan's figures.
+func TestScanHeldGauges(t *testing.T) {
+	e, reader := newTestEmitter(t)
+	if _, ok := collectMetric(t, reader, "pa_monitor.scan.held_files"); ok {
+		t.Fatal("gauge emitted before the first push")
+	}
+	e.RecordScanHeld(18000, 40)
+	for name, want := range map[string]int64{"pa_monitor.scan.held_files": 18000, "pa_monitor.scan.sessions": 40} {
+		m, ok := collectMetric(t, reader, name)
+		if !ok {
+			t.Fatalf("%s not emitted", name)
+		}
+		if v := m.Data.(metricdata.Gauge[int64]).DataPoints[0].Value; v != want {
+			t.Errorf("%s = %d, want %d", name, v, want)
+		}
+	}
+}

@@ -13,6 +13,9 @@ type Recorder interface {
 	// RecordScanDirtyFiles reports how many files are still dirty (waiting for
 	// a read) after a Scan fold; 0 means the fold is complete.
 	RecordScanDirtyFiles(n int)
+	// RecordScanHeld reports the files the Monitor holds and the sessions it
+	// resolved after a Scan.
+	RecordScanHeld(files, sessions int)
 }
 
 func recordScan(rec Recorder, mode string, d time.Duration, bytes int64) {
@@ -30,5 +33,11 @@ func recordPhase(rec Recorder, phase string, d time.Duration) {
 func recordDirtyFiles(rec Recorder, n int) {
 	if rec != nil {
 		rec.RecordScanDirtyFiles(n)
+	}
+}
+
+func recordHeld(rec Recorder, files, sessions int) {
+	if rec != nil {
+		rec.RecordScanHeld(files, sessions)
 	}
 }
