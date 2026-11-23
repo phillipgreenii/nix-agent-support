@@ -272,10 +272,7 @@ func (c ConnectorReader) PRMerged(ctx context.Context, prID string) (bool, error
 	if err != nil {
 		return false, err
 	}
-	var pr struct {
-		State  string `json:"state"`
-		Merged bool   `json:"merged"`
-	}
+	var pr client.PRShowResult
 	if err := json.Unmarshal(raw, &pr); err != nil {
 		return false, fmt.Errorf("decode pr show result: %w", err)
 	}
@@ -288,12 +285,7 @@ func (c ConnectorReader) PendingReview(ctx context.Context, prID string) (Pendin
 	if err != nil {
 		return PendingReview{}, err
 	}
-	var res struct {
-		Pending bool `json:"pending"`
-		Review  *struct {
-			Stale bool `json:"stale"`
-		} `json:"review"`
-	}
+	var res client.PendingReviewResult
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return PendingReview{}, fmt.Errorf("decode review pending result: %w", err)
 	}
