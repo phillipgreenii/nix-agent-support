@@ -118,20 +118,22 @@ func (d *Daemon) computeCoverageModeCtx(ctx context.Context, view string, withSu
 }
 
 // loadStages returns the stage rows, re-reading them only when the store's
-// lifecycle model input counter moved. The counter is read before the query, so
-// a commit in between leaves the cache one step behind, never ahead.
+// stage counter or rollback epoch moved (a process observation or history
+// record moves the model input counter but leaves the stage rows alone). The
+// counters are read before the query, so a commit in between leaves the cache
+// one step behind, never ahead.
 func (d *Daemon) loadStages() ([]store.StageRow, error) {
-	mseq := d.st.ModelInputSeq()
+	mseq, epoch := d.st.StageSeq(), d.st.RollbackEpoch()
 	d.stagesMu.Lock()
 	defer d.stagesMu.Unlock()
-	if d.stagesOK && d.stagesSeq == mseq {
+	if d.stagesOK && d.stagesSeq == mseq && d.stagesEpoch == epoch {
 		return d.stages, nil
 	}
 	rows, err := d.st.Stages()
 	if err != nil {
 		return nil, err
 	}
-	d.stages, d.stagesSeq, d.stagesOK = rows, mseq, true
+	d.stages, d.stagesSeq, d.stagesEpoch, d.stagesOK = rows, mseq, epoch, true
 	return rows, nil
 }
 
@@ -139,10 +141,10 @@ func (d *Daemon) loadStages() ([]store.StageRow, error) {
 // loop filled them just before). A miss reads nothing, so the caller reads under
 // its own snapshot.
 func (d *Daemon) cachedStages() ([]store.StageRow, bool) {
-	mseq := d.st.ModelInputSeq()
+	mseq, epoch := d.st.StageSeq(), d.st.RollbackEpoch()
 	d.stagesMu.Lock()
 	defer d.stagesMu.Unlock()
-	if d.stagesOK && d.stagesSeq == mseq {
+	if d.stagesOK && d.stagesSeq == mseq && d.stagesEpoch == epoch {
 		return d.stages, true
 	}
 	return nil, false

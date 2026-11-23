@@ -225,6 +225,7 @@ type Store struct {
 	schemaCache atomic.Int64
 	commitSeq   atomic.Uint64 // journal applies committed (see CommitSeq)
 	pathSeq     atomic.Uint64 // journal applies that may have changed the path rows (see PathSeq)
+	stageSeq    atomic.Uint64 // journal applies that may have changed the conv_stage rows (see StageSeq)
 	liveSeq     atomic.Uint64 // commits that may have changed the live-Process inputs (see LiveInputSeq)
 	livePend    atomic.Bool   // a write in flight stored a live-Process input (see NoteLiveInput)
 	modelSeq    atomic.Uint64 // commits that may have changed the lifecycle model inputs (see ModelInputSeq)
@@ -852,6 +853,14 @@ func (s *Store) CommitSeq() uint64 { return s.commitSeq.Load() }
 // the read-before-query rule of LiveInputSeq and issues no query.
 func (s *Store) PathSeq() uint64 { return s.pathSeq.Load() }
 
+// StageSeq counts the journal applies committed by this process that held a
+// record able to change the conv_stage table (a stage or a settle record). A
+// process observation or a history record moves ModelInputSeq but not this, so a
+// reader that cached the stage rows rebuilds only when this or RollbackEpoch
+// moved. It follows the read-before-query rule of LiveInputSeq and issues no
+// query.
+func (s *Store) StageSeq() uint64 { return s.stageSeq.Load() }
+
 // LiveInputSeq counts the commits that may have changed what decides which
 // Conversations hold a live Process: a session-registry record (a WithWrite or
 // bulk-batch commit that followed NoteLiveInput) and a journal apply holding a
@@ -1391,19 +1400,24 @@ func (s *Store) applyAllOn(ctx context.Context, db txBeginner, recs []*Rec) erro
 	}
 	s.lastSeq = last
 	s.commitSeq.Add(1)
-	var proc, model, paths bool
+	var proc, model, paths, stage bool
 	for _, r := range recs {
 		switch r.T {
 		case TPath, TPathClose, TTomb:
 			paths = true
 		case TProc:
 			proc = true
-		case TStage, TSettle, TTorn:
+		case TStage, TSettle:
+			model, stage = true, true
+		case TTorn:
 			model = true
 		}
 	}
 	if paths {
 		s.pathSeq.Add(1)
+	}
+	if stage {
+		s.stageSeq.Add(1)
 	}
 	if proc {
 		s.liveSeq.Add(1)

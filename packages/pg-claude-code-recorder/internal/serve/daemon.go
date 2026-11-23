@@ -222,12 +222,13 @@ type Daemon struct {
 	pathsOK    bool
 	pathsSeq   uint64
 	pathsEpoch uint64
-	// stages is the cached conv_stage table, valid for the store's lifecycle
-	// model input counter stagesSeq (guarded by stagesMu).
-	stagesMu  sync.Mutex
-	stagesOK  bool
-	stagesSeq uint64
-	stages    []store.StageRow
+	// stages is the cached conv_stage table, valid for the store's stage
+	// counter stagesSeq and rollback epoch stagesEpoch (guarded by stagesMu).
+	stagesMu    sync.Mutex
+	stagesOK    bool
+	stagesSeq   uint64
+	stagesEpoch uint64
+	stages      []store.StageRow
 	// statExceptions is how many files the last status pass Lstat'ed;
 	// lastFullStatNS is when the last coverage run or watcher sweep finished.
 	statExceptions atomic.Int64

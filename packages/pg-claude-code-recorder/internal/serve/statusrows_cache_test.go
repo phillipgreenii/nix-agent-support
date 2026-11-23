@@ -58,6 +58,13 @@ func TestStatusRefreshReadsOnlyTheTablesACommitChanged(t *testing.T) {
 	if q := refresh("path commit"); q != 3 {
 		t.Fatalf("a path commit: %d statements, want 3 (the file rows, their check, and paths)", q)
 	}
+	// A process observation moves the lifecycle model counter but changes no
+	// conv_stage row, so the refresh reads nothing: the live stream of
+	// observations must not make every refresh reread the stage table.
+	commit(&store.Rec{T: store.TProc, Kind: "seen", Pid: 1, ProcStart: "x", At: 6})
+	if q := refresh("process observation commit"); q != 0 {
+		t.Fatalf("a process observation commit: %d statements, want 0 (stage rows unchanged)", q)
+	}
 	commit(&store.Rec{T: store.TStage, At: 7, Session: "s", State: store.StageHeld})
 	// A stage record names no file, so no file row is reread.
 	if q := refresh("stage commit"); q != 1 {
