@@ -79,6 +79,11 @@ func (m *Monitor) SetPhaseRecorder(r any) {
 	if rec, ok := r.(Recorder); ok {
 		m.rec = rec
 	}
+	// The recorder's facts reader also reports the session lag and discovery gate
+	// metrics; it takes the same recorder when it can.
+	if fr, ok := m.rd.facts.(interface{ SetRecorder(any) }); ok {
+		fr.SetRecorder(r)
+	}
 }
 
 // pricingWindow is the age of record the Monitor folds transcripts for pricing:

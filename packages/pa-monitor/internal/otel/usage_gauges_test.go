@@ -244,3 +244,56 @@ func TestScanHeldGauges(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionLagAndDiscoveryCounters: appear and leave lag land in their own
+// histograms (seconds), and the discovery counters carry their reason/kind.
+func TestSessionLagAndDiscoveryCounters(t *testing.T) {
+	e, reader := newTestEmitter(t)
+	e.RecordSessionLag("appear", 12*time.Second)
+	e.RecordSessionLag("appear", 3*time.Second)
+	e.RecordSessionLag("leave", 6*time.Second)
+	for name, want := range map[string]struct {
+		count uint64
+		sum   float64
+	}{"pa_monitor.session.appear_lag": {2, 15}, "pa_monitor.session.leave_lag": {1, 6}} {
+		m, ok := collectMetric(t, reader, name)
+		if !ok {
+			t.Fatalf("%s not emitted", name)
+		}
+		dp := m.Data.(metricdata.Histogram[float64]).DataPoints[0]
+		if dp.Count != want.count || dp.Sum != want.sum {
+			t.Errorf("%s count=%d sum=%v, want %d and %v", name, dp.Count, dp.Sum, want.count, want.sum)
+		}
+	}
+	e.RecordDiscoveryForced("gone")
+	e.RecordDiscoveryForced("gone")
+	e.RecordDiscoveryForced("empty")
+	e.RecordDiscoveryBudgetExhausted("empty")
+	for name, want := range map[string]map[string]int64{
+		"pa_monitor.discovery.forced_total":           {"gone": 2, "empty": 1},
+		"pa_monitor.discovery.budget_exhausted_total": {"empty": 1},
+	} {
+		m, ok := collectMetric(t, reader, name)
+		if !ok {
+			t.Fatalf("%s not emitted", name)
+		}
+		got := map[string]int64{}
+		for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+			for _, kv := range dp.Attributes.ToSlice() {
+				got[kv.Value.AsString()] = dp.Value
+			}
+		}
+		for k, v := range want {
+			if got[k] != v {
+				t.Errorf("%s[%s] = %d, want %d", name, k, got[k], v)
+			}
+		}
+		if len(got) != len(want) {
+			t.Errorf("%s series = %v, want %v", name, got, want)
+		}
+	}
+	var nilE *Emitter
+	nilE.RecordSessionLag("appear", time.Second)
+	nilE.RecordDiscoveryForced("gone")
+	nilE.RecordDiscoveryBudgetExhausted("gone")
+}

@@ -340,6 +340,25 @@ The daemon emits:
   **`pa_monitor.scan.sessions`** (`pa_monitor_scan_sessions`) — gauges, the transcript and status files
   the corpus monitor holds and the sessions it resolved after each scan. Absent until the first scan.
 
+- **`pa_monitor.session.appear_lag`** (Prometheus `pa_monitor_session_appear_lag`, unit seconds) and
+  **`pa_monitor.session.leave_lag`** (`pa_monitor_session_leave_lag`) — histograms, buckets 1, 2, 5, 10,
+  15, 30, 60, 120, 300, 600 s. Appear lag is the clock at the first discovery that lists a session
+  alive minus the Process start time the recorder reports (second resolution), for a new pid only (a
+  resume that changes the session id on a known pid is not an appearance); it includes the scan cycle
+  still to come before a viewer sees the session. Leave lag is the clock at the discovery that stops
+  listing a session alive minus the moment the local `kill -0` probe first found its pid dead; it is a
+  lower bound, and a session the probe never saw dead (the probe only runs on a scan whose registry
+  feed was quiet) records none. Neither records for the first discovery after start or after a
+  recorder outage.
+- **`pa_monitor.discovery.forced_total`** (`pa_monitor_discovery_forced_total`, label
+  `reason="gone"|"empty"`) — counter, discoveries the gate ran only because of the local probe: a pid
+  dead locally while the recorder still lists it alive (`gone`), or an alive Process with no session id
+  yet (`empty`). A registry change or the heartbeat is not counted.
+- **`pa_monitor.discovery.budget_exhausted_total`** (`pa_monitor_discovery_budget_exhausted_total`,
+  label `kind="gone"|"empty"`) — counter, once per pid that wanted another forced discovery after
+  using its whole budget (`maxGoneTries` = 4, `maxEmptyTries` = 6). A rise means the gate stopped
+  chasing a pid and the next heartbeat (60 s) is the bound.
+
 - **`pa_monitor.poll.phase.duration`** (Prometheus `pa_monitor_poll_phase_duration`, label `phase`) —
   per-phase duration histogram. Producer phases: `discover`, `pricer`, `limits`, `weekly`, and
   `assemble`, the whole producer cycle. `assemble` is split into sub-phases that name the slow part

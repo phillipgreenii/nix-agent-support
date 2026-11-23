@@ -59,6 +59,54 @@ type Facts struct {
 	// sessionless state has forced.
 	emptyPids  []int
 	emptyTries map[int]int
+
+	// rec receives the lag and gate metrics (nil: none). goneSince is when the
+	// local probe first found each pid dead; goneExhausted and emptyExhausted
+	// remember the pids whose try budget was already reported as used up.
+	rec            Recorder
+	goneSince      map[int]time.Time
+	goneExhausted  map[int]bool
+	emptyExhausted map[int]bool
+}
+
+// Recorder receives the discovery metrics. *otel.Emitter satisfies it.
+//
+// Definitions (all from timestamps pa-monitor already has):
+//
+//   - appear lag: the discovery's clock minus the Process start time the
+//     recorder reports (second resolution) for a session that the discovery
+//     lists alive for the first time (a new pid; a session id change on a known
+//     pid, a resume, is not an appearance). It is the time from the session's
+//     start to the first discovery that lists it, so it includes the scan cycle
+//     that follows the discovery before a viewer sees it. The first discovery
+//     after start or after a recorder outage records nothing.
+//   - leave lag: the discovery's clock minus the moment the local kill -0 probe
+//     first found the pid dead, for a session the discovery stops listing
+//     alive. It is a lower bound (the pid may have died before the first probe)
+//     and records nothing for a session the probe never saw dead (the
+//     probe runs only on a scan whose registry feed was quiet).
+type Recorder interface {
+	// RecordSessionLag records one lag; kind is "appear" or "leave".
+	RecordSessionLag(kind string, d time.Duration)
+	// RecordDiscoveryForced counts a discovery the gate ran only because of the
+	// local probe; reason is "gone" (dead pid still listed alive) or "empty"
+	// (alive Process without a session id).
+	RecordDiscoveryForced(reason string)
+	// RecordDiscoveryBudgetExhausted counts, once per pid, a pid that wanted
+	// another forced discovery after using its whole try budget; kind is "gone"
+	// (maxGoneTries) or "empty" (maxEmptyTries).
+	RecordDiscoveryBudgetExhausted(kind string)
+}
+
+// SetRecorder wires the metric recorder. Takes any so a caller can pass a value
+// that may or may not implement Recorder; one that does not (or nil) disables
+// recording. Call it before the first Registrations.
+func (f *Facts) SetRecorder(r any) {
+	f.scanMu.Lock()
+	defer f.scanMu.Unlock()
+	if rec, ok := r.(Recorder); ok {
+		f.rec = rec
+	}
 }
 
 // maxEmptyTries bounds how many discoveries one alive Process with no session
@@ -180,19 +228,36 @@ func (f *Facts) liveProcessGone() bool {
 		seen[s.PID] = true
 		if probe(s.PID) {
 			delete(f.goneTries, s.PID)
+			delete(f.goneSince, s.PID)
+			delete(f.goneExhausted, s.PID)
 			continue
 		}
 		if f.goneTries == nil {
 			f.goneTries = map[int]int{}
 		}
+		if f.goneSince == nil {
+			f.goneSince = map[int]time.Time{}
+		}
+		if _, ok := f.goneSince[s.PID]; !ok {
+			f.goneSince[s.PID] = f.clock()
+		}
 		if f.goneTries[s.PID] < maxGoneTries {
 			f.goneTries[s.PID]++
 			gone = true
+		} else if !f.goneExhausted[s.PID] {
+			if f.goneExhausted == nil {
+				f.goneExhausted = map[int]bool{}
+			}
+			f.goneExhausted[s.PID] = true
+			if f.rec != nil {
+				f.rec.RecordDiscoveryBudgetExhausted("gone")
+			}
 		}
 	}
 	for pid := range f.goneTries {
 		if !seen[pid] {
 			delete(f.goneTries, pid)
+			delete(f.goneExhausted, pid)
 		}
 	}
 	return gone
@@ -212,11 +277,20 @@ func (f *Facts) sessionIDPending() bool {
 		if f.emptyTries[pid] < maxEmptyTries {
 			f.emptyTries[pid]++
 			pending = true
+		} else if !f.emptyExhausted[pid] {
+			if f.emptyExhausted == nil {
+				f.emptyExhausted = map[int]bool{}
+			}
+			f.emptyExhausted[pid] = true
+			if f.rec != nil {
+				f.rec.RecordDiscoveryBudgetExhausted("empty")
+			}
 		}
 	}
 	for pid := range f.emptyTries {
 		if !seen[pid] {
 			delete(f.emptyTries, pid)
+			delete(f.emptyExhausted, pid)
 		}
 	}
 	return pending
@@ -343,9 +417,15 @@ func (f *Facts) Registrations(ctx context.Context) ([]*session.Session, error) {
 		}
 		if !changed && f.liveProcessGone() {
 			changed = true
+			if f.rec != nil {
+				f.rec.RecordDiscoveryForced("gone")
+			}
 		}
 		if !changed && f.sessionIDPending() {
 			changed = true
+			if f.rec != nil {
+				f.rec.RecordDiscoveryForced("empty")
+			}
 		}
 		if f.haveSnapshot && !f.fetchFailed && !changed && f.clock().Sub(f.lastFetch) < f.heartbeat {
 			return f.cachedRegistrations(), nil
@@ -382,6 +462,8 @@ func (f *Facts) discover(ctx context.Context, c *client.Client) ([]*session.Sess
 		live = append(live, fromProcess(p))
 	}
 
+	f.recordAppear(live)
+
 	var ended []*session.Session // newest first
 	if !f.endedSeeded {
 		dead, err := c.ProcessList(ctx, client.ProcessFilter{Alive: &no, Limit: maxDeadProcesses})
@@ -414,6 +496,9 @@ func (f *Facts) discover(ctx context.Context, c *client.Client) ([]*session.Sess
 			}
 		}
 		for _, s := range gone {
+			if t, ok := f.goneSince[s.PID]; ok && f.rec != nil {
+				f.rec.RecordSessionLag("leave", f.clock().Sub(t))
+			}
 			// Carried forward as ended with the facts it last had: no recorder read.
 			d := *s
 			d.PidAlive = false
@@ -434,6 +519,11 @@ func (f *Facts) discover(ctx context.Context, c *client.Client) ([]*session.Sess
 		return nil, err
 	}
 	f.live, f.ended, f.endedSeeded = live, ended, true
+	for pid := range f.goneSince {
+		if !hasPID(live, pid) {
+			delete(f.goneSince, pid)
+		}
+	}
 	f.emptyPids = empty
 	if f.emptyTries == nil {
 		f.emptyTries = map[int]int{}
@@ -449,6 +539,34 @@ func (f *Facts) discover(ctx context.Context, c *client.Client) ([]*session.Sess
 		out = append(out, &cp)
 	}
 	return out, nil
+}
+
+// recordAppear records the appear lag of every session in live that no earlier
+// discovery listed (by session id or pid). It records nothing before the first
+// discovery or after a recorder outage (endedSeeded false: every session would
+// look new), nor for a session whose start time is unknown or in the future.
+func (f *Facts) recordAppear(live []*session.Session) {
+	if f.rec == nil || !f.endedSeeded {
+		return
+	}
+	now := f.clock()
+	for _, s := range live {
+		if s.StartedAt.IsZero() || hasID(f.live, s.SessionID) || hasID(f.ended, s.SessionID) || hasPID(f.live, s.PID) {
+			continue
+		}
+		if d := now.Sub(s.StartedAt); d >= 0 {
+			f.rec.RecordSessionLag("appear", d)
+		}
+	}
+}
+
+func hasPID(ss []*session.Session, pid int) bool {
+	for _, s := range ss {
+		if s.PID == pid {
+			return true
+		}
+	}
+	return false
 }
 
 // endedRetryBatch bounds how many failed ended-session lookups one Scan retries.
@@ -492,6 +610,7 @@ func (f *Facts) resetEnded() {
 	f.haveSnapshot, f.regCursor = false, ""
 	f.live, f.ended = nil, nil
 	f.emptyPids, f.emptyTries = nil, nil
+	f.goneSince, f.goneExhausted, f.emptyExhausted = nil, nil, nil
 }
 
 // wrapScan is wrap for a scan: an outage also forgets the carried state.

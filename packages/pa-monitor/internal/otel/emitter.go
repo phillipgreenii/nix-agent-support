@@ -104,6 +104,10 @@ type Emitter struct {
 	subprocessSpawns  metric.Int64Counter
 	exportDur         metric.Float64Histogram
 	exportAttempts    metric.Int64Counter
+	// Discovery lag and gate metrics (see recorderfacts.Recorder).
+	appearLag, leaveLag      metric.Float64Histogram
+	discoveryForced          metric.Int64Counter
+	discoveryBudgetExhausted metric.Int64Counter
 
 	mu                 sync.Mutex
 	sessionsObs        []stateObs
@@ -450,6 +454,23 @@ func (e *Emitter) registerMetrics(ctx context.Context, mp *sdkmetric.MeterProvid
 	}
 	if e.pollPhaseDuration, err = meter.Float64Histogram("pa_monitor.poll.phase.duration",
 		metric.WithUnit("ms"), metric.WithDescription("per-phase poll duration")); err != nil {
+		return err
+	}
+	lagBuckets := metric.WithExplicitBucketBoundaries(1, 2, 5, 10, 15, 30, 60, 120, 300, 600)
+	if e.appearLag, err = meter.Float64Histogram("pa_monitor.session.appear_lag", lagBuckets,
+		metric.WithUnit("s"), metric.WithDescription("seconds from a session's process start to the first discovery that lists it")); err != nil {
+		return err
+	}
+	if e.leaveLag, err = meter.Float64Histogram("pa_monitor.session.leave_lag", lagBuckets,
+		metric.WithUnit("s"), metric.WithDescription("seconds from the local probe first finding a session's pid dead to the discovery that stops listing it alive")); err != nil {
+		return err
+	}
+	if e.discoveryForced, err = meter.Int64Counter("pa_monitor.discovery.forced_total",
+		metric.WithDescription("discoveries the gate ran only because of the local probe, by reason (gone, empty)")); err != nil {
+		return err
+	}
+	if e.discoveryBudgetExhausted, err = meter.Int64Counter("pa_monitor.discovery.budget_exhausted_total",
+		metric.WithDescription("pids that used their whole forced-discovery try budget, by kind (gone, empty)")); err != nil {
 		return err
 	}
 	if e.scanDuration, err = meter.Float64Histogram("pa_monitor.transcript.scan.duration",
@@ -1210,6 +1231,39 @@ func (e *Emitter) RecordPhase(ctx context.Context, phase string, d time.Duration
 	}
 	e.pollPhaseDuration.Record(ctx, durMS(d),
 		metric.WithAttributes(attribute.String("phase", phase)))
+}
+
+// RecordSessionLag records one session appear or leave lag (kind "appear" or
+// "leave") in the matching histogram. nil-safe.
+func (e *Emitter) RecordSessionLag(kind string, d time.Duration) {
+	if e == nil {
+		return
+	}
+	h := e.appearLag
+	if kind == "leave" {
+		h = e.leaveLag
+	}
+	if h == nil {
+		return
+	}
+	h.Record(context.Background(), d.Seconds())
+}
+
+// RecordDiscoveryForced counts one gate-forced discovery by reason. nil-safe.
+func (e *Emitter) RecordDiscoveryForced(reason string) {
+	if e == nil || e.discoveryForced == nil {
+		return
+	}
+	e.discoveryForced.Add(context.Background(), 1, metric.WithAttributes(attribute.String("reason", reason)))
+}
+
+// RecordDiscoveryBudgetExhausted counts one pid that used up its try budget, by
+// kind. nil-safe.
+func (e *Emitter) RecordDiscoveryBudgetExhausted(kind string) {
+	if e == nil || e.discoveryBudgetExhausted == nil {
+		return
+	}
+	e.discoveryBudgetExhausted.Add(context.Background(), 1, metric.WithAttributes(attribute.String("kind", kind)))
 }
 
 // RecordScan records one transcript scan: duration under `mode`, and (for real

@@ -338,3 +338,23 @@ func TestScan_RecordsResolveSubPhasesAndHeldGauges(t *testing.T) {
 		t.Errorf("held gauges = %v, want [[%d %d]]", rec.held, r.m.FilesHeldLastScan(), len(sessions))
 	}
 }
+
+// The Monitor hands the recorder to its facts reader (which reports the session
+// lag and discovery gate metrics) as well as keeping it for its own phases.
+func TestSetPhaseRecorderReachesTheFactsReader(t *testing.T) {
+	r := newRig(t)
+	rec := &dirtyRec{}
+	var got any
+	r.m.rd.facts = setRecFacts{Facts: r.m.rd.facts, set: func(v any) { got = v }}
+	r.m.SetPhaseRecorder(rec)
+	if got != rec {
+		t.Errorf("facts reader recorder = %v, want the phase recorder", got)
+	}
+}
+
+type setRecFacts struct {
+	Facts
+	set func(any)
+}
+
+func (s setRecFacts) SetRecorder(r any) { s.set(r) }
