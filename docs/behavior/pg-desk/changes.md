@@ -629,7 +629,12 @@ anchor work item stays open, and nothing would ever correct it. pg-desk therefor
 for `pr`, and only for that population:
 
 - **Population.** The PRs the open-anchor gauge ages (`pg_desk_pr_open_anchor_oldest_hydration_age_seconds`):
-  not hidden, with at least one open anchor, whose stored row still says open. No other PR is swept.
+  not hidden, with at least one open anchor, whose stored row still says open; and, because no change
+  event reaches the decider for a hidden PR already stored as merged or closed, every hidden PR with at
+  least one open anchor whose stored row says merged or closed (the population of
+  `pg_desk_pr_open_anchors_hidden_finished`). Re-hydrating it runs the decider's closure rule, which closes
+  the anchor. A hidden PR whose stored row still says open keeps its anchor and is never swept. No other
+  PR is swept.
 - **Age.** A PR in that population whose last hydration (else its first-seen time) is older than
   `sweep.max_age` MUST be re-hydrated, oldest first. The sweep MUST NOT use any other age setting, and it
   does not read `sweep.max_per_poll` or the hydration budget.

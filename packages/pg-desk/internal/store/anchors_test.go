@@ -152,13 +152,27 @@ func TestSweepPRAnchors(t *testing.T) {
 	          VALUES ('o/r','pr','o/r#8','hidden','{"value":true,"reason":"x"}','pg-desk','t','2026-10-01T00:00:00Z')`)
 	anchor("c3", "closed", pr(9, open, "2026-09-01T00:00:00Z", ""))
 	anchor("c4", "open", "o/r#99")
+	// Hidden: a finished one is due (oldest among the due, hydrated
+	// 2026-09-15), a hidden one still open and a recently hydrated finished
+	// one are not.
+	hide := func(id string) {
+		mustExec(`INSERT INTO annotation (repo, entity_type, entity_id, key, value, origin, set_by, set_at)
+		          VALUES ('o/r','pr',?,'hidden','{"value":true,"reason":"x"}','pg-desk','t','2026-10-01T00:00:00Z')`, id)
+	}
+	closedFacts := `{"pr_show":{"state":"merged"}}`
+	hide(pr(10, closedFacts, "2026-09-15T00:00:00Z", ""))
+	anchor("d1", "open", "o/r#10")
+	hide(pr(11, open, "2026-09-01T00:00:00Z", ""))
+	anchor("d2", "open", "o/r#11")
+	hide(pr(12, closedFacts, "2026-10-10T23:00:00Z", ""))
+	anchor("d3", "open", "o/r#12")
 
 	day := 24 * time.Hour
 	got, err := s.SweepPRAnchors(context.Background(), now, day, time.Hour, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"o/r#3", "o/r#2", "o/r#6", "o/r#1"}
+	want := []string{"o/r#3", "o/r#10", "o/r#2", "o/r#6", "o/r#1"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("sweep = %v, want %v (oldest first)", got, want)
 	}

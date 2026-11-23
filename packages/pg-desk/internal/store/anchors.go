@@ -165,8 +165,12 @@ func (s *Store) loadAnchorPRs(ctx context.Context) (map[string]anchorPR, error) 
 
 // SweepPRAnchors returns up to limit ids of the PRs the age sweep should
 // re-hydrate at now: the PRs CountPRAnchors counts in OldestHydrationAgeSeconds
-// (an open anchor, not hidden, a stored row that still says open) whose last
-// hydration is older than maxAge, oldest first (ties by id). A PR whose
+// (an open anchor, not hidden, a stored row that still says open) plus the
+// PRs it counts in OpenHiddenFinished (an open anchor, hidden, a stored row
+// that says merged or closed), whose last hydration is older than maxAge,
+// oldest first (ties by id). The hidden finished ones are re-read so the
+// decider runs its closure rule for them, which no change event does for a PR
+// stored as finished before that rule existed. A PR whose
 // read_attempt_at is newer than retryAfter ago is skipped, so a PR that keeps
 // failing to hydrate does not hold the front of the queue; the caller writes
 // the attempt time.
@@ -181,7 +185,13 @@ func (s *Store) SweepPRAnchors(ctx context.Context, now time.Time, maxAge, retry
 	}
 	var due []cand
 	for id, p := range prs {
-		if p.hidden || !p.present || p.closed {
+		if !p.present {
+			continue
+		}
+		// A visible PR is due while its row still says open; a hidden one
+		// while its row says merged or closed (a hidden open PR keeps its
+		// anchor, so it is never due).
+		if p.hidden != p.closed {
 			continue
 		}
 		since, perr := time.Parse(time.RFC3339, p.since)
