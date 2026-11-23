@@ -773,3 +773,33 @@ func (s *Reader) PathsByFiles(ids []int64) (map[int64][]string, error) {
 	}
 	return out, nil
 }
+
+// CurrentPathsByIDs is AllCurrentPaths restricted to the given file ids. A file
+// with no open path has no entry.
+func (s *Reader) CurrentPathsByIDs(ids []int64) (map[int64][]string, error) {
+	out := map[int64][]string{}
+	for len(ids) > 0 {
+		n := min(len(ids), idChunk)
+		ph, args := idArgs(ids[:n])
+		ids = ids[n:]
+		rows, err := s.q.Query(`SELECT file_id,path FROM paths WHERE closed_ns IS NULL AND file_id IN (`+ph+`) ORDER BY file_id,path`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			var p string
+			if err := rows.Scan(&id, &p); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			out[id] = append(out[id], p)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		_ = rows.Close()
+	}
+	return out, nil
+}

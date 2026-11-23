@@ -205,6 +205,17 @@ type Daemon struct {
 	// OnOffsets hook); the status loop Lstats the ones inside status.fresh.
 	touchedMu sync.Mutex
 	touched   map[int64]int64
+	// covTouched is every file whose offsets changed since the incremental
+	// coverage pass last took it (guarded by touchedMu).
+	covTouched map[int64]struct{}
+	// covDirty and covFull are the file ids the file tracker reported, and
+	// whether a whole reread happened, since the incremental coverage pass last
+	// took them (guarded by rowsMu).
+	covDirty map[int64]struct{}
+	covFull  bool
+	// covMu guards covc, the incremental coverage state (see covcache.go).
+	covMu sync.Mutex
+	covc  covCache
 	// rows is the status loop's cached copy of the file rows and current paths,
 	// kept current from the store file tracker (see statusRows).
 	rowsMu    sync.Mutex

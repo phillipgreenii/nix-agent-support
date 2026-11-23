@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"iter"
+	"sort"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
@@ -60,6 +61,20 @@ func (v fileView) maxID() int64 {
 	}
 	c := v.chunks[len(v.chunks)-1]
 	return c[len(c)-1].ID
+}
+
+// get returns the row with the id.
+func (v fileView) get(id int64) (store.File, bool) {
+	ci := sort.Search(len(v.chunks), func(i int) bool { return v.chunks[i][len(v.chunks[i])-1].ID >= id })
+	if ci == len(v.chunks) {
+		return store.File{}, false
+	}
+	c := v.chunks[ci]
+	i := sort.Search(len(c), func(i int) bool { return c[i].ID >= id })
+	if i < len(c) && c[i].ID == id {
+		return c[i], true
+	}
+	return store.File{}, false
 }
 
 // with returns a view in which each of rows (id-ascending) replaces the row of
@@ -170,10 +185,19 @@ func (d *Daemon) syncFileRows(ctx context.Context) error {
 	})
 	if err != nil {
 		d.rowsFiles, d.rowsOK = fileView{}, false
+		d.covFull = true
 		return err
 	}
 	if whole {
 		d.rowsBuilt = now
+		d.covFull = true
+	} else {
+		if d.covDirty == nil {
+			d.covDirty = make(map[int64]struct{}, len(ids))
+		}
+		for _, id := range ids {
+			d.covDirty[id] = struct{}{}
+		}
 	}
 	d.rowsFiles, d.rowsOK = view, true
 	return nil

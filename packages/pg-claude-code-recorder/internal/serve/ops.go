@@ -101,6 +101,10 @@ func (d *Daemon) computeCoverageModeCtx(ctx context.Context, view string, withSu
 	// One read transaction for every statement: one lock round trip instead of
 	// one per statement, and the figures come from one snapshot.
 	// Only the reads run under the snapshot; the Lstat loop runs after it closes.
+	if view == "summary" && !withSummary && mode == statLazy && d.cfg.StatusFresh > 0 {
+		// The status loop's pass: only what changed since the last one is redone.
+		return d.coverageIncremental(ctx)
+	}
 	var in coverageInputs
 	err := d.st.ReadTxCtx(ctx, func(rd *store.Reader) error {
 		var e error
@@ -276,7 +280,6 @@ func (d *Daemon) computeCoverageOver(ctx context.Context, in coverageInputs, vie
 			}
 		}
 		var fc wire.FileCoverage
-		var parseS float64
 		gl := lagGens[f.ID] // zero when the file has no tracked current generation
 		if mode == statLazy {
 			var stat bool
@@ -287,34 +290,48 @@ func (d *Daemon) computeCoverageOver(ctx context.Context, in coverageInputs, vie
 		} else {
 			fc = d.fileCoverage(f, p, byGen[genKey{f.ID, f.CurGen}], parse[genKey{f.ID, f.CurGen}], now)
 		}
-		if fc.ParseLagBytes > 0 && !gl.UnparsedSince.IsZero() {
-			parseS = max(0, now.Sub(gl.UnparsedSince).Seconds())
-		}
-		if fc.ParseLagBytes > 0 {
-			if fc.ParseLagBytes > cov.ParseLagBytesMax {
-				cov.ParseLagBytesMax = fc.ParseLagBytes
-			}
-			if parseS > cov.ParseLagSecondsMax {
-				cov.ParseLagSecondsMax = parseS
-			}
-		}
-		if fc.CopyLagBytes > cov.CopyLagBytesMax {
-			cov.CopyLagBytesMax = fc.CopyLagBytes
-			cov.Worst = &wire.Worst{FileID: f.ID, Path: p, CopyLagBytes: fc.CopyLagBytes}
-		}
-		if fc.CopyLagS > cov.CopyLagSecondsMax {
-			cov.CopyLagSecondsMax = fc.CopyLagS
-		}
+		accumulateLag(&cov, f, p, fc, gl, now)
 		if view == "files" {
 			cov.FileList = append(cov.FileList, fc)
 		}
 	}
+	d.finishCoverage(&cov, roots, counts, kinds, in.summary, in.stages, in.stagesOK, mode, exceptions)
+	return cov, nil
+}
+
+// accumulateLag folds one file's lag figures into the maxima of cov.
+func accumulateLag(cov *wire.Coverage, f store.File, p string, fc wire.FileCoverage, gl parser.GenLag, now time.Time) {
+	var parseS float64
+	if fc.ParseLagBytes > 0 && !gl.UnparsedSince.IsZero() {
+		parseS = max(0, now.Sub(gl.UnparsedSince).Seconds())
+	}
+	if fc.ParseLagBytes > 0 {
+		if fc.ParseLagBytes > cov.ParseLagBytesMax {
+			cov.ParseLagBytesMax = fc.ParseLagBytes
+		}
+		if parseS > cov.ParseLagSecondsMax {
+			cov.ParseLagSecondsMax = parseS
+		}
+	}
+	if fc.CopyLagBytes > cov.CopyLagBytesMax {
+		cov.CopyLagBytesMax = fc.CopyLagBytes
+		cov.Worst = &wire.Worst{FileID: f.ID, Path: p, CopyLagBytes: fc.CopyLagBytes}
+	}
+	if fc.CopyLagS > cov.CopyLagSecondsMax {
+		cov.CopyLagSecondsMax = fc.CopyLagS
+	}
+}
+
+// finishCoverage fills the parts of cov that do not come from the per-file
+// loop: the roots, the summary aggregates, the unparsed kinds, the stage counts
+// and the backfill figures.
+func (d *Daemon) finishCoverage(cov *wire.Coverage, roots []string, counts, kinds map[string]int, summary *parser.Summary, stages []store.StageRow, stagesOK bool, mode statMode, exceptions int) {
 	for _, root := range roots {
 		_, err := os.Stat(root)
 		cov.Roots = append(cov.Roots, wire.RootCoverage{Path: root, Present: err == nil, Files: counts[root]})
 	}
-	if in.summary != nil { // nil when the caller does not read the aggregates
-		sum := *in.summary
+	if summary != nil { // nil when the caller does not read the aggregates
+		sum := *summary
 		cov.BadLines = sum.BadLines
 		cov.UnknownKeys = []wire.UnknownKey{}
 		for _, u := range sum.UnknownKeys {
@@ -326,8 +343,8 @@ func (d *Daemon) computeCoverageOver(ctx context.Context, in coverageInputs, vie
 		cov.UnparsedKinds = append(cov.UnparsedKinds, wire.UnparsedKind{Kind: k, Files: n})
 	}
 	sort.Slice(cov.UnparsedKinds, func(i, j int) bool { return cov.UnparsedKinds[i].Kind < cov.UnparsedKinds[j].Kind })
-	if in.stagesOK {
-		for _, r := range in.stages {
+	if stagesOK {
+		for _, r := range stages {
 			switch r.Stage {
 			case store.StageHeld:
 				cov.Held++
@@ -344,7 +361,6 @@ func (d *Daemon) computeCoverageOver(ctx context.Context, in coverageInputs, vie
 	if mode == statLazy {
 		d.statExceptions.Store(int64(exceptions))
 	}
-	return cov, nil
 }
 
 // fileCoverage is one file's copy and parse state against the original on
@@ -412,6 +428,10 @@ func (d *Daemon) noteTouched(file int64, _ int, _, _ int64, at time.Time) {
 		d.touched = map[int64]int64{}
 	}
 	d.touched[file] = at.UnixNano()
+	if d.covTouched == nil {
+		d.covTouched = map[int64]struct{}{}
+	}
+	d.covTouched[file] = struct{}{}
 	d.touchedMu.Unlock()
 }
 

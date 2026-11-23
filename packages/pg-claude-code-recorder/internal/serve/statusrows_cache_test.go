@@ -49,14 +49,15 @@ func TestStatusRefreshReadsOnlyTheTablesACommitChanged(t *testing.T) {
 		t.Fatalf("a refresh with no commit issued %d statements, want 0", q)
 	}
 	commit(&store.Rec{T: store.TState, At: 5, File: 100001, State: "ok"})
-	// One FilesByIDs for the changed file, plus the row count and largest id
-	// check that catches an insert the tracker missed.
-	if q := refresh("file-only commit"); q != 2 {
-		t.Fatalf("a commit that touched no path or stage: %d statements, want 2 (FilesByIDs and the count check)", q)
+	// One FilesByIDs for the changed file, the row count and largest id check
+	// that catches an insert the tracker missed, and the current paths of the
+	// named file (the coverage pass keeps its own copy of them).
+	if q := refresh("file-only commit"); q != 3 {
+		t.Fatalf("a commit that touched no path or stage: %d statements, want 3 (FilesByIDs, the count check and the file's paths)", q)
 	}
 	commit(&store.Rec{T: store.TPath, At: 6, File: 100002, Path: filepath.Join(e.claude, "projects", "example-proj", "moved.jsonl")})
 	if q := refresh("path commit"); q != 3 {
-		t.Fatalf("a path commit: %d statements, want 3 (the file rows, their check, and paths)", q)
+		t.Fatalf("a path commit: %d statements, want 3 (the file rows, their check, and the file's paths)", q)
 	}
 	// A process observation moves the lifecycle model counter but changes no
 	// conv_stage row, so the refresh reads nothing: the live stream of

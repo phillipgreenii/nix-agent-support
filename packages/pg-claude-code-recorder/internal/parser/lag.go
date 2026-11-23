@@ -394,3 +394,16 @@ func (h *lagOldHeap) Pop() any {
 	*h = old[:len(old)-1]
 	return x
 }
+
+// Generation is the figures of one generation of one file (false when the
+// state tracks none), the single-key form of CurrentGenerationsInto.
+func (l *lagState) Generation(file int64, gen int) (GenLag, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	k := lagKey{file, gen}
+	lg, ok := l.gens[k]
+	if !ok {
+		return GenLag{}, false
+	}
+	return l.genLag(k, lg), true
+}
