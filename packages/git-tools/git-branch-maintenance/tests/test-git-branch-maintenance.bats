@@ -754,6 +754,19 @@ MOCK
     [ ! -e "$GBM_TMP_ROOT/git-branch-maintenance-777" ]
 }
 
+@test "orphans are found when GBM_TMP_ROOT is a symlink (macOS /tmp)" {
+    use_private_tmp_root
+    local real="$MOCK_DIR/real-tmp"
+    mkdir -p "$real/git-branch-maintenance-888"
+    touch -t 202001010000 "$real/git-branch-maintenance-888"
+    rmdir "$GBM_TMP_ROOT"
+    ln -s "$real" "$GBM_TMP_ROOT"
+    export GBM_ORPHAN_MIN_AGE_MIN=0
+    run_git_branch_maintenance
+    [ "$status" -eq 0 ]
+    [ ! -e "$real/git-branch-maintenance-888" ]
+}
+
 # Shim that records, when the temporary worktree is removed, whether tracked
 # files were checked out in it. Result lands in $WT_STATE_LOG.
 install_worktree_state_git() {

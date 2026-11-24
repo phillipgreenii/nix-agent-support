@@ -322,7 +322,7 @@ remove_orphaned_tmp_worktrees() {
       echo "Removing orphaned temporary worktree directory: $dir"
       rm -rf "$dir"
     fi
-  done < <(find "$GBM_TMP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'git-branch-maintenance-*' -mmin "+$GBM_ORPHAN_MIN_AGE_MIN" ! -name "git-branch-maintenance-$$" -print0 2>/dev/null)
+  done < <(find -H "$GBM_TMP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'git-branch-maintenance-*' -mmin "+$GBM_ORPHAN_MIN_AGE_MIN" ! -name "git-branch-maintenance-$$" -print0 2>/dev/null)
 }
 
 cleanup_tmp_worktree() {
