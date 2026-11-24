@@ -171,6 +171,7 @@ type Daemon struct {
 	truncate   func(time.Duration) (bool, error)
 	usedMu     sync.Mutex
 	usedBytes  int64
+	usedAt     time.Time // when usedBytes was last computed
 	// ctx is the daemon root context, made in Open; Close cancels it. stop is a
 	// read-only alias of ctx.Done() (nil, which never fires, on a literal built
 	// without Open). gor tracks every goLoop goroutine.
@@ -1185,6 +1186,13 @@ func (d *Daemon) blobPruneLoop() {
 // copiesPrivateEvery is how often a new private-size sweep of copies/ starts.
 const copiesPrivateEvery = time.Hour
 
+// stateUsedEvery is how often the state-used figure is recomputed. The figure
+// sums every generation and snapshot row (Reader.CopyBytes, a whole-table
+// scan with a correlated subquery per row), which at the 5 second refresh
+// pace was the largest read-side cost of the pass; a size gauge does not need
+// 5 second resolution.
+const stateUsedEvery = time.Minute
+
 // refreshGaugesPass is the body of one refresh_gauges pass.
 func (d *Daemon) refreshGaugesPass() {
 	collectRuntimeMetrics(d.obs.Reg, filepath.Join(d.cfg.StateDir, store.DBName+"-wal"))
@@ -1200,8 +1208,11 @@ func (d *Daemon) refreshGaugesPass() {
 	// Database-derived, no walk (see StateUsedBytes); a failed read keeps the
 	// last figure.
 	d.usedMu.Lock()
-	if u, err := StateUsedBytes(&d.st.Reader, d.cfg.StateDir); err == nil {
-		d.usedBytes = u
+	if now := d.clock.Now(); d.usedAt.IsZero() || now.Sub(d.usedAt) >= stateUsedEvery {
+		if u, err := StateUsedBytes(&d.st.Reader, d.cfg.StateDir); err == nil {
+			d.usedBytes = u
+			d.usedAt = now
+		}
 	}
 	used := d.usedBytes
 	d.usedMu.Unlock()

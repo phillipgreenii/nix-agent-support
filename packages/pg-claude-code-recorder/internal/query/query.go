@@ -22,6 +22,19 @@ type Resolver interface {
 	Line(file int64, gen int, off int64, ln int) ([]byte, error)
 }
 
+// LineReader reads many lines of one generation from a single open copy.
+type LineReader = interface {
+	Line(off int64, ln int) ([]byte, error)
+	Close() error
+}
+
+// LineOpener is an optional Resolver capability: a query that returns raw
+// lines opens each (file, generation) once through it rather than once per
+// row through Line.
+type LineOpener interface {
+	OpenLines(file int64, gen int) (LineReader, error)
+}
+
 // Engine answers query and search over one database.
 type Engine struct {
 	DB      *sql.DB
@@ -239,12 +252,13 @@ func (e *Engine) rows(tx store.Querier, req Request, ans *Answer) *wire.Error {
 		hits = hits[:limit]
 	}
 	ans.Columns = names
+	rl := &rawLines{res: e.Res, open: map[[2]int64]LineReader{}}
+	defer rl.close()
 	for _, h := range hits {
 		ans.Rows = append(ans.Rows, h.row)
 		ans.Records = append(ans.Records, h.ref)
 		if req.Raw && e.Res != nil {
-			raw, _ := e.Res.Line(h.file, h.ref.Gen, h.ref.Offset, h.ln)
-			ans.Raw = append(ans.Raw, string(raw))
+			ans.Raw = append(ans.Raw, string(rl.line(h.file, h.ref.Gen, h.ref.Offset, h.ln)))
 		}
 	}
 	if req.Follow != "" {
@@ -259,6 +273,42 @@ func (e *Engine) rows(tx store.Querier, req Request, ans *Answer) *wire.Error {
 		ans.Links = links
 	}
 	return nil
+}
+
+// rawLines reads the raw lines of one answer, keeping each (file, generation)
+// copy open for the whole answer when the resolver can (LineOpener).
+type rawLines struct {
+	res  Resolver
+	open map[[2]int64]LineReader // nil reader: the copy could not be opened
+}
+
+// line returns the raw line, or nil when it cannot be read (the per-row Line
+// read did not report the error either).
+func (r *rawLines) line(file int64, gen int, off int64, ln int) []byte {
+	lo, ok := r.res.(LineOpener)
+	if !ok {
+		raw, _ := r.res.Line(file, gen, off, ln)
+		return raw
+	}
+	k := [2]int64{file, int64(gen)}
+	lr, seen := r.open[k]
+	if !seen {
+		lr, _ = lo.OpenLines(file, gen)
+		r.open[k] = lr
+	}
+	if lr == nil {
+		return nil
+	}
+	raw, _ := lr.Line(off, ln)
+	return raw
+}
+
+func (r *rawLines) close() {
+	for _, lr := range r.open {
+		if lr != nil {
+			_ = lr.Close()
+		}
+	}
 }
 
 func hits0files[T any](h []T, f func(T) int64) []int64 {

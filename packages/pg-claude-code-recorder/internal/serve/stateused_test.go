@@ -4,10 +4,38 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-claude-code-recorder/internal/store"
 )
+
+// The refresh pass recomputes the state-used figure (a whole-table scan of the
+// generations and snapshots) at most once per stateUsedEvery, not every pass.
+func TestRefreshGaugesPassThrottlesStateUsedScan(t *testing.T) {
+	d, _, c := openCounting(t, "state-used-throttle-counting")
+	clk := clock.NewFake(time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC))
+	d.clock = clk
+	const scan = "FROM generations g"
+	c.Reset()
+	d.refreshGaugesPass()
+	if n := c.Matching(scan); n != 1 {
+		t.Fatalf("first pass ran the scan %d times, want 1", n)
+	}
+	for i := 0; i < 11; i++ { // 11 passes, 5 s apart: 55 s, inside the interval
+		clk.Advance(5 * time.Second)
+		d.refreshGaugesPass()
+	}
+	if n := c.Matching(scan); n != 1 {
+		t.Fatalf("scan ran %d times within %v, want 1", n, stateUsedEvery)
+	}
+	clk.Advance(5 * time.Second) // 60 s since the first
+	d.refreshGaugesPass()
+	if n := c.Matching(scan); n != 2 {
+		t.Fatalf("scan ran %d times after the interval, want 2", n)
+	}
+}
 
 func TestStateUsedBytesIsDatabaseDerivedNoWalk(t *testing.T) {
 	e := newEnv(t, false)

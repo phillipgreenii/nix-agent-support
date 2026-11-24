@@ -1456,6 +1456,37 @@ func (p *Parser) Line(file int64, gen int, off int64, ln int) ([]byte, error) {
 	return bytes.TrimRight(buf, "\n"), nil
 }
 
+// LineReader reads stored lines of one generation through a single opened
+// pointer, so a query returning many raw lines of the same copy opens it once
+// instead of once per line.
+type LineReader struct{ fh *store.Pointer }
+
+// OpenLines opens the copy of (file, gen) for repeated line reads. The caller
+// MUST Close it.
+func (p *Parser) OpenLines(file int64, gen int) (interface {
+	Line(off int64, ln int) ([]byte, error)
+	Close() error
+}, error,
+) {
+	fh, err := p.cfg.Store.OpenPointer(file, gen)
+	if err != nil {
+		return nil, err
+	}
+	return &LineReader{fh: fh}, nil
+}
+
+// Line returns the raw bytes of the stored line at off of length ln.
+func (r *LineReader) Line(off int64, ln int) ([]byte, error) {
+	buf := make([]byte, ln)
+	if _, err := r.fh.ReadAt(buf, off); err != nil && err != io.EOF {
+		return nil, err
+	}
+	return bytes.TrimRight(buf, "\n"), nil
+}
+
+// Close releases the opened copy.
+func (r *LineReader) Close() error { return r.fh.Close() }
+
 // fieldNameID returns the id of a field name, creating its row on first sight.
 // The name cache survives across lines and transactions, so a name costs
 // statements only the first time. Called inside a write transaction.
