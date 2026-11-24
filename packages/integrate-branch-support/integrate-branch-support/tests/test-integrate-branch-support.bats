@@ -114,7 +114,7 @@ stub_bd() {
   local json="$1" code="${2:-0}"
   printf '%s' "$json" >"$STUB_BIN/bd.out"
   cat >"$STUB_BIN/bd" <<EOS
-#!/usr/bin/env bash
+#!$BASH
 cat "$STUB_BIN/bd.out"
 exit $code
 EOS
@@ -283,8 +283,8 @@ run_with_bd_only() {
 
 @test "open_pr: an open PR surfaces as open_pr.number" {
   mkdir -p "$STUB_BIN"
-  cat >"$STUB_BIN/gh" <<'EOF'
-#!/usr/bin/env bash
+  cat >"$STUB_BIN/gh" <<EOF
+#!$BASH
 echo '{"number":42,"state":"OPEN","url":"https://example.invalid/o/r/pull/42"}'
 EOF
   chmod +x "$STUB_BIN/gh"
@@ -296,8 +296,8 @@ EOF
 
 @test "open_pr: a merged PR is treated as no open PR" {
   mkdir -p "$STUB_BIN"
-  cat >"$STUB_BIN/gh" <<'EOF'
-#!/usr/bin/env bash
+  cat >"$STUB_BIN/gh" <<EOF
+#!$BASH
 echo '{"number":42,"state":"MERGED","url":"https://example.invalid/o/r/pull/42"}'
 EOF
   chmod +x "$STUB_BIN/gh"
@@ -332,8 +332,8 @@ EOF
 @test "strategy: an open PR (undeclared, remote present) infers pull-request" {
   git remote add origin https://example.invalid/o/r.git
   mkdir -p "$STUB_BIN"
-  cat >"$STUB_BIN/gh" <<'EOF'
-#!/usr/bin/env bash
+  cat >"$STUB_BIN/gh" <<EOF
+#!$BASH
 echo '{"number":42,"state":"OPEN","url":"https://example.invalid/o/r/pull/42"}'
 EOF
   chmod +x "$STUB_BIN/gh"
@@ -369,8 +369,8 @@ EOF
   git remote add origin https://example.invalid/o/r.git
   git config pgii-integrate-branch.strategy ff-merge-to-main
   mkdir -p "$STUB_BIN"
-  cat >"$STUB_BIN/gh" <<'EOF2'
-#!/usr/bin/env bash
+  cat >"$STUB_BIN/gh" <<EOF2
+#!$BASH
 echo '{"number":42,"state":"OPEN","url":"https://example.invalid/o/r/pull/42"}'
 EOF2
   chmod +x "$STUB_BIN/gh"
@@ -399,8 +399,8 @@ EOF2
 @test "use case 5: a closed PR counts as no open PR and does not infer pull-request" {
   git remote add origin https://example.invalid/o/r.git
   mkdir -p "$STUB_BIN"
-  cat >"$STUB_BIN/gh" <<'EOF2'
-#!/usr/bin/env bash
+  cat >"$STUB_BIN/gh" <<EOF2
+#!$BASH
 echo '{"number":42,"state":"CLOSED","url":"https://example.invalid/o/r/pull/42"}'
 EOF2
   chmod +x "$STUB_BIN/gh"
@@ -696,7 +696,7 @@ stub_pg_hooks() {
   local rc="${1:-0}" msg="${2:-}"
   printf '%s' "$msg" >"$STUB_BIN/pg-hooks-stderr"
   cat >"$STUB_BIN/pg-hooks" <<STUB
-#!/usr/bin/env bash
+#!$BASH
 printf 'cwd=%s\n' "\$(pwd -P)" >>"$STUB_BIN/pg-hooks-calls"
 printf 'args=%s\n' "\$*" >>"$STUB_BIN/pg-hooks-calls"
 if [ "\$1" = status ]; then
@@ -964,7 +964,7 @@ assert_no_hook_config_created() {
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
   add_worktree feat
   cat >"$STUB_BIN/prek" <<STUB
-#!/usr/bin/env bash
+#!$BASH
 echo called >>"$STUB_BIN/prek-calls"
 STUB
   chmod +x "$STUB_BIN/prek"
@@ -992,7 +992,7 @@ STUB
 stub_bgrun() {
   local rc="${1:-0}" out="${2:-pg-hooks-refresh 4242 /tmp/bg.log}"
   cat >"$STUB_BIN/bgrun" <<STUB
-#!/usr/bin/env bash
+#!$BASH
 echo call >>"$STUB_BIN/bgrun-calls"
 for a in "\$@"; do printf 'arg=%s\n' "\$a" >>"$STUB_BIN/bgrun-calls"; done
 printf '%s\n' '$out'
