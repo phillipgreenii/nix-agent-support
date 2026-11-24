@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
@@ -139,5 +140,55 @@ func TestRunPRSweepSkips(t *testing.T) {
 	runPRSweep(cmd, st, start)
 	if len(h.calls) != 0 || !bytes.Contains(errb.Bytes(), []byte("pr age sweep skipped")) {
 		t.Errorf("spent period: calls=%v stderr=%q", h.calls, errb.String())
+	}
+}
+
+// ctxHydrator records the deadline of the context each read gets.
+type ctxHydrator struct{ left []time.Duration }
+
+func (h *ctxHydrator) RunEntityChange(ctx context.Context, _, _ string, _ gather.ChangeKind, _ pipeline.EntityChangeOptions) (pipeline.EntityChangeResult, error) {
+	if dl, ok := ctx.Deadline(); ok {
+		h.left = append(h.left, time.Until(dl))
+	}
+	return pipeline.EntityChangeResult{Written: true, Version: 2}, nil
+}
+
+// A re-read of a hidden finished PR takes about 10 s, so the sweep's budget
+// MUST be all the period leaves (25 s), not the catch-up's 10 s cap, or the
+// read is cancelled and the PR never closes its anchor.
+func TestRunPRSweepBudgetCoversASlowFinishedPRRead(t *testing.T) {
+	withReleaseVersion(t)
+	withHeartbeatClock(t, 0)
+	rs := newRIStore(t)
+	seedAnchoredPR(t, rs, 1, prSweepNow.Add(-config.DefaultSweepMaxAge-time.Hour))
+	h := &ctxHydrator{}
+	orig := newRefreshHydrator
+	t.Cleanup(func() { newRefreshHydrator = orig })
+	newRefreshHydrator = func(*config.Config, *store.Store) changes.Hydrator { return h }
+	st, err := store.Open(rs.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	cmd, _ := newCatchUpCmd(context.Background())
+	runPRSweep(cmd, st, heartbeatClock())
+	if len(h.left) != 1 || h.left[0] < 20*time.Second {
+		t.Fatalf("read deadlines left = %v, want one above 20s", h.left)
+	}
+}
+
+// Later in the period the budget shrinks so the ledger read still fits.
+func TestPRSweepBudgetLeft(t *testing.T) {
+	s := prSweepNow
+	for _, tc := range []struct{ elapsed, want time.Duration }{
+		{0, PRSweepBudget}, {10 * time.Second, 15 * time.Second}, {24 * time.Second, time.Second},
+	} {
+		if got := prSweepBudgetLeft(s, s.Add(tc.elapsed)); got != tc.want {
+			t.Errorf("elapsed %s: budget %s, want %s", tc.elapsed, got, tc.want)
+		}
+	}
+	if PRSweepBudget != 25*time.Second {
+		t.Errorf("PRSweepBudget = %s, want 25s", PRSweepBudget)
 	}
 }

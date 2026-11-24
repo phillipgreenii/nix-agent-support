@@ -27,13 +27,29 @@ const (
 	// runs each minute, so this is a rate, not a backlog limit: at 3 a minute
 	// 180 open-anchor PRs a hour are swept, far above what sweep.max_age needs.
 	PRSweepMaxRows = 3
-	// PRSweepBudget is the cap of the sweep's time budget; the heartbeat period
-	// can leave less (see catchUpBudgetLeft).
-	PRSweepBudget = 10 * time.Second
+	// PRSweepBudget is the cap of the sweep's time budget: all the period leaves
+	// once the ledger read and the margin are kept free, so a heartbeat that
+	// reaches the sweep at once can spend it; a later start leaves less (see
+	// prSweepBudgetLeft). It was 10 s, which cancelled the re-read of a hidden
+	// finished PR (its pr show takes about that long) every time, so the PR never
+	// closed its anchor and only stepped aside for PRSweepRetryAfter.
+	PRSweepBudget = heartbeatPeriod - heartbeatLedgerShowTimeout - catchUpMargin
 	// PRSweepRetryAfter is how long a PR whose hydration just failed is left
 	// alone, so one PR that keeps failing does not hold the front of the queue.
 	PRSweepRetryAfter = 30 * time.Minute
 )
+
+// prSweepBudgetLeft is the time the sweep may run when the heartbeat began at
+// start and it is now: PRSweepBudget, cut so that the step after it (the ledger
+// read) plus catchUpMargin still finishes inside the period. A result below
+// catchUpMinBudget means skip.
+func prSweepBudgetLeft(start, now time.Time) time.Duration {
+	left := heartbeatPeriod - heartbeatLedgerShowTimeout - catchUpMargin - now.Sub(start)
+	if left > PRSweepBudget {
+		return PRSweepBudget
+	}
+	return left
+}
 
 // prSweepOutcome is what one sweep pass did.
 type prSweepOutcome struct {
@@ -49,10 +65,7 @@ func runPRSweep(cmd *cobra.Command, st *store.Store, start time.Time) {
 	if Version == "dev" {
 		return
 	}
-	budget := catchUpBudgetLeft(start, heartbeatClock())
-	if budget > PRSweepBudget {
-		budget = PRSweepBudget
-	}
+	budget := prSweepBudgetLeft(start, heartbeatClock())
 	if budget < catchUpMinBudget {
 		_, _ = fmt.Fprintf(errOut, "heartbeat: pr age sweep skipped: the period has %s left\n", budget.Round(time.Second))
 		return
