@@ -808,14 +808,16 @@ find_nix_dir() {
 
 # bundle_refresh <old primary sha>: FF-4 (spec 4.5, D5). Run from the canonical
 # clone AFTER a successful ff-merge. When the landed diff (<old>..HEAD)
-# touches a stamp input -- flake.lock, flake.nix, or a stampPaths entry of the
+# touches a stamp input -- a flake.lock or flake.nix at any depth (e.g.
+# nix/flake.nix), or a stampPaths entry of the
 # current bundle's meta.json -- start the canonical clone's recorded
 # `reinstall` command in the background through bgrun. Prints exactly one
 # `FF-4: bundle refresh ...` line and ALWAYS returns 0: a refresh that is
 # skipped, cannot start, or later fails is reported, never a failed land.
 bundle_refresh() {
   local old="$1" common pgdir top gen="" cmd="" repo job out rc=0 nixdir=""
-  local -a inputs=(flake.lock flake.nix)
+  # A flake may live below the root (homelab: nix/flake.nix), so match at any depth.
+  local -a inputs=(":(glob)**/flake.lock" ":(glob)**/flake.nix")
   local p touched
 
   common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""

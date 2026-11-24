@@ -53,7 +53,8 @@ Options:
                       FF-4: run from the canonical clone after an ff-merge
                       that moved the primary branch from <old-sha>. When the
                       landed diff touches a stamp input (flake.lock,
-                      flake.nix, the bundle's stampPaths), start the clone's
+                      flake.nix at any depth such as nix/flake.nix, the
+                      bundle's stampPaths), start the clone's
                       pg-hooks `reinstall` command through bgrun. A `nix`
                       command is resolved without trusting the caller's PATH
                       (falls back to /run/current-system/sw/bin); when nix is

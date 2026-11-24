@@ -1060,6 +1060,28 @@ land_commit() {
   [[ "$output" == "FF-4: bundle refresh started"* ]]
 }
 
+@test "bundle-refresh: a non-root nix/flake.nix change starts the refresh" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  stub_bgrun
+  local old
+  old="$(land_commit nix/flake.nix)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+}
+
+@test "bundle-refresh: a non-root nix/flake.lock change starts the refresh" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  stub_bgrun
+  local old
+  old="$(land_commit nix/flake.lock)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+}
+
 @test "bundle-refresh: a change under a meta.json stampPaths entry starts the refresh" {
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
   make_bundle_state modules/hooks
