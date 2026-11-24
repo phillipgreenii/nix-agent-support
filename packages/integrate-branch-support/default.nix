@@ -20,4 +20,17 @@ in
   checks = {
     test-integrate-branch-support = integrate-branch-support.check;
   };
+
+  # Opt-in tier (INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS=1): the FF-1b pass-reuse
+  # tests (multi-commit fixtures with a linked worktree and a rebase; seconds per
+  # test). NOT a check: the flake publishes it under
+  # `legacyPackages.<system>.integration-checks` (ADR 0024 in nix-repo-base) so
+  # `nix flake check` never builds it, and no hook or gate runs it (global rule
+  # V-4). Build by name when the reuse decision changes:
+  # `nix build --no-link .#integration-checks.test-integrate-branch-support-pre-land-reuse`.
+  integration-checks = {
+    test-integrate-branch-support-pre-land-reuse = integrate-branch-support.check.overrideAttrs (_: {
+      INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS = "1";
+    });
+  };
 }

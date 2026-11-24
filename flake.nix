@@ -22734,6 +22734,13 @@
             inherit pkgs;
             bashBuilders = pkgs._agentSupportBashBuilders;
             beads = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
+          }).integration-checks
+          # integrate-branch-support's FF-1b pass-reuse tier
+          # (INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS=1), defined in its own default.nix
+          # beside its unit check.
+          // (import ./packages/integrate-branch-support {
+            inherit pkgs;
+            bashBuilders = pkgs._agentSupportBashBuilders;
           }).integration-checks;
 
           packages = {

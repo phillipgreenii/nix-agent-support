@@ -11,6 +11,9 @@ setup() {
   # is exported by the nix check, so it would otherwise be wiped (pg2-31f13).
   local scripts_dir_saved="${SCRIPTS_DIR:-}"
   local test_support_saved="${TEST_SUPPORT:-}"
+  # The opt-in switch of the FF-1b pass-reuse tier (see rl_require_tier below),
+  # also scrubbed by gfh_setup, so captured here and re-exported after it.
+  local reuse_tier_saved="${INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS:-}"
 
   # GFH_LIB is the one required file (tc-4ehow); nix package checks
   # export it.
@@ -21,6 +24,13 @@ setup() {
   fi
   # shellcheck disable=SC1090,SC1091
   source "$gfh_lib"
+
+  # Fast path: skip an opt-in-tier test before paying for the fixture (after
+  # the source, so teardown's gfh_teardown exists). rl_require_tier inside the
+  # fixtures stays the guarantee for a test whose name lacks the prefix.
+  if [[ $BATS_TEST_DESCRIPTION == "pre-land reuse"* && $reuse_tier_saved != 1 ]]; then
+    skip "needs INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS=1 (integration-checks.test-integrate-branch-support-pre-land-reuse)"
+  fi
 
   # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
   # allowlist reset + fresh HOME + hooks disabled): see pg2-31f13/pg2-gucfd.
@@ -40,6 +50,9 @@ setup() {
     export TEST_SUPPORT="$test_support_saved"
   fi
   export GFH_LIB="$gfh_lib"
+  if [[ -n $reuse_tier_saved ]]; then
+    export INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS="$reuse_tier_saved"
+  fi
 
   BIN="${SCRIPTS_DIR}/integrate-branch-support.sh"
   TEST_DIR="$GFH_REPO"
@@ -1324,6 +1337,22 @@ run_scrubbed_nix() {
 # Real git throughout (real branch, real rebase, real patch-id, real merge-base);
 # only pg-hooks is stubbed, because what is under test is the DECISION whether to
 # call it again. A "run" is one `pg-hooks run pre-land` call in the stub log.
+#
+# Opt-in tier (INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS=1): each of these tests builds
+# a multi-commit fixture with a linked worktree, rebases it and runs the tool
+# twice, so one test costs seconds, not milliseconds, and the ~57 of them kept the
+# package's suite from finishing inside the run-unit-tests hook cap. They are NOT
+# unit tests (global rule V-4): every test that uses rl_fixture or
+# rl_real_fixture skips unless the switch is set. Their gate is
+# `nix build --no-link .#integration-checks.test-integrate-branch-support-pre-land-reuse`
+# (ADR 0024 in nix-repo-base: outside `checks`, in no hook or land gate). Run it
+# when the FF-1b reuse decision (`--prek-branch-diff` reuse) changes.
+
+# rl_require_tier: skip the calling test unless the opt-in tier is switched on.
+rl_require_tier() {
+  [[ ${INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS:-} == 1 ]] ||
+    skip "needs INTEGRATE_BRANCH_SUPPORT_REUSE_TESTS=1 (integration-checks.test-integrate-branch-support-pre-land-reuse)"
+}
 
 rl_git() { git -c user.email=t@t -c user.name=t "$@"; }
 
@@ -1343,6 +1372,7 @@ rl_commit() {
 # docs; worktree `feat` is checked out and one commit on feat edits module a.
 # Leaves the cwd in the worktree with pg-hooks stubbed as a present bundle.
 rl_fixture() {
+  rl_require_tier
   rl_commit "$TEST_DIR" base flake.nix docs/x.md packages/a/go.mod packages/a/a.go \
     packages/b/go.mod packages/b/b.go packages/c/go.mod packages/c/c.go packages/d/go.mod packages/d/d.go
   printf 'module a\n\nrequire c v0.0.0\n\nreplace c => ../c\n' >"$TEST_DIR/packages/a/go.mod"
@@ -1783,6 +1813,7 @@ rl_expect_linked() {
 # --- real undeclared couplings (no go.mod replace edge), named by the reviewer --------------------
 # Each pair is lifted from this repo: the first path is edited on the branch, the second on main.
 rl_real_fixture() {
+  rl_require_tier
   local f
   mkdir -p "$TEST_DIR/packages/pg-desk/internal/focus" "$TEST_DIR/packages/pg-decider/internal/prchange" \
     "$TEST_DIR/packages/pg-decider/internal/rules/testdata/focus" "$TEST_DIR/packages/pa-monitor/internal/core/caffeinate/keepertest" \
