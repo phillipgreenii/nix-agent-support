@@ -36,64 +36,64 @@ setup() {
   MOCK_BD_LOG="$(mktemp)"
   MOCK_BD_STORE="$(mktemp -d)"
   export MOCK_BD_LOG MOCK_BD_STORE
-  cat >"$MOCK_BIN/bd" <<'MOCKBD'
-#!/usr/bin/env bash
-echo "$*" >>"$MOCK_BD_LOG"
-store="$MOCK_BD_STORE"
-case "$1" in
+  cat >"$MOCK_BIN/bd" <<MOCKBD
+#!$BASH
+echo "\$*" >>"\$MOCK_BD_LOG"
+store="\$MOCK_BD_STORE"
+case "\$1" in
 show)
-  if [[ -f $store/$2.json ]]; then
-    printf '{"data":[%s]}\n' "$(cat "$store/$2.json")"
+  if [[ -f \$store/\$2.json ]]; then
+    printf '{"data":[%s]}\\n' "\$(cat "\$store/\$2.json")"
   else
-    echo "mock bd show: no item $2" >&2
+    echo "mock bd show: no item \$2" >&2
     exit 1
   fi
   ;;
 create)
   shift
   title="" parent="" labels="" metadata='{}'
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-    --title) title="$2"; shift 2 ;;
-    --parent) parent="$2"; shift 2 ;;
-    --labels) labels="$2"; shift 2 ;;
-    --metadata) metadata="$2"; shift 2 ;;
+  while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+    --title) title="\$2"; shift 2 ;;
+    --parent) parent="\$2"; shift 2 ;;
+    --labels) labels="\$2"; shift 2 ;;
+    --metadata) metadata="\$2"; shift 2 ;;
     --actor) shift 2 ;;
     *) shift ;;
     esac
   done
-  n=$(($(find "$store" -name 'tc-q*.json' | wc -l) + 1))
-  id="tc-q$n"
-  jq -cn --arg id "$id" --arg t "$title" --arg p "$parent" --arg l "$labels" --argjson m "$metadata" \
-    '{id:$id,title:$t,status:"open",labels:($l|split(",")|map(select(.!=""))),metadata:$m}
-     + (if $p == "" then {} else {parent:$p} end)' >"$store/$id.json"
-  printf '{"data":[{"id":"%s"}]}\n' "$id"
+  n=\$((\$(find "\$store" -name 'tc-q*.json' | wc -l) + 1))
+  id="tc-q\$n"
+  jq -cn --arg id "\$id" --arg t "\$title" --arg p "\$parent" --arg l "\$labels" --argjson m "\$metadata" \\
+    '{id:\$id,title:\$t,status:"open",labels:(\$l|split(",")|map(select(.!=""))),metadata:\$m}
+     + (if \$p == "" then {} else {parent:\$p} end)' >"\$store/\$id.json"
+  printf '{"data":[{"id":"%s"}]}\\n' "\$id"
   ;;
 children)
-  # bd children shows `.parent`-linked items only, like the real thing.
-  jq -cs --arg p "$2" '{data: [.[] | select(.parent == $p)]}' "$store"/*.json
+  # bd children shows \`.parent\`-linked items only, like the real thing.
+  jq -cs --arg p "\$2" '{data: [.[] | select(.parent == \$p)]}' "\$store"/*.json
   ;;
 dep)
-  case "$2" in
+  case "\$2" in
   add) # dep add BLOCKED BLOCKER
-    echo "$3" >>"$store/blocks-$4.up"
+    echo "\$3" >>"\$store/blocks-\$4.up"
     echo '{"data":[{}]}'
     ;;
   list) # dep list ID --direction up : items ID blocks; --direction down : ID's blockers
-    case "$*" in
+    case "\$*" in
     *"--direction down"* | *"--direction=down"*)
-      for f in "$store"/blocks-*.up; do
-        [[ -f $f ]] || continue
-        if grep -qx "$3" "$f"; then
-          q="${f##*/blocks-}"
-          cat "$store/${q%.up}.json"
+      for f in "\$store"/blocks-*.up; do
+        [[ -f \$f ]] || continue
+        if grep -qx "\$3" "\$f"; then
+          q="\${f##*/blocks-}"
+          cat "\$store/\${q%.up}.json"
           echo
         fi
       done | jq -cs '{data: .}'
       ;;
     *)
-      if [[ -f $store/blocks-$3.up ]]; then
-        while read -r b; do cat "$store/$b.json"; echo; done <"$store/blocks-$3.up" | jq -cs '{data: .}'
+      if [[ -f \$store/blocks-\$3.up ]]; then
+        while read -r b; do cat "\$store/\$b.json"; echo; done <"\$store/blocks-\$3.up" | jq -cs '{data: .}'
       else
         echo '{"data":[]}'
       fi
@@ -105,7 +105,7 @@ dep)
 list) echo '{"data":[]}' ;;
 update) echo '{"data":[{}]}' ;;
 *)
-  echo "mock bd: unhandled subcommand: $1" >&2
+  echo "mock bd: unhandled subcommand: \$1" >&2
   exit 1
   ;;
 esac

@@ -34,7 +34,7 @@ setup() {
   bd_fixture_register_handoff_type
   # The builder composes <name>.bash + <name>.sh under strict mode; do the same.
   cat >"$TDIR/run-handoff-create" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "${SCRIPTS_DIR}/handoff-create.bash"
 source "${SCRIPTS_DIR}/handoff-create.sh"

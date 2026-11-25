@@ -18,23 +18,23 @@ setup() {
   SHIM_DIR="$(mktemp -d)"
   export BD_CALL_LOG="$SHIM_DIR/calls.log"
   : >"$BD_CALL_LOG"
-  cat >"$SHIM_DIR/bd" <<'SHIM'
-#!/usr/bin/env bash
-# Records argv; `create` echoes a fixed id (or fails per BD_SHIM_CREATE_FAIL);
-# `show` prints $BD_SHIM_SHOW_JSON.
-printf '%s\n' "${*//$'\n'/\\n}" >>"$BD_CALL_LOG"
-for a in "$@"; do
-  case "$a" in
+  cat >"$SHIM_DIR/bd" <<SHIM
+#!$BASH
+# Records argv; \`create\` echoes a fixed id (or fails per BD_SHIM_CREATE_FAIL);
+# \`show\` prints \$BD_SHIM_SHOW_JSON.
+printf '%s\\n' "\${*//\$'\\n'/\\\\n}" >>"\$BD_CALL_LOG"
+for a in "\$@"; do
+  case "\$a" in
   create)
-    if [ -n "${BD_SHIM_CREATE_FAIL:-}" ]; then
-      echo "$BD_SHIM_CREATE_FAIL" >&2
+    if [ -n "\${BD_SHIM_CREATE_FAIL:-}" ]; then
+      echo "\$BD_SHIM_CREATE_FAIL" >&2
       exit 1
     fi
     echo "shim-1"
     exit 0
     ;;
   show)
-    printf '%s\n' "$BD_SHIM_SHOW_JSON"
+    printf '%s\\n' "\$BD_SHIM_SHOW_JSON"
     exit 0
     ;;
   esac
@@ -46,7 +46,7 @@ SHIM
   export PATH
 
   cat >"$TEST_DIR/run-handoff-create" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "${SCRIPTS_DIR}/handoff-create.bash"
 source "${SCRIPTS_DIR}/handoff-create.sh"
@@ -173,18 +173,18 @@ assert_no_bd_call() { [ ! -s "$BD_CALL_LOG" ]; }
 @test "unregistered type: one retry as task, both creates identical but for the type" {
   # first create fails as an unregistered type, the retry (a second run of the
   # shim) must succeed: switch the failure off after the first call.
-  cat >"$SHIM_DIR/bd" <<'SHIM'
-#!/usr/bin/env bash
-printf '%s\n' "${*//$'\n'/\\n}" >>"$BD_CALL_LOG"
-for a in "$@"; do
-  case "$a" in
+  cat >"$SHIM_DIR/bd" <<SHIM
+#!$BASH
+printf '%s\\n' "\${*//\$'\\n'/\\\\n}" >>"\$BD_CALL_LOG"
+for a in "\$@"; do
+  case "\$a" in
   create)
-    if [ "$(grep -cE '(^| )create( |$)' "$BD_CALL_LOG")" -eq 1 ]; then
+    if [ "\$(grep -cE '(^| )create( |\$)' "\$BD_CALL_LOG")" -eq 1 ]; then
       echo "Error: validation failed for issue : invalid issue type: handoff" >&2
       exit 1
     fi
     echo "shim-1"; exit 0 ;;
-  show) printf '%s\n' "$BD_SHIM_SHOW_JSON"; exit 0 ;;
+  show) printf '%s\\n' "\$BD_SHIM_SHOW_JSON"; exit 0 ;;
   esac
 done
 SHIM

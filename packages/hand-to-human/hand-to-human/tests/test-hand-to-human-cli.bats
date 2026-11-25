@@ -21,33 +21,33 @@ setup() {
   export PGC_CALL_LOG="$SHIM_DIR/pgc-calls.log"
   : >"$BD_CALL_LOG"
   : >"$PGC_CALL_LOG"
-  cat >"$SHIM_DIR/bd" <<'SHIM'
-#!/usr/bin/env bash
-# Records argv one call per line; `update` fails per BD_SHIM_UPDATE_FAIL; `show`
-# prints $BD_SHIM_SHOW_JSON.
-printf '%s\n' "${*//$'\n'/\\n}" >>"$BD_CALL_LOG"
-for a in "$@"; do
-  case "$a" in
+  cat >"$SHIM_DIR/bd" <<SHIM
+#!$BASH
+# Records argv one call per line; \`update\` fails per BD_SHIM_UPDATE_FAIL; \`show\`
+# prints \$BD_SHIM_SHOW_JSON.
+printf '%s\\n' "\${*//\$'\\n'/\\\\n}" >>"\$BD_CALL_LOG"
+for a in "\$@"; do
+  case "\$a" in
   update)
-    if [ -n "${BD_SHIM_UPDATE_FAIL:-}" ]; then
-      echo "$BD_SHIM_UPDATE_FAIL" >&2
-      exit "${BD_SHIM_UPDATE_RC:-1}"
+    if [ -n "\${BD_SHIM_UPDATE_FAIL:-}" ]; then
+      echo "\$BD_SHIM_UPDATE_FAIL" >&2
+      exit "\${BD_SHIM_UPDATE_RC:-1}"
     fi
     exit 0
     ;;
   show)
-    printf '%s\n' "$BD_SHIM_SHOW_JSON"
+    printf '%s\\n' "\$BD_SHIM_SHOW_JSON"
     exit 0
     ;;
   esac
 done
 exit 0
 SHIM
-  cat >"$SHIM_DIR/pg-connector" <<'SHIM'
-#!/usr/bin/env bash
-printf '%s\n' "${*//$'\n'/\\n}" >>"$PGC_CALL_LOG"
-if [ -n "${PGC_SHIM_FAIL:-}" ]; then
-  echo "$PGC_SHIM_FAIL" >&2
+  cat >"$SHIM_DIR/pg-connector" <<SHIM
+#!$BASH
+printf '%s\\n' "\${*//\$'\\n'/\\\\n}" >>"\$PGC_CALL_LOG"
+if [ -n "\${PGC_SHIM_FAIL:-}" ]; then
+  echo "\$PGC_SHIM_FAIL" >&2
   exit 1
 fi
 exit 0
@@ -57,7 +57,7 @@ SHIM
   export PATH
 
   cat >"$TEST_DIR/run-hand-to-human" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "${SCRIPTS_DIR}/hand-to-human.bash"
 source "${SCRIPTS_DIR}/hand-to-human.sh"

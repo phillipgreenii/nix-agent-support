@@ -48,15 +48,15 @@ setup() {
 create_mock_gui_tools() {
     # Mock fzf - return first line of input (non-interactive)
     # If no input, exit with code 1 (simulates cancellation)
-    cat > "$MOCK_DIR/fzf" <<'EOF'
-#!/usr/bin/env bash
+    cat > "$MOCK_DIR/fzf" <<EOF
+#!$BASH
 # Mock fzf for testing - returns first line of input or exits if no input
 # Read first line with timeout, if empty exit 1 (cancelled)
 read -t 1 -r first_line || exit 1
-if [ -z "$first_line" ]; then
+if [ -z "\$first_line" ]; then
     exit 1  # Empty input (cancelled)
 fi
-echo "$first_line"
+echo "\$first_line"
 EOF
     chmod +x "$MOCK_DIR/fzf"
 
@@ -69,13 +69,13 @@ EOF
     # Mock column - pass through to real column if available, otherwise just cat
     if [[ -n "$real_column" ]]; then
         cat > "$MOCK_DIR/column" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 # Mock column for testing
 exec "$real_column" "\$@"
 EOF
     else
-        cat > "$MOCK_DIR/column" <<'EOF'
-#!/usr/bin/env bash
+        cat > "$MOCK_DIR/column" <<EOF
+#!$BASH
 # Mock column for testing
 cat
 EOF

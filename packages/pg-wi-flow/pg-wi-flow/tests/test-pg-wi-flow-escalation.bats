@@ -39,53 +39,53 @@ setup() {
   MOCK_BD_LIST_FILE="$(mktemp)"
   printf '[]' >"$MOCK_BD_LIST_FILE"
   export MOCK_BD_LOG MOCK_BD_SHOW_DIR MOCK_BD_DEP_DIR MOCK_BD_LIST_FILE
-  cat >"$MOCK_BIN/bd" <<'MOCKBD'
-#!/usr/bin/env bash
-echo "$*" >>"$MOCK_BD_LOG"
-case "$1" in
+  cat >"$MOCK_BIN/bd" <<MOCKBD
+#!$BASH
+echo "\$*" >>"\$MOCK_BD_LOG"
+case "\$1" in
 show)
-  id="$2"
-  file="$MOCK_BD_SHOW_DIR/$id.json"
-  if [[ -f $file ]]; then
-    printf '{"data":[%s]}\n' "$(cat "$file")"
+  id="\$2"
+  file="\$MOCK_BD_SHOW_DIR/\$id.json"
+  if [[ -f \$file ]]; then
+    printf '{"data":[%s]}\\n' "\$(cat "\$file")"
     exit 0
   fi
-  echo "mock bd show: no fixture for $id" >&2
+  echo "mock bd show: no fixture for \$id" >&2
   exit 1
   ;;
 update)
-  id="$2"
-  for failing in ${MOCK_BD_UPDATE_FAIL_IDS:-}; do
-    if [[ $id == "$failing" ]]; then
-      echo "mock bd update: refused for $id" >&2
+  id="\$2"
+  for failing in \${MOCK_BD_UPDATE_FAIL_IDS:-}; do
+    if [[ \$id == "\$failing" ]]; then
+      echo "mock bd update: refused for \$id" >&2
       exit 1
     fi
   done
   echo '{"data":[{}]}'
   ;;
 create)
-  id="${MOCK_BD_CREATE_ID:-tc-newquestion}"
-  printf '{"data":[{"id":"%s"}]}\n' "$id"
+  id="\${MOCK_BD_CREATE_ID:-tc-newquestion}"
+  printf '{"data":[{"id":"%s"}]}\\n' "\$id"
   ;;
 list)
-  printf '{"data":%s}\n' "$(cat "$MOCK_BD_LIST_FILE")"
+  printf '{"data":%s}\\n' "\$(cat "\$MOCK_BD_LIST_FILE")"
   ;;
 dep)
-  sub="$2"
-  case "$sub" in
+  sub="\$2"
+  case "\$sub" in
   list)
-    id="$3"
+    id="\$3"
     direction=""
-    for a in "$@"; do
-      case "$a" in
-      --direction=*) direction="${a#--direction=}" ;;
+    for a in "\$@"; do
+      case "\$a" in
+      --direction=*) direction="\${a#--direction=}" ;;
       esac
     done
-    file="$MOCK_BD_DEP_DIR/${id}.${direction}.json"
-    if [[ -f $file ]]; then
-      printf '{"data":%s}\n' "$(cat "$file")"
+    file="\$MOCK_BD_DEP_DIR/\${id}.\${direction}.json"
+    if [[ -f \$file ]]; then
+      printf '{"data":%s}\\n' "\$(cat "\$file")"
     else
-      printf '{"data":[]}\n'
+      printf '{"data":[]}\\n'
     fi
     ;;
   *)
@@ -104,7 +104,7 @@ note)
   echo '{"data":[{}]}'
   ;;
 *)
-  echo "mock bd: unhandled subcommand: $1" >&2
+  echo "mock bd: unhandled subcommand: \$1" >&2
   exit 1
   ;;
 esac

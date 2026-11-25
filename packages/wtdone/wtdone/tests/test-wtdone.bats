@@ -221,7 +221,7 @@ fake_lsof_records() {
     printf 'p%s\nc%s\nfcwd\nn/some/worktree\n' "$1" "$2" >>"$FAKE_LSOF_OUT"
     shift 2
   done
-  printf '#!/usr/bin/env bash\ncat "$FAKE_LSOF_OUT"\n' >"$fakebin/lsof"
+  printf '#!%s\ncat "$FAKE_LSOF_OUT"\n' "$BASH" >"$fakebin/lsof"
   chmod +x "$fakebin/lsof"
   PATH="$fakebin:$PATH"
 }

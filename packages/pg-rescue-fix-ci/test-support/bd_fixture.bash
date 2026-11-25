@@ -112,7 +112,7 @@ bd_call_log_install() {
   BD_CALL_LOG="$BD_SHIM_DIR/calls.log"
   export BD_CALL_LOG
   cat >"$BD_SHIM_DIR/bd" <<SHIM
-#!/usr/bin/env bash
+#!$BASH
 printf '%s\n' "\${*//\$'\n'/\\\\n}" >>"$BD_CALL_LOG"
 exec "$real_bd" "\$@"
 SHIM

@@ -19,20 +19,20 @@ setup() {
 
   # Stub go: records start, reports its niceness, then holds until the release
   # file named by $HOLD_FILE exists (no hold when unset).
-  cat >"$TEST_DIR/bin/go" <<'GO'
-#!/usr/bin/env bash
-echo "started $*" >>"$TEST_DIR/events"
-echo "nice=$(ps -o ni= -p $$ | tr -d ' ')" >>"$TEST_DIR/events"
-if [[ -n ${HOLD_FILE:-} ]]; then
-  for _ in $(seq 1 300); do [[ -e $HOLD_FILE ]] && break; sleep 0.1; done
+  cat >"$TEST_DIR/bin/go" <<GO
+#!$BASH
+echo "started \$*" >>"\$TEST_DIR/events"
+echo "nice=\$(ps -o ni= -p \$\$ | tr -d ' ')" >>"\$TEST_DIR/events"
+if [[ -n \${HOLD_FILE:-} ]]; then
+  for _ in \$(seq 1 300); do [[ -e \$HOLD_FILE ]] && break; sleep 0.1; done
 fi
-exit "${GO_EXIT:-0}"
+exit "\${GO_EXIT:-0}"
 GO
   chmod +x "$TEST_DIR/bin/go"
   export PATH="$TEST_DIR/bin:$PATH"
 
   cat >"$TEST_DIR/pg-go-gate" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "${SCRIPTS_DIR}/pg-go-gate.sh"
 WRAPPER

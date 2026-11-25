@@ -46,7 +46,7 @@ do_remove() {
 # fake_pnwf <exit> [stdout]
 fake_pnwf() {
   mkdir -p "$FX/pnwfbin"
-  printf '#!/usr/bin/env bash\nprintf "%%s" "%s"\nexit %s\n' "${2:-}" "${1}" >"$FX/pnwfbin/pnwf"
+  printf '#!%s\nprintf "%%s" "%s"\nexit %s\n' "$BASH" "${2:-}" "${1}" >"$FX/pnwfbin/pnwf"
   chmod +x "$FX/pnwfbin/pnwf"
   PATH="$FX/pnwfbin:$PATH"
   export PATH
@@ -150,7 +150,7 @@ fake_pnwf() {
 @test "scan: discovery uses pn workspace discover and an unreadable discovered path becomes a repo-unreadable row (fake pn: a nonexistent discovered path cannot come from the real pn)" {
   mkdir -p "$FX/pnbin"
   cat >"$FX/pnbin/pn" <<PN
-#!/usr/bin/env bash
+#!$BASH
 printf 'goodrepo\tgit@example.invalid:good.git\t%s\n' "$REPO"
 printf 'ghostrepo\tgit@example.invalid:ghost.git\t%s\n' "$FX/does-not-exist"
 PN
@@ -167,7 +167,7 @@ PN
 
 @test "scan: pn workspace discover failing is a usage-class error (exit 2)" {
   mkdir -p "$FX/pnbin"
-  printf '#!/usr/bin/env bash\nexit 1\n' >"$FX/pnbin/pn"
+  printf '#!%s\nexit 1\n' "$BASH" >"$FX/pnbin/pn"
   chmod +x "$FX/pnbin/pn"
   PATH="$FX/pnbin:$PATH"
   export PATH
@@ -312,7 +312,7 @@ PN
   wt="$(add_wt "$REPO" scratch)"
   tip="$(tip_of "$REPO" scratch)"
   cat >"$FX/bin/wtdone-fake" <<FAKE
-#!/usr/bin/env bash
+#!$BASH
 git -C "$REPO" worktree remove --force "$wt"
 new="\$(git -C "$REPO" commit-tree "refs/heads/scratch^{tree}" -p refs/heads/scratch -m moved)"
 git -C "$REPO" update-ref refs/heads/scratch "\$new"
@@ -331,7 +331,7 @@ FAKE
   newtip="$(git -C "$REPO" commit-tree "refs/heads/dangler^{tree}" -p refs/heads/dangler -m moved)"
   real_git="$(command -v git)"
   cat >"$FX/bin/git" <<SHIM
-#!/usr/bin/env bash
+#!$BASH
 if [[ " \$* " == *" update-ref -d "* ]]; then
   "$real_git" -C "$REPO" update-ref refs/heads/dangler "$newtip"
 fi
@@ -361,7 +361,7 @@ SHIM
 
 @test "exit-code matrix: remove 13 teardown-refused - a wtdone that exits 1 without removing the worktree (fake wtdone: the refusal is the point)" {
   wt="$(add_wt "$REPO" scratch)"
-  printf '#!/usr/bin/env bash\necho "wtdone: refusing: live process" >&2\nexit 1\n' >"$FX/bin/wtdone-refuse"
+  printf '#!%s\necho "wtdone: refusing: live process" >&2\nexit 1\n' "$BASH" >"$FX/bin/wtdone-refuse"
   chmod +x "$FX/bin/wtdone-refuse"
   WTDONE_BIN="$FX/bin/wtdone-refuse" do_remove "$REPO" scratch
   [ "$status" -eq 13 ]
@@ -585,7 +585,7 @@ unlanded_wt() {
 
 @test "keep-branch: exit 13 teardown-refused when wtdone leaves the worktree (fake wtdone: the refusal is the point)" {
   wt="$(unlanded_wt abandoned)"
-  printf '#!/usr/bin/env bash\necho "wtdone: refusing" >&2\nexit 1\n' >"$FX/bin/wtdone-refuse"
+  printf '#!%s\necho "wtdone: refusing" >&2\nexit 1\n' "$BASH" >"$FX/bin/wtdone-refuse"
   chmod +x "$FX/bin/wtdone-refuse"
   WTDONE_BIN="$FX/bin/wtdone-refuse" do_keep "$REPO" abandoned
   [ "$status" -eq 13 ]
@@ -597,7 +597,7 @@ unlanded_wt() {
   wt="$(unlanded_wt abandoned)"
   tip="$(tip_of "$REPO" abandoned)"
   cat >"$FX/bin/wtdone-eager" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 git -C "$REPO" worktree remove --force "$wt"
 git -C "$REPO" branch -D abandoned >/dev/null
 EOF
@@ -684,7 +684,7 @@ EOF
 @test "unmanaged: reads the exceptions from pg-gwm list --exceptions" {
   git -C "$REPO" worktree add -q -b stray "$FX/wts/stray" >/dev/null
   # a stand-in for the pg-gwm executable: only the list --exceptions answer is needed
-  printf '#!/usr/bin/env bash\n[[ "$1 $2 $3" == "list --exceptions --format=json" ]] || exit 9\nprintf '"'"'[{"path":"%s/wts/**"}]'"'"'\n' "$FX" >"$FX/bin/pg-gwm"
+  printf '#!%s\n[[ "$1 $2 $3" == "list --exceptions --format=json" ]] || exit 9\nprintf '"'"'[{"path":"%s/wts/**"}]'"'"'\n' "$BASH" "$FX" >"$FX/bin/pg-gwm"
   chmod +x "$FX/bin/pg-gwm"
   PG_GWM_BIN="$FX/bin/pg-gwm" run --separate-stderr "$WTAUDIT" unmanaged --repo "$REPO"
   [ "$status" -eq 0 ]

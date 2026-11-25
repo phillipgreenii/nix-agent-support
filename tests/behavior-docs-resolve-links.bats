@@ -123,9 +123,9 @@ MD
 @test "remote fallback: stubbed fetch confirms the uuid -> ok (remote), not a WARN" {
   impl_repo "myorg/impl-remote"
   mkdir -p "$BATS_TEST_TMPDIR/bin"
-  cat >"$BATS_TEST_TMPDIR/bin/curl" <<'EOF'
-#!/usr/bin/env bash
-printf 'remote content carries 33333333-3333-4333-8333-333333333333\n'
+  cat >"$BATS_TEST_TMPDIR/bin/curl" <<EOF
+#!$BASH
+printf 'remote content carries 33333333-3333-4333-8333-333333333333\\n'
 EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/curl"
   d5_table '`INV-REMOTE`' 'only the remote confirms it' 'nobody · nowhere' \
@@ -140,9 +140,9 @@ EOF
 @test "remote fallback: stubbed fetch does NOT carry the uuid -> WARN, never FAIL" {
   impl_repo "myorg/impl-remote2"
   mkdir -p "$BATS_TEST_TMPDIR/bin"
-  cat >"$BATS_TEST_TMPDIR/bin/curl" <<'EOF'
-#!/usr/bin/env bash
-printf 'remote content carries a DIFFERENT uuid entirely\n'
+  cat >"$BATS_TEST_TMPDIR/bin/curl" <<EOF
+#!$BASH
+printf 'remote content carries a DIFFERENT uuid entirely\\n'
 EOF
   chmod +x "$BATS_TEST_TMPDIR/bin/curl"
   d5_table '`INV-ROTTED`' 'rotted' 'nobody · nowhere' \
@@ -160,12 +160,12 @@ EOF
   # asserts the CONVERSION happened, not merely that some fetch happened.
   impl_repo "myorg/impl-raw"
   mkdir -p "$BATS_TEST_TMPDIR/bin"
-  cat >"$BATS_TEST_TMPDIR/bin/curl" <<'EOF'
-#!/usr/bin/env bash
-for a in "$@"; do
-  case "$a" in
+  cat >"$BATS_TEST_TMPDIR/bin/curl" <<EOF
+#!$BASH
+for a in "\$@"; do
+  case "\$a" in
   https://raw.githubusercontent.com/*)
-    printf 'ok 55555555-5555-4555-8555-555555555555\n'
+    printf 'ok 55555555-5555-4555-8555-555555555555\\n'
     exit 0
     ;;
   esac

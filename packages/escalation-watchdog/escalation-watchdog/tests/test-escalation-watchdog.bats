@@ -32,7 +32,7 @@ setup() {
   REAL_H2H="$(command -v hand-to-human)"
   # The builder composes <name>.bash + <name>.sh under strict mode; do the same.
   cat >"$TDIR/run-escalation-watchdog" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "${SCRIPTS_DIR}/escalation-watchdog.bash"
 source "${SCRIPTS_DIR}/escalation-watchdog.sh"
@@ -275,7 +275,7 @@ second line is not quoted" >/dev/null 2>&1
   # (the race), then runs the real tool unchanged.
   mkdir -p "$TDIR/shim"
   cat >"$TDIR/shim/hand-to-human" <<SHIM
-#!/usr/bin/env bash
+#!$BASH
 if [ ! -e "$TDIR/raced" ]; then
   : >"$TDIR/raced"
   bd -C "$TDIR" update -a racer -- "\$1" >/dev/null 2>&1
@@ -303,7 +303,7 @@ SHIM
   b="$(new_bead escalated)"
   mkdir -p "$TDIR/shim"
   cat >"$TDIR/shim/hand-to-human" <<SHIM
-#!/usr/bin/env bash
+#!$BASH
 if [ ! -e "$TDIR/failed-once" ]; then
   : >"$TDIR/failed-once"
   exit 3
@@ -337,7 +337,7 @@ bd_warn_shim() {
   real_bd="$(command -v bd)"
   shim_dir="$(mktemp -d)"
   cat >"$shim_dir/bd" <<SHIM
-#!/usr/bin/env bash
+#!$BASH
 case " \$* " in *" ready "*) echo "warning: beads.role not configured" >&2 ;; esac
 exec "$real_bd" "\$@"
 SHIM

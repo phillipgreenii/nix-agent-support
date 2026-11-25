@@ -16,16 +16,16 @@ setup() {
   : >"$BD_CALL_LOG"
   # Tools that record every call; validation failures must never reach them.
   for t in bd hand-to-human; do
-    cat >"$SHIM_DIR/$t" <<'SHIM'
-#!/usr/bin/env bash
-printf '%s %s\n' "$(basename "$0")" "$*" >>"$BD_CALL_LOG"
+    cat >"$SHIM_DIR/$t" <<SHIM
+#!$BASH
+printf '%s %s\\n' "\$(basename "\$0")" "\$*" >>"\$BD_CALL_LOG"
 exit 0
 SHIM
     chmod +x "$SHIM_DIR/$t"
   done
   PATH="$SHIM_DIR:$PATH"
   cat >"$TEST_DIR/run-escalation-watchdog" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "${SCRIPTS_DIR}/escalation-watchdog.bash"
 source "${SCRIPTS_DIR}/escalation-watchdog.sh"

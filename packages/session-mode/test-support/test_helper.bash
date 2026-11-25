@@ -40,7 +40,7 @@ resolve_lib() {
 create_cmd_wrapper() {
   local name="$1"
   cat >"$TEST_DIR/run_${name}" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "$(resolve_lib)"
 source "${SCRIPTS_DIR}/${name}.sh"

@@ -41,7 +41,7 @@ teardown() {
 #   $2 = exit code for `marketplace update`
 _mock_claude() {
   cat > "$CLAUDE_BIN" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 echo "\$@" >> "$CALLS"
 # args: plugin marketplace <add|update> <arg>
 case "\$3" in

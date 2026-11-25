@@ -54,7 +54,7 @@ teardown() {
 # behavior. $1=install_exit, $2=update_exit, $3=install_stderr, $4=update_stderr
 _mock_claude() {
   cat > "$CLAUDE_BIN" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 echo "\$@" >> "$CALLS"
 case "\$2" in
   install) echo "$3" >&2; exit $1 ;;
@@ -89,7 +89,7 @@ _write_manifest() {
 _mock_claude_enabling() {
   local settings="$1" newver="${2:-}"
   cat > "$CLAUDE_BIN" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 echo "\$@" >> "$CALLS"
 case "\$2" in
   install)

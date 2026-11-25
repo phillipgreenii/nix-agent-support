@@ -56,24 +56,24 @@ setup() {
 create_mock_gui_tools() {
     # Mock fzf - return first line of input (non-interactive)
     # If no input, exit with code 1 (simulates cancellation)
-    cat > "$MOCK_DIR/fzf" <<'EOF'
-#!/usr/bin/env bash
+    cat > "$MOCK_DIR/fzf" <<EOF
+#!$BASH
 # Mock fzf for testing - returns first line of input or exits if no input
 # Read first line with timeout, if empty exit 1 (cancelled)
 read -t 1 -r first_line || exit 1
-if [ -z "$first_line" ]; then
+if [ -z "\$first_line" ]; then
     exit 1  # Empty input (cancelled)
 fi
-echo "$first_line"
+echo "\$first_line"
 EOF
     chmod +x "$MOCK_DIR/fzf"
 
     # Mock column - pass through to real column if available, otherwise just cat
-    cat > "$MOCK_DIR/column" <<'EOF'
-#!/usr/bin/env bash
+    cat > "$MOCK_DIR/column" <<EOF
+#!$BASH
 # Mock column for testing
 if command -v column >/dev/null 2>&1; then
-    command column "$@"
+    command column "\$@"
 else
     cat
 fi
@@ -93,15 +93,15 @@ teardown() {
 
 create_mock_git() {
     # Create a mock git script that handles fetch by returning success without network calls
-    cat > "$MOCK_DIR/git" <<'EOF'
-#!/usr/bin/env bash
+    cat > "$MOCK_DIR/git" <<EOF
+#!$BASH
 # Mock git for testing - intercepts fetch commands
-if [[ "$1" == "fetch" ]]; then
+if [[ "\$1" == "fetch" ]]; then
     # Return success without doing actual network operations
     exit 0
 fi
 # For all other git commands, use the real git
-exec command git "$@"
+exec command git "\$@"
 EOF
     chmod +x "$MOCK_DIR/git"
     # Prepend MOCK_DIR to PATH so our mock is found first

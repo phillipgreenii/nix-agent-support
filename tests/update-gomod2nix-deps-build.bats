@@ -62,7 +62,7 @@ EOF
 fake_nix() {
   mkdir -p "$BATS_TEST_TMPDIR/shim"
   {
-    printf '#!/usr/bin/env bash\n'
+    printf '#!%s\n' "$BASH"
     printf 'echo "$*" >>"%s/nix-called"\n' "$BATS_TEST_TMPDIR"
     printf 'case "$*" in\n'
     printf '*generate*)\n'

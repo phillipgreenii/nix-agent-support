@@ -40,7 +40,7 @@ create_mock_agent() {
   esac
 
   cat >"$TEST_DIR/${name}-agent" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 # Mock $name agent script
 # Accepts: <model> <plan> <thinking> <prompt>
 
@@ -112,7 +112,7 @@ create_zr_agent_wrapper() {
   create_agents_config
 
   cat >"$TEST_DIR/pg2-agent" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 export AGENTS_CONFIG="$TEST_DIR/agents.json"
 source "$SCRIPTS_DIR/pg2-agent.sh"
 EOF

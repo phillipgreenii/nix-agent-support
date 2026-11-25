@@ -70,27 +70,27 @@ setup() {
   MOCK_BD_SHOW_DIR="$(mktemp -d)"
   MOCK_BD_LIST_DIR="$(mktemp -d)"
   export MOCK_BD_LOG MOCK_BD_SHOW_DIR MOCK_BD_LIST_DIR
-  cat >"$MOCK_BIN/bd" <<'MOCKBD'
-#!/usr/bin/env bash
-echo "$*" >>"$MOCK_BD_LOG"
-case "$1" in
+  cat >"$MOCK_BIN/bd" <<MOCKBD
+#!$BASH
+echo "\$*" >>"\$MOCK_BD_LOG"
+case "\$1" in
 show)
-  id="$2"
-  file="$MOCK_BD_SHOW_DIR/$id.json"
-  if [[ -f $file ]]; then
-    printf '{"data":[%s]}\n' "$(cat "$file")"
+  id="\$2"
+  file="\$MOCK_BD_SHOW_DIR/\$id.json"
+  if [[ -f \$file ]]; then
+    printf '{"data":[%s]}\\n' "\$(cat "\$file")"
     exit 0
   fi
-  echo "mock bd show: no fixture for $id" >&2
+  echo "mock bd show: no fixture for \$id" >&2
   exit 1
   ;;
 children)
-  id="$2"
-  file="$MOCK_BD_LIST_DIR/children-$id.json"
-  if [[ -f $file ]]; then
-    printf '{"data":%s}\n' "$(cat "$file")"
+  id="\$2"
+  file="\$MOCK_BD_LIST_DIR/children-\$id.json"
+  if [[ -f \$file ]]; then
+    printf '{"data":%s}\\n' "\$(cat "\$file")"
   else
-    printf '{"data":[]}\n'
+    printf '{"data":[]}\\n'
   fi
   ;;
 list)
@@ -98,36 +98,36 @@ list)
   # canned fixture file; anything unrecognized (or no fixture present)
   # returns an empty result set -- most tests need no list data at all.
   key=""
-  args=("$@")
-  for ((i = 0; i < ${#args[@]}; i++)); do
-    case "${args[$i]}" in
-    --label-any) key="${args[$((i + 1))]}" ;;
-    --title-contains) key="${args[$((i + 1))]}" ;;
+  args=("\$@")
+  for ((i = 0; i < \${#args[@]}; i++)); do
+    case "\${args[\$i]}" in
+    --label-any) key="\${args[\$((i + 1))]}" ;;
+    --title-contains) key="\${args[\$((i + 1))]}" ;;
     esac
   done
-  file="$MOCK_BD_LIST_DIR/list-${key}.json"
-  if [[ -n $key && -f $file ]]; then
-    printf '{"data":%s}\n' "$(cat "$file")"
+  file="\$MOCK_BD_LIST_DIR/list-\${key}.json"
+  if [[ -n \$key && -f \$file ]]; then
+    printf '{"data":%s}\\n' "\$(cat "\$file")"
   else
-    printf '{"data":[]}\n'
+    printf '{"data":[]}\\n'
   fi
   ;;
 dep)
-  printf '{"data":[]}\n'
+  printf '{"data":[]}\\n'
   ;;
 memories)
-  if [[ -n ${MOCK_BD_MEMORIES_FAIL:-} ]]; then
+  if [[ -n \${MOCK_BD_MEMORIES_FAIL:-} ]]; then
     echo "mock bd memories: boom" >&2
     exit 1
   fi
-  if [[ -n ${MOCK_BD_MEMORIES_FILE:-} && -f $MOCK_BD_MEMORIES_FILE ]]; then
-    printf '{"data":%s}\n' "$(cat "$MOCK_BD_MEMORIES_FILE")"
+  if [[ -n \${MOCK_BD_MEMORIES_FILE:-} && -f \$MOCK_BD_MEMORIES_FILE ]]; then
+    printf '{"data":%s}\\n' "\$(cat "\$MOCK_BD_MEMORIES_FILE")"
   else
-    printf '{"data":{}}\n'
+    printf '{"data":{}}\\n'
   fi
   ;;
 *)
-  echo "mock bd: unhandled subcommand: $1" >&2
+  echo "mock bd: unhandled subcommand: \$1" >&2
   exit 1
   ;;
 esac

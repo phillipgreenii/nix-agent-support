@@ -78,10 +78,10 @@ fake_lsof_records() {
     printf 'p%s\nc%s\nfcwd\nn/some/worktree\n' "$1" "$2" >>"$FAKE_LSOF_OUT"
     shift 2
   done
-  cat >"$fakebin/lsof" <<'SHIM'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >"$FAKE_LSOF_ARGS"
-cat "$FAKE_LSOF_OUT"
+  cat >"$fakebin/lsof" <<SHIM
+#!$BASH
+printf '%s\\n' "\$*" >"\$FAKE_LSOF_ARGS"
+cat "\$FAKE_LSOF_OUT"
 SHIM
   chmod +x "$fakebin/lsof"
   PATH="$fakebin:$PATH"
@@ -111,7 +111,7 @@ refute_blocks() {
 @test "wtdone_anchored_processes: lsof's nonzero exit is discarded" {
   local fakebin="$GFH_ROOT/fakebin"
   mkdir -p "$fakebin"
-  printf '#!/usr/bin/env bash\nexit 1\n' >"$fakebin/lsof"
+  printf '#!%s\nexit 1\n' "$BASH" >"$fakebin/lsof"
   chmod +x "$fakebin/lsof"
   PATH="$fakebin:$PATH"
   run wtdone_anchored_processes "$TEST_DIR"

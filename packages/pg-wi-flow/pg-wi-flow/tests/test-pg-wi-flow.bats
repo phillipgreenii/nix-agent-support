@@ -17,19 +17,19 @@ setup() {
   MOCK_BIN="$(mktemp -d)"
   MOCK_BD_LOG="$(mktemp)"
   export MOCK_BD_LOG
-  cat >"$MOCK_BIN/bd" <<'MOCKBD'
-#!/usr/bin/env bash
-echo "$*" >>"$MOCK_BD_LOG"
-case "$1" in
-ready) printf '[]\n' ;;
+  cat >"$MOCK_BIN/bd" <<MOCKBD
+#!$BASH
+echo "\$*" >>"\$MOCK_BD_LOG"
+case "\$1" in
+ready) printf '[]\\n' ;;
 show)
-  printf '{"data":[{"id":"%s","title":"an item","labels":[],"metadata":{}}]}\n' "$2"
+  printf '{"data":[{"id":"%s","title":"an item","labels":[],"metadata":{}}]}\\n' "\$2"
   ;;
-list) printf '{"data":[]}\n' ;;
-children) printf '{"data":[]}\n' ;;
-dep) printf '{"data":[]}\n' ;;
+list) printf '{"data":[]}\\n' ;;
+children) printf '{"data":[]}\\n' ;;
+dep) printf '{"data":[]}\\n' ;;
 *)
-  echo "mock bd: unhandled subcommand: $1" >&2
+  echo "mock bd: unhandled subcommand: \$1" >&2
   exit 1
   ;;
 esac

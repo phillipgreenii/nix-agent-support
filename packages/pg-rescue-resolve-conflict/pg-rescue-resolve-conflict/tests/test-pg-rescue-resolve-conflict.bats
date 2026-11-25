@@ -75,7 +75,7 @@ teardown() {
 # never to stdout (handler stdout must be empty or one JSON object).
 write_handlers() {
   cat >"$HANDLERS/resolve.sh" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 set -eu
 pwd -P >"$HLOG/resolve.cwd"
 printf '%s\n' "\$PG_ROUTER_ITEM_ID" >"$HLOG/resolve.item"
@@ -91,7 +91,7 @@ EOF
   cp "$HANDLERS/resolve.sh" "$HANDLERS/agent.sh"
   cp "$HANDLERS/resolve.sh" "$HANDLERS/det.sh"
   cat >"$HANDLERS/give-up.sh" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 set -eu
 touch "$HLOG/give-up.ran"
 printf '%s\n' "\$PG_ROUTER_ITEM_ID" >"$HLOG/give-up.item"
@@ -99,13 +99,13 @@ bd update "\$PG_ROUTER_ITEM_ID" --add-label script-gave-up >&2
 exit 24
 EOF
   cat >"$HANDLERS/decline.sh" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 touch "$HLOG/decline.ran"
 exit 2
 EOF
   # A handler that tries to publish by itself (design D5): it must fail.
   cat >"$HANDLERS/push.sh" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 touch "$HLOG/push.ran"
 rc=0
 git push origin HEAD:refs/heads/handler-pushed >"$HLOG/push.out" 2>&1 || rc=\$?
@@ -114,14 +114,14 @@ exit 2
 EOF
   # A handler that is still running when the test signals the shim.
   cat >"$HANDLERS/slow.sh" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 touch "$HLOG/slow.started"
 exec sleep 60
 EOF
   # Resolves the conflict, then moves the remote branch from a second clone
   # (without the handler's unusable push URL): the push lease is then stale.
   cat >"$HANDLERS/mover.sh" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 set -eu
 printf 'one\nresolved\nthree\n' >f
 git add f
@@ -446,7 +446,7 @@ assert_closed_stale() {
   real_helper=$(command -v pg-rescue-push-branch)
   mkdir -p "$GFH_WORK/helper-bin"
   cat >"$GFH_WORK/helper-bin/pg-rescue-push-branch" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 printf '%s\n' "\$*" >"$GFH_WORK/helper.args"
 printf '%s\n' "\${GIT_CONFIG_COUNT-unset}" >"$GFH_WORK/helper.gitcfg"
 exec "$real_helper" "\$@"
@@ -512,7 +512,7 @@ EOF
   STUB_DIR="$GFH_WORK/stub-bin"
   mkdir -p "$STUB_DIR"
   cat >"$STUB_DIR/pg-rescue" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 while [ \$# -gt 0 ]; do
   if [ "\$1" = "--result-file" ]; then echo 'not json' >"\$2"; fi
   shift
@@ -817,7 +817,7 @@ stub_pg_rescue() { # EXIT_CODE
   STUB_LOG="$GFH_WORK/stub-pg-rescue.args"
   mkdir -p "$STUB_DIR"
   cat >"$STUB_DIR/pg-rescue" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 printf '%s\n' "\$*" >"$STUB_LOG"
 exit $1
 EOF

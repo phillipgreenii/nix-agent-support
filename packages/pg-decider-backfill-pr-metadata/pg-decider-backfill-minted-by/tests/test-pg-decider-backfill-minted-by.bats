@@ -31,7 +31,7 @@ setup() {
   [ -d "$TDIR/.beads" ]
   bd_fixture_assert_isolated
   cat >"$TDIR/run" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "${SCRIPTS_DIR}/pg-decider-backfill-minted-by.bash"
 source "${SCRIPTS_DIR}/pg-decider-backfill-minted-by.sh"
@@ -80,7 +80,7 @@ install_shim() {
   SHIM_DIR="$(mktemp -d)"
   export SHIM_DIR
   cat >"$SHIM_DIR/bd" <<SHIM
-#!/usr/bin/env bash
+#!$BASH
 printf '%s\n' "\$*" >>"$SHIM_DIR/calls.log"
 for a in "\$@"; do
   if [ "\$a" = update ]; then

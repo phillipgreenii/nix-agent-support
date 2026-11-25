@@ -53,27 +53,27 @@ setup() {
   MOCK_BD_LOG="$(mktemp)"
   MOCK_BD_SHOW_DIR="$(mktemp -d)"
   export MOCK_BD_LOG MOCK_BD_SHOW_DIR
-  cat >"$MOCK_BIN/bd" <<'MOCKBD'
-#!/usr/bin/env bash
-echo "$*" >>"$MOCK_BD_LOG"
-case "$1" in
+  cat >"$MOCK_BIN/bd" <<MOCKBD
+#!$BASH
+echo "\$*" >>"\$MOCK_BD_LOG"
+case "\$1" in
 show)
-  id="$2"
-  file="$MOCK_BD_SHOW_DIR/$id.json"
-  if [[ -f $file ]]; then
-    printf '{"data":[%s]}\n' "$(cat "$file")"
+  id="\$2"
+  file="\$MOCK_BD_SHOW_DIR/\$id.json"
+  if [[ -f \$file ]]; then
+    printf '{"data":[%s]}\\n' "\$(cat "\$file")"
     exit 0
   fi
-  echo "mock bd show: no fixture for $id" >&2
+  echo "mock bd show: no fixture for \$id" >&2
   exit 1
   ;;
 update)
-  id="$2"
-  case " $* " in
+  id="\$2"
+  case " \$* " in
   *" --claim "*)
-    for failing in ${MOCK_BD_CLAIM_FAIL_IDS:-}; do
-      if [[ $id == "$failing" ]]; then
-        echo "mock bd update: --claim refused for $id" >&2
+    for failing in \${MOCK_BD_CLAIM_FAIL_IDS:-}; do
+      if [[ \$id == "\$failing" ]]; then
+        echo "mock bd update: --claim refused for \$id" >&2
         exit 1
       fi
     done
@@ -81,19 +81,19 @@ update)
   esac
   # Newer bd: reassigning an item held in_progress by another actor is
   # refused unless --force is passed.
-  case " $* " in
+  case " \$* " in
   *" --assignee "*)
-    for held in ${MOCK_BD_HELD_IDS:-}; do
-      if [[ $id == "$held" && " $* " != *" --force "* ]]; then
-        echo "mock bd update: cannot reassign $id: held (in_progress); pass --force" >&2
+    for held in \${MOCK_BD_HELD_IDS:-}; do
+      if [[ \$id == "\$held" && " \$* " != *" --force "* ]]; then
+        echo "mock bd update: cannot reassign \$id: held (in_progress); pass --force" >&2
         exit 1
       fi
     done
     ;;
   esac
-  for failing in ${MOCK_BD_UPDATE_FAIL_IDS:-}; do
-    if [[ $id == "$failing" ]]; then
-      echo "mock bd update: refused for $id" >&2
+  for failing in \${MOCK_BD_UPDATE_FAIL_IDS:-}; do
+    if [[ \$id == "\$failing" ]]; then
+      echo "mock bd update: refused for \$id" >&2
       exit 1
     fi
   done
@@ -102,30 +102,30 @@ update)
 ready | list | children | dep)
   # Row-set reads: optionally mimic bd's truncation notice on STDERR (exit 0)
   # next to a truncated pagination envelope; MOCK_BD_ROWS_FAIL makes it fail.
-  if [[ -n ${MOCK_BD_ROWS_FAIL:-} ]]; then
-    echo "mock bd $1: boom" >&2
+  if [[ -n \${MOCK_BD_ROWS_FAIL:-} ]]; then
+    echo "mock bd \$1: boom" >&2
     exit 1
   fi
-  if [[ -n ${MOCK_BD_TRUNCATED:-} ]]; then
+  if [[ -n \${MOCK_BD_TRUNCATED:-} ]]; then
     echo "Showing 100 of 109 ready issues. Use --limit 0 for all, or --limit N to raise the cap." >&2
-    printf '{"data":[{"id":"a"},{"id":"b"}],"pagination":{"returned":100,"total":109,"truncated":true}}\n'
+    printf '{"data":[{"id":"a"},{"id":"b"}],"pagination":{"returned":100,"total":109,"truncated":true}}\\n'
   else
-    printf '{"data":[{"id":"a"},{"id":"b"}]}\n'
+    printf '{"data":[{"id":"a"},{"id":"b"}]}\\n'
   fi
   ;;
 memories)
-  if [[ -n ${MOCK_BD_MEMORIES_FAIL:-} ]]; then
+  if [[ -n \${MOCK_BD_MEMORIES_FAIL:-} ]]; then
     echo "mock bd memories: boom" >&2
     exit 1
   fi
-  if [[ -n ${MOCK_BD_MEMORIES_FILE:-} && -f $MOCK_BD_MEMORIES_FILE ]]; then
-    printf '{"data":%s}\n' "$(cat "$MOCK_BD_MEMORIES_FILE")"
+  if [[ -n \${MOCK_BD_MEMORIES_FILE:-} && -f \$MOCK_BD_MEMORIES_FILE ]]; then
+    printf '{"data":%s}\\n' "\$(cat "\$MOCK_BD_MEMORIES_FILE")"
   else
-    printf '{"data":{}}\n'
+    printf '{"data":{}}\\n'
   fi
   ;;
 *)
-  echo "mock bd: unhandled subcommand: $1" >&2
+  echo "mock bd: unhandled subcommand: \$1" >&2
   exit 1
   ;;
 esac

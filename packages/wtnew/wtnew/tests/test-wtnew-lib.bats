@@ -93,8 +93,8 @@ add_worktree() {
 }
 
 @test "wtnew_resolve_base: passes through integrate-branch-support's primary_branch field" {
-  cat >"$STUB_BIN/integrate-branch-support" <<'EOF'
-#!/usr/bin/env bash
+  cat >"$STUB_BIN/integrate-branch-support" <<EOF
+#!$BASH
 echo '{"strategy":null,"reason":"","primary_branch":"trunk","canonical":{"branch":"main","dirty":false},"remote":null,"open_pr":null,"mr_bead":null}'
 EOF
   chmod +x "$STUB_BIN/integrate-branch-support"

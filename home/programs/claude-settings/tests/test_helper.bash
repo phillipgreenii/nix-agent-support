@@ -47,7 +47,7 @@ resolve_claude_settings_script() {
   fi
 
   cat >"$wrapper" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 # Minimal act_* fallbacks keep a local run (no LIB_PATH) working; the composed
 # library overrides them when a Nix check exports LIB_PATH.
 act_ok() { printf '  %s\n' "\$*"; }

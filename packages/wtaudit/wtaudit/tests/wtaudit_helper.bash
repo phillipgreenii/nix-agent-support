@@ -86,7 +86,7 @@ wtaudit_test_setup() {
   # A strict-mode runner (the builder injects `set -euo pipefail`): sources the
   # library, the logic file and the entry point exactly as the built script.
   cat >"$FX/bin/wtaudit" <<RUNNER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "$live"
 source "$SCRIPTS_DIR/wtaudit.bash"
@@ -100,7 +100,7 @@ RUNNER
   # wraps the sibling script.
   if [[ -z ${WTDONE_BIN:-} ]]; then
     cat >"$FX/bin/wtdone-real" <<WTDONE
-#!/usr/bin/env bash
+#!$BASH
 export LIB_PATH="$live"
 exec bash "$SCRIPTS_DIR/../../wtdone/wtdone/wtdone.sh" "\$@"
 WTDONE
@@ -205,7 +205,7 @@ stop_anchor() {
 # mock_bd <body-script>: put a `bd` on PATH that runs <body-script>.
 mock_bd() {
   mkdir -p "$FX/mockbin"
-  printf '#!/usr/bin/env bash\n%s\n' "$1" >"$FX/mockbin/bd"
+  printf '#!%s\n%s\n' "$BASH" "$1" >"$FX/mockbin/bd"
   chmod +x "$FX/mockbin/bd"
   PATH="$FX/mockbin:$PATH"
   export PATH

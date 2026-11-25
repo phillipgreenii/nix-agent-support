@@ -70,24 +70,24 @@ setup() {
 create_mock_gui_tools() {
     # Mock fzf - return first line of input (non-interactive)
     # If no input, exit with code 1 (simulates cancellation)
-    cat > "$MOCK_DIR/fzf" <<'EOF'
-#!/usr/bin/env bash
+    cat > "$MOCK_DIR/fzf" <<EOF
+#!$BASH
 # Mock fzf for testing - returns first line of input or exits if no input
 # Read first line with timeout, if empty exit 1 (cancelled)
 read -t 1 -r first_line || exit 1
-if [ -z "$first_line" ]; then
+if [ -z "\$first_line" ]; then
     exit 1  # Empty input (cancelled)
 fi
-echo "$first_line"
+echo "\$first_line"
 EOF
     chmod +x "$MOCK_DIR/fzf"
 
     # Mock column - pass through to real column if available, otherwise just cat
-    cat > "$MOCK_DIR/column" <<'EOF'
-#!/usr/bin/env bash
+    cat > "$MOCK_DIR/column" <<EOF
+#!$BASH
 # Mock column for testing
 if command -v column >/dev/null 2>&1; then
-    command column "$@"
+    command column "\$@"
 else
     cat
 fi
@@ -103,7 +103,7 @@ EOF
 
     # Mock git for testing - intercepts fetch commands to avoid network calls
     cat > "$MOCK_DIR/git" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 # Mock git for testing - intercepts fetch commands
 if [[ "\$1" == "fetch" ]]; then
     # Return success without doing actual network operations
@@ -406,7 +406,7 @@ run_git_branch_maintenance() {
     # (leaving every other git invocation, including the tmp-gbm cleanup
     # worktree, to the real git) so the failure is deterministic.
     cat > "$MOCK_DIR/git" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 if [[ "\$1" == "fetch" ]]; then
     exit 0
 fi
@@ -579,7 +579,7 @@ output_without_tmp_cleanup() {
     git branch merged-after-refused-fetch main
 
     cat > "$MOCK_DIR/git" <<MOCK
-#!/usr/bin/env bash
+#!$BASH
 if [[ "\$1" == "fetch" ]]; then
     echo "pg-origin-guard: refused (no-human)" >&2
     exit 1
@@ -601,7 +601,7 @@ install_counting_git() {
     export GIT_CALL_LOG="$MOCK_DIR/git-calls.log"
     : > "$GIT_CALL_LOG"
     cat > "$MOCK_DIR/git" <<MOCK
-#!/usr/bin/env bash
+#!$BASH
 printf '%s\n' "\$*" >> "$GIT_CALL_LOG"
 if [[ "\$1" == "fetch" ]]; then
     exit 0
@@ -658,7 +658,7 @@ use_private_tmp_root() {
 @test "git worktree add stderr reaches the output when the temporary worktree cannot be created" {
     use_private_tmp_root
     cat > "$MOCK_DIR/git" <<MOCK
-#!/usr/bin/env bash
+#!$BASH
 if [[ "\$1" == "fetch" ]]; then exit 0; fi
 if [[ "\$1" == "worktree" && "\$2" == "add" ]]; then
     echo "fatal: simulated no space left on device" >&2
@@ -677,7 +677,7 @@ MOCK
 @test "git branch -f stderr reaches the output when the temporary branch cannot be created" {
     use_private_tmp_root
     cat > "$MOCK_DIR/git" <<MOCK
-#!/usr/bin/env bash
+#!$BASH
 if [[ "\$1" == "fetch" ]]; then exit 0; fi
 if [[ "\$1" == "branch" && "\$2" == "-f" ]]; then
     echo "fatal: simulated ref lock failure" >&2
@@ -773,7 +773,7 @@ install_worktree_state_git() {
     export WT_STATE_LOG="$MOCK_DIR/wt-state.log"
     : > "$WT_STATE_LOG"
     cat > "$MOCK_DIR/git" <<MOCK
-#!/usr/bin/env bash
+#!$BASH
 if [[ "\$1" == "fetch" ]]; then exit 0; fi
 if [[ "\$1" == "worktree" && "\$2" == "remove" && "\$3" == */git-branch-maintenance-* ]]; then
     if [[ -e "\$3/test.txt" ]]; then echo present >> "$WT_STATE_LOG"; else echo absent >> "$WT_STATE_LOG"; fi
@@ -830,7 +830,7 @@ MOCK
 
     # A git that fails on fetch/worktree add proves neither is reached
     cat > "$MOCK_DIR/git" <<MOCK
-#!/usr/bin/env bash
+#!$BASH
 if [[ "\$1" == "fetch" || ( "\$1" == "worktree" && "\$2" == "add" ) ]]; then
     echo "unexpected: git \$*" >&2
     exit 99

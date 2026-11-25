@@ -61,7 +61,7 @@ setup() {
     SHIM=("$SCRIPT_UNDER_TEST")
   else
     {
-      printf '#!/usr/bin/env bash\nset -euo pipefail\n'
+      printf '#!%s\nset -euo pipefail\n' "$BASH"
       cat "$SCRIPTS_DIR/pg-rescue-fix-ci.sh"
     } >"$WORK/pg-rescue-fix-ci"
     chmod +x "$WORK/pg-rescue-fix-ci"
@@ -89,7 +89,7 @@ write_bd_shim() {
   local real_bd
   real_bd="$(PATH="${PATH#"$BD_SHIM_DIR:"}" command -v bd)"
   cat >"$BD_SHIM_DIR/bd" <<SHIM
-#!/usr/bin/env bash
+#!$BASH
 printf '%s\n' "\${*//\$'\n'/\\\\n}" >>"$BD_CALL_LOG"
 if [ -e "\$BD_FAIL_RECORD" ] && [[ "\$*" == *ci_rerun_of=* ]]; then
   echo "bd shim: failing the ci_rerun_of write on request" >&2
@@ -105,17 +105,17 @@ SHIM
 # non-zero while $CONNECTOR_FAIL exists, or hangs (recording its pid) while
 # $CONNECTOR_HANG exists.
 write_connector_double() {
-  cat >"$DOUBLE_DIR/pg-connector" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"$CONNECTOR_LOG"
-bd show "$PG_ROUTER_ITEM_ID" --json |
-  jq -r '(if type=="object" and has("data") then .data else . end) | (if type=="array" then .[0] else . end) | .metadata.ci_rerun_of // "ABSENT"' \
-    >>"$CONNECTOR_SEEN"
-if [ -e "$CONNECTOR_HANG" ]; then
-  echo $$ >"$CONNECTOR_PID"
+  cat >"$DOUBLE_DIR/pg-connector" <<EOF
+#!$BASH
+printf '%s\\n' "\$*" >>"\$CONNECTOR_LOG"
+bd show "\$PG_ROUTER_ITEM_ID" --json |
+  jq -r '(if type=="object" and has("data") then .data else . end) | (if type=="array" then .[0] else . end) | .metadata.ci_rerun_of // "ABSENT"' \\
+    >>"\$CONNECTOR_SEEN"
+if [ -e "\$CONNECTOR_HANG" ]; then
+  echo \$\$ >"\$CONNECTOR_PID"
   exec sleep 120
 fi
-if [ -e "$CONNECTOR_FAIL" ]; then
+if [ -e "\$CONNECTOR_FAIL" ]; then
   echo "pg-connector double: failing on request" >&2
   exit 1
 fi
@@ -131,7 +131,7 @@ EOF
 # never to stdout.
 write_handlers() {
   cat >"$HANDLERS/give-up.sh" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 set -eu
 touch "$HLOG/give-up.ran"
 printf '%s\n' "\$PG_ROUTER_ITEM_ID" >>"$HLOG/give-up.item"
@@ -232,7 +232,7 @@ stub_pg_rescue() { # EXIT_CODE...
   : >"$STUB_N"
   local codes="$*"
   cat >"$STUB_DIR/pg-rescue" <<EOF
-#!/usr/bin/env bash
+#!$BASH
 printf '%s\n' "\$*" >>"$STUB_LOG"
 echo x >>"$STUB_N"
 n=\$(grep -c . "$STUB_N")

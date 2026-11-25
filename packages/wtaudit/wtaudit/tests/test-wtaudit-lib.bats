@@ -512,7 +512,7 @@ mk_set() {
 fake_pnwf() {
   mkdir -p "$FX/pnwfbin"
   cat >"$FX/pnwfbin/pnwf" <<FAKE
-#!/usr/bin/env bash
+#!$BASH
 pwd -P >"$FX/pnwf.cwd"
 printf '%s\n' "\$*" >"$FX/pnwf.args"
 printf '%s' "${2:-}"
@@ -589,7 +589,7 @@ scan_sets() {
 # stub_lander <json>: a `pg-git-lander` on PATH whose `status` prints <json>.
 stub_lander() {
   mkdir -p "$FX/landerbin"
-  printf '#!/usr/bin/env bash\nprintf %%s %q\n' "$1" >"$FX/landerbin/pg-git-lander"
+  printf '#!%s\nprintf %%s %q\n' "$BASH" "$1" >"$FX/landerbin/pg-git-lander"
   chmod +x "$FX/landerbin/pg-git-lander"
   PATH="$FX/landerbin:$PATH"
 }
@@ -631,7 +631,7 @@ stub_lander() {
   WT="$(add_wt "$REPO" "pg-git-lander/op9")"
   commit_in "$WT" f.txt "work"
   mkdir -p "$FX/failbin"
-  printf '#!/usr/bin/env bash\nexit 1\n' >"$FX/failbin/pg-git-lander"
+  printf '#!%s\nexit 1\n' "$BASH" >"$FX/failbin/pg-git-lander"
   chmod +x "$FX/failbin/pg-git-lander"
   PATH="$FX/failbin:$PATH"
   [ "$(verdict "$REPO" "pg-git-lander/op9")" = "keep lander-owned" ]

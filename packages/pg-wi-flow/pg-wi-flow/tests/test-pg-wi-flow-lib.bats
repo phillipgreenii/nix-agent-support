@@ -35,85 +35,85 @@ setup() {
   MOCK_BD_READY_DIR="$(mktemp -d)"
   MOCK_BD_READY_PARENT_DIR="$(mktemp -d)"
   export MOCK_BD_LOG MOCK_BD_SHOW_DIR MOCK_BD_CHILDREN_DIR MOCK_BD_READY_DIR MOCK_BD_READY_PARENT_DIR
-  cat >"$MOCK_BIN/bd" <<'MOCKBD'
-#!/usr/bin/env bash
-echo "$*" >>"$MOCK_BD_LOG"
-case "$1" in
+  cat >"$MOCK_BIN/bd" <<MOCKBD
+#!$BASH
+echo "\$*" >>"\$MOCK_BD_LOG"
+case "\$1" in
 show)
-  id="$2"
-  file="$MOCK_BD_SHOW_DIR/$id.json"
-  if [[ -f $file ]]; then
-    printf '{"data":[%s]}\n' "$(cat "$file")"
+  id="\$2"
+  file="\$MOCK_BD_SHOW_DIR/\$id.json"
+  if [[ -f \$file ]]; then
+    printf '{"data":[%s]}\\n' "\$(cat "\$file")"
     exit 0
   fi
-  echo "mock bd show: no fixture for $id" >&2
+  echo "mock bd show: no fixture for \$id" >&2
   exit 1
   ;;
 children)
-  id="$2"
-  file="$MOCK_BD_CHILDREN_DIR/$id.json"
-  if [[ -f $file ]]; then
-    printf '{"data":%s}\n' "$(cat "$file")"
+  id="\$2"
+  file="\$MOCK_BD_CHILDREN_DIR/\$id.json"
+  if [[ -f \$file ]]; then
+    printf '{"data":%s}\\n' "\$(cat "\$file")"
     exit 0
   fi
-  printf '{"data":[]}\n'
+  printf '{"data":[]}\\n'
   ;;
 ready)
   parent=""
-  args=("$@")
-  for ((i = 0; i < ${#args[@]}; i++)); do
-    if [[ "${args[$i]}" == "--parent" ]]; then
-      parent="${args[$((i + 1))]}"
+  args=("\$@")
+  for ((i = 0; i < \${#args[@]}; i++)); do
+    if [[ "\${args[\$i]}" == "--parent" ]]; then
+      parent="\${args[\$((i + 1))]}"
     fi
   done
-  if [[ -n $parent ]]; then
-    file="$MOCK_BD_READY_PARENT_DIR/$parent.json"
+  if [[ -n \$parent ]]; then
+    file="\$MOCK_BD_READY_PARENT_DIR/\$parent.json"
   else
-    file="$MOCK_BD_READY_DIR/default.json"
+    file="\$MOCK_BD_READY_DIR/default.json"
   fi
-  if [[ -f $file ]]; then
-    printf '{"data":%s}\n' "$(cat "$file")"
+  if [[ -f \$file ]]; then
+    printf '{"data":%s}\\n' "\$(cat "\$file")"
   else
-    printf '{"data":[]}\n'
+    printf '{"data":[]}\\n'
   fi
   ;;
 update)
-  id="$2"
-  case " $* " in
+  id="\$2"
+  case " \$* " in
   *" --claim "*)
-    for failing in ${MOCK_BD_CLAIM_FAIL_IDS:-}; do
-      if [[ $id == "$failing" ]]; then
-        echo "mock bd update: --claim refused for $id" >&2
+    for failing in \${MOCK_BD_CLAIM_FAIL_IDS:-}; do
+      if [[ \$id == "\$failing" ]]; then
+        echo "mock bd update: --claim refused for \$id" >&2
         exit 1
       fi
     done
     ;;
   esac
-  for failing in ${MOCK_BD_UPDATE_FAIL_IDS:-}; do
-    if [[ $id == "$failing" ]]; then
-      echo "mock bd update: refused for $id" >&2
+  for failing in \${MOCK_BD_UPDATE_FAIL_IDS:-}; do
+    if [[ \$id == "\$failing" ]]; then
+      echo "mock bd update: refused for \$id" >&2
       exit 1
     fi
   done
   echo '{"data":[{}]}'
   ;;
 list)
-  if [[ -n ${MOCK_BD_LIST_FAIL:-} ]]; then
+  if [[ -n \${MOCK_BD_LIST_FAIL:-} ]]; then
     echo "mock bd list: forced failure" >&2
     exit 1
   fi
-  file="${MOCK_BD_LIST_FILE:-}"
-  if [[ -n $file && -f $file ]]; then
-    cat "$file"
+  file="\${MOCK_BD_LIST_FILE:-}"
+  if [[ -n \$file && -f \$file ]]; then
+    cat "\$file"
   else
-    printf '{"data":[]}\n'
+    printf '{"data":[]}\\n'
   fi
   ;;
 dep)
-  printf '{"data":[]}\n'
+  printf '{"data":[]}\\n'
   ;;
 *)
-  echo "mock bd: unhandled subcommand: $1" >&2
+  echo "mock bd: unhandled subcommand: \$1" >&2
   exit 1
   ;;
 esac

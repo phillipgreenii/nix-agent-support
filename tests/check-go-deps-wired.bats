@@ -17,9 +17,9 @@ setup() {
   cp "$REPO/flake.lock" "$ROOT/flake.lock"
   cp "$REPO/packages/update-gomod2nix-deps.sh" "$ROOT/packages/update-gomod2nix-deps.sh"
   # Stand-in for update-locks.sh: lists every module dir that has a gomod2nix.toml.
-  cat >"$ROOT/update-locks.sh" <<'SH'
-#!/usr/bin/env bash
-for t in "$(dirname "$0")"/packages/*/gomod2nix.toml; do basename "$(dirname "$t")"; done
+  cat >"$ROOT/update-locks.sh" <<SH
+#!$BASH
+for t in "\$(dirname "\$0")"/packages/*/gomod2nix.toml; do basename "\$(dirname "\$t")"; done
 SH
   mod alpha "go 1.26.8"
   mod beta "go 1.26.8"
@@ -30,7 +30,7 @@ mod() {
   mkdir -p "$ROOT/packages/$1"
   printf 'module example.com/%s\n\n%s\n' "$1" "$2" >"$ROOT/packages/$1/go.mod"
   : >"$ROOT/packages/$1/gomod2nix.toml"
-  printf '#!/usr/bin/env bash\nexec ../update-gomod2nix-deps.sh\n' >"$ROOT/packages/$1/update-deps.sh"
+  printf '#!%s\nexec ../update-gomod2nix-deps.sh\n' "$BASH" >"$ROOT/packages/$1/update-deps.sh"
   chmod +x "$ROOT/packages/$1/update-deps.sh"
 }
 

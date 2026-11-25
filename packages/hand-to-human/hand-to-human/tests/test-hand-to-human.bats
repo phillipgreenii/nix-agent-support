@@ -31,7 +31,7 @@ setup() {
   bd_call_log_install
   # The builder composes <name>.bash + <name>.sh under strict mode; do the same.
   cat >"$TDIR/run-hand-to-human" <<WRAPPER
-#!/usr/bin/env bash
+#!$BASH
 set -euo pipefail
 source "${SCRIPTS_DIR}/hand-to-human.bash"
 source "${SCRIPTS_DIR}/hand-to-human.sh"
@@ -259,7 +259,7 @@ bd_warn_shim() {
   real_bd="$(command -v bd)"
   shim_dir="$(mktemp -d)"
   cat >"$shim_dir/bd" <<SHIM
-#!/usr/bin/env bash
+#!$BASH
 echo "warning: beads.role not configured" >&2
 if [ "${1:-}" = "show-fail" ]; then
   case " \$* " in *" show "*) echo "bd: show exploded" >&2; exit 1 ;; esac
