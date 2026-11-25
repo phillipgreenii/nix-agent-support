@@ -134,6 +134,7 @@ func TestBashErrorSitesReportGenuineFailure(t *testing.T) {
 		"pg-gwm-readonly":    true,
 		"pg-git-lander":      true,
 		"pg-review":          true,
+		"ping":               true,
 		"rc-preflight":       true,
 		"safe-commands":      true,
 		"kubectl":            true,

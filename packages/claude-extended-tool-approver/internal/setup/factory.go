@@ -34,6 +34,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggwmworktree"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgnixlogwrapped"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgreview"
+	pingrule "github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/ping"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnwf"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pnworkspace"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/primarycommit"
@@ -358,6 +359,10 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// spec, which alone drives only evaluate/replay. The raw-worktree deny is the
 		// separate pggwmworktree rule above.
 		pggwm.New(),
+		// ping approves a bounded ICMP probe (-c or -w, closed numeric operands,
+		// one plain destination), mirroring pingSchema, which alone drives only
+		// evaluate/replay. "ping" is recognized by no other rule here.
+		pingrule.New(),
 		// pg-git-lander approves its read-only verbs and the resume forms
 		// (--abort/--quit/--continue/--skip) of an interrupted land or rebase,
 		// mirroring the pg-git-lander command spec, which alone drives only
