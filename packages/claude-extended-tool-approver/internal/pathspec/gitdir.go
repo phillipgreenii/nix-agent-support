@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/fixturerepo"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
-	"github.com/phillipgreenii/claude-extended-tool-approver/internal/temproot"
 )
 
 // P5 .git/ PROTECTION (docket tc-o14i5.3, packet tc-o14i5.3.9; operator
@@ -246,16 +246,17 @@ func readCoreHooksPath(file string) (string, bool) {
 	return val, found
 }
 
-// isTempPath is temproot.Under, indirected so tests can classify a fixture
+// isTempPath is temproot.Under (false inside a registered NonTemp fixturerepo.Repo), indirected so tests can classify a fixture
 // repo as NON-temp (every directory a test can create lives under some temp
 // root, so the Forbidden branch is otherwise unreachable from a test).
-var isTempPath = temproot.Under
+var isTempPath = fixturerepo.AwareTemp
 
 // SetTempClassifierForTest replaces the "is this path under a temp root"
 // predicate GitDirWriteVerdict uses and returns a restore func. Every
 // directory a test can create sits under some temp root, so without this
 // seam the non-temp (Forbidden) branch could not be exercised end to end
-// (including from effectpolicy's tests). It is not used by production code.
+// (including from effectpolicy's tests). It is not used by production code; a non-test loader that needs a non-temp
+// fixture uses fixturerepo.Register.
 func SetTempClassifierForTest(f func(string) bool) (restore func()) {
 	prev := isTempPath
 	isTempPath = f

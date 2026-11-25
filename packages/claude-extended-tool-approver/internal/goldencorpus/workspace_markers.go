@@ -27,7 +27,9 @@ const (
 type MarkerTree struct {
 	CWD, ProjectRoot string
 	Set, Bare        string
-	Cleanup          func()
+	// Home is the row's pinned HOME (synthetic; see Scope), "" for none.
+	Home    string
+	Cleanup func()
 }
 
 // Expand replaces the directory tokens in s (a no-op for a row without
@@ -51,8 +53,11 @@ func (t MarkerTree) Expand(s string) string {
 // effectpolicy golden fixtures. Cleanup removes it and is always safe to call.
 // A consumer that replays the row's command MUST pass it through Expand.
 func (fx PathStateFixture) MaterializeTree() (MarkerTree, error) {
-	none := MarkerTree{CWD: fx.CWD, ProjectRoot: fx.ProjectRoot, Cleanup: func() {}}
+	none := MarkerTree{CWD: fx.CWD, ProjectRoot: fx.ProjectRoot, Home: fx.Home, Cleanup: func() {}}
 	if len(fx.WorkspaceMarkers) == 0 {
+		if fx.needsRepo() {
+			return fx.materializeRepo(none)
+		}
 		return none, nil
 	}
 	for _, m := range fx.WorkspaceMarkers {
@@ -88,6 +93,7 @@ func (fx PathStateFixture) MaterializeTree() (MarkerTree, error) {
 		t.CWD = t.Bare
 	}
 	t.ProjectRoot = t.CWD
+	t.Home = fx.Home
 	return t, nil
 }
 

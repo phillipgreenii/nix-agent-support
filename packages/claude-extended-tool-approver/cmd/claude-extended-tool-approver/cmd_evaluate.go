@@ -666,7 +666,9 @@ func runEvaluateCorpus(corpusPaths []string, format string) {
 			BuildToolVerbs:  convertBuildToolVerbs(row.RulesConfig.BuildToolVerbs),
 		}
 
+		doneScope := tree.Scope()
 		resp, evalErr := claudecodeadapter.Evaluate(input, cfg, reg, policies, graphPolicies)
+		doneScope()
 		cleanupCWD()
 		if evalErr != nil {
 			r.Category = "not-comparable"

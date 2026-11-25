@@ -142,6 +142,7 @@ func compareRow(row goldencorpus.Row, reg cmddesc.Registry, policies []effectpol
 		return rowOutcome{err: fmt.Errorf("legacyextract: %s: %w", row.Case, err)}
 	}
 	defer tree.Cleanup()
+	defer tree.Scope()()
 	rowCWD, rowRoot := tree.CWD, tree.ProjectRoot
 	raw = []byte(tree.Expand(string(raw)))
 	input := &hookio.HookInput{

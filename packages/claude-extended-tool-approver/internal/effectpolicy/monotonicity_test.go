@@ -86,6 +86,8 @@ func monotonicityCommands(t testing.TB) (cmds []string, cwd, root string) {
 			continue
 		}
 		ps := r.CWDPathState
+		// Rows pinning git, home or marker state are left out: this test replays
+		// one shared synthetic cwd and does not materialise a per-row tree.
 		if ps.CWD != "/repo" || ps.ProjectRoot != "/repo" || len(ps.GitTracked) > 0 || len(ps.Gitignored) > 0 || ps.WorktreeState != "" || ps.Home != "" || len(ps.WorkspaceMarkers) > 0 {
 			continue
 		}

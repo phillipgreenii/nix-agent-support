@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/fixturerepo"
+
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/userconfig"
 )
@@ -237,6 +239,9 @@ func trustedGitPath() (string, error) {
 // PATH, root does not exist) reports WorktreeUnknown with the error —
 // never a crash, and never treated as clean.
 func realWorktreeState(root string) (WorktreeState, error) {
+	if f, _, ok := fixturerepo.For(root); ok && f.HasWorktreeState {
+		return worktreeStateFromName(f.WorktreeState), nil
+	}
 	gitPath, err := trustedGitPath()
 	if err != nil {
 		return WorktreeUnknown, &worktreeProbeError{root: root, err: err}
@@ -347,6 +352,9 @@ func SetGitTrackedProbe(fn func(root, rel string, isDir bool) (bool, error)) (re
 // property realWorktreeState's own doc comment states for its non-zero
 // exit: "never treated as clean" there, "never treated as untracked" here.
 func realGitTracked(root, rel string, isDir bool) (bool, error) {
+	if tracked, ok := fixturerepo.Tracked(root, rel, isDir); ok {
+		return tracked, nil
+	}
 	gitPath, err := trustedGitPath()
 	if err != nil {
 		return false, &gitTrackedProbeError{root: root, rel: rel, err: err}
@@ -551,4 +559,18 @@ func ProbeWorkforestSetState(abs string) (WorktreeState, error) {
 // unit, is affected).
 func AtWorktreeRoot(abs string) bool {
 	return IsWorktreeRoot(abs) || IsDeclaredWorktreeSlot(abs)
+}
+
+// worktreeStateFromName maps a fixturerepo state name to its WorktreeState;
+// any other name is WorktreeUnknown (never treated as clean).
+func worktreeStateFromName(n string) WorktreeState {
+	switch n {
+	case "clean":
+		return WorktreeClean
+	case "dirty":
+		return WorktreeDirty
+	case "clean-ignored":
+		return WorktreeCleanIgnored
+	}
+	return WorktreeUnknown
 }

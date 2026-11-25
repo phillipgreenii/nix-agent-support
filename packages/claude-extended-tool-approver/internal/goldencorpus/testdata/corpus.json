@@ -88,7 +88,8 @@
     },
     "cwd_path_state": {
       "cwd": "/repo",
-      "project_root": "/repo"
+      "project_root": "/repo",
+      "git_repo": true
     },
     "mode": "default",
     "settings": {},
@@ -107,7 +108,8 @@
     },
     "cwd_path_state": {
       "cwd": "/repo",
-      "project_root": "/repo"
+      "project_root": "/repo",
+      "git_repo": true
     },
     "mode": "default",
     "settings": {},
@@ -17504,6 +17506,42 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "operator-class"
+  },
+  {
+    "case": "statedep-min-1",
+    "tags": ["state-dependent", "family:bash"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "cat config/.env.local" }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "git_tracked": ["config/.env.local"]
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "minimum case 1"
+  },
+  {
+    "case": "statedep-min-3",
+    "tags": ["state-dependent", "family:bash"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "echo x > .git/hooks/pre-commit" }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo",
+      "git_repo": true
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "minimum case 3"
   },
   {
     "case": "statedep-min-2",

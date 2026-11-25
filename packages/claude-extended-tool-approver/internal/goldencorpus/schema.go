@@ -136,8 +136,9 @@ type ToolInputFixture struct {
 // helper (a throwaway project root plus a separate HOME, with git-tracked
 // and worktree-state fakes) — that package builds its fixture as live Go
 // closures against a real temp directory because it has a real engine to
-// exercise; this corpus has no consuming loader yet, so the same facts are
-// named as data instead, for a future loader to materialise.
+// exercise; this corpus names the same facts as data and every row-grading consumer
+// materialises them through PathStateFixture.MaterializeTree (a throwaway repo
+// answered through pathspec.FixtureRepo; HOME through MarkerTree.Scope).
 type PathStateFixture struct {
 	CWD           string   `json:"cwd"`
 	ProjectRoot   string   `json:"project_root,omitempty"`
@@ -145,6 +146,11 @@ type PathStateFixture struct {
 	GitTracked    []string `json:"git_tracked,omitempty"`
 	Gitignored    []string `json:"gitignored,omitempty"`
 	WorktreeState string   `json:"worktree_state,omitempty"`
+	// GitRepo opts a row into a materialised git repository (a real .git
+	// directory) without naming any tracked or ignored path, for a row whose
+	// verdict depends only on the repository existing, for example a write into
+	// .git/. GitTracked, Gitignored and WorktreeState imply it.
+	GitRepo bool `json:"git_repo,omitempty"`
 	// WorkspaceMarkers names marker files (a bare file name such as
 	// "pn-workspace.toml") that PathStateFixture.Materialize creates, empty, in a
 	// throwaway directory above a workforest-set-shaped working directory, and

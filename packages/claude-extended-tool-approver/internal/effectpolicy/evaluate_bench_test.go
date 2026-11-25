@@ -58,7 +58,9 @@ type benchCorpusRow struct {
 	name     string
 	expected goldencorpus.Verdict
 	marked   bool
-	req      evalcontract.Request
+	// scope brackets one evaluation of the row (pins its HOME).
+	scope func() func()
+	req   evalcontract.Request
 }
 
 // loadBashCorpusRows is loadBashCorpusCommands' row-level form. A row naming
@@ -98,6 +100,7 @@ func loadBashCorpusRows(tb testing.TB) []benchCorpusRow {
 			name:     r.Case,
 			expected: r.ExpectedVerdict,
 			marked:   len(r.CWDPathState.WorkspaceMarkers) > 0,
+			scope:    tree.Scope,
 			req:      evalcontract.Request{Command: cmd, CWD: cwd, ProjectRoot: root},
 		})
 	}
@@ -137,19 +140,21 @@ func percentile(durations []time.Duration, p float64) time.Duration {
 // output feeds, and its own doc comment for the (currently manual) update
 // procedure.
 func BenchmarkEvaluate(b *testing.B) {
-	reqs := loadBashCorpusCommands(b)
+	rows := loadBashCorpusRows(b)
 	reg := cmddesc.DefaultRegistry()
 	policies := DefaultPolicies()
 	graphPolicies := DefaultGraphPolicies()
 
-	durations := make([]time.Duration, 0, b.N*len(reqs))
+	durations := make([]time.Duration, 0, b.N*len(rows))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for _, req := range reqs {
+		for _, row := range rows {
+			done := row.scope()
 			start := time.Now()
-			Evaluate(req, reg, policies, graphPolicies)
+			Evaluate(row.req, reg, policies, graphPolicies)
 			durations = append(durations, time.Since(start))
+			done()
 		}
 	}
 	b.StopTimer()
