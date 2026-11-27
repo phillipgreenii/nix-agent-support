@@ -324,10 +324,23 @@ let
   withWrapBin =
     hasSpecRole: settings:
     lib.recursiveUpdate (lib.optionalAttrs hasSpecRole { claude.bin = pgWrapExecBin; }) settings;
-  handlerPoolSettings = withWrapBin (lib.any (r: r.spec != null) (
-    lib.attrValues handlerPoolRoles
-  )) cfg.pool.settings;
-  rolePoolSettings = roleCfg: withWrapBin (roleCfg.spec != null) roleCfg.ccpool.pool.settings;
+  # Every managed pool's config.toml also pins `claude.plugin_dir`, exactly as
+  # home/programs/ccpool pins it into the default pool's config.toml. ccpool
+  # reads ONE config.toml per pool (the pool dir's own, never the XDG one), so
+  # without this a session on a managed pool refuses to launch ("no plugin dir
+  # configured"): the ccpool-plugin SessionStart hook would never register.
+  # The plugin MUST match the ccpool binary on PATH, which is the ccpool
+  # module's package (the `or` covers an evaluation that declares only that
+  # module's `enable`).
+  ccpoolPluginDir = "${
+    config.phillipgreenii.programs.ccpool.package or pkgs.ccpool
+  }/share/ccpool-plugin";
+  withPluginDir = settings: lib.recursiveUpdate settings { claude.plugin_dir = ccpoolPluginDir; };
+  handlerPoolSettings = withPluginDir (
+    withWrapBin (lib.any (r: r.spec != null) (lib.attrValues handlerPoolRoles)) cfg.pool.settings
+  );
+  rolePoolSettings =
+    roleCfg: withPluginDir (withWrapBin (roleCfg.spec != null) roleCfg.ccpool.pool.settings);
   # Where a ccpool role runs, and the `claude.bin` that pool's config.toml carries.
   poolOf =
     roleCfg:
@@ -2625,7 +2638,8 @@ in
             phillipgreenii.programs.ccpool.enable = true -- this module's
             ccpool role kind shells out to the `ccpool` binary on PATH
             (internal/ccpool/cli.go), and only the ccpool module renders
-            claude.plugin_dir into ccpool's own config.toml (tc-24qs).
+            claude.plugin_dir into the default pool's config.toml (tc-24qs);
+            the pools this module manages pin the same plugin dir themselves.
           '';
         }
         {

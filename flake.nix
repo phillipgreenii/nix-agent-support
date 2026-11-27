@@ -12774,6 +12774,10 @@
                     promptBody = "wrap prompt";
                   };
                   pgWrapExecPath = "${pkgs.pg-wrap}/bin/pg-wrap-exec";
+                  # Every managed pool's config.toml pins the ccpool plugin (evalHM
+                  # declares only `programs.ccpool.enable`, so the module falls back
+                  # to `pkgs.ccpool`).
+                  ccpoolPluginDir = "${pkgs.ccpool}/share/ccpool-plugin";
                   wrapClaudeBin = claudeBin;
                   # Real executables for the specs the per-adapter validation builds: the
                   # build-time `pg-wrap check` (bead pg2-12gr4.8.32) needs every
@@ -13278,6 +13282,7 @@
                         ];
                         inherit
                           pgWrapExecPath
+                          ccpoolPluginDir
                           wrapClaudeBin
                           wrapFakePrefix
                           wrapFakeOther
@@ -13596,6 +13601,14 @@
                         [ "$(toml2json "$wrapOwnPoolConfig" | jq -r .pool.max_sessions)" = 1 ]
                         [ "$(toml2json "$wrapHandlerPoolConfig" | jq -r .claude.bin)" = "$pgWrapExecPath" ]
                         toml2json "$wrapPlainPoolConfig" | jq -e '(.claude // {}) | has("bin") | not' >/dev/null
+                        # Every managed pool (own pool with and without a spec role, and
+                        # the handler-wide pool) pins claude.plugin_dir to the ccpool
+                        # plugin, which exists: ccpool reads only the pool dir's own
+                        # config.toml, and refuses to launch a session without it.
+                        test -f "$ccpoolPluginDir/.claude-plugin/plugin.json"
+                        for poolConfig in "$wrapOwnPoolConfig" "$wrapPlainPoolConfig" "$wrapHandlerPoolConfig"; do
+                          [ "$(toml2json "$poolConfig" | jq -r .claude.plugin_dir)" = "$ccpoolPluginDir" ]
+                        done
 
                         # The join (beads pg2-12gr4.10.10, pg2-12gr4.10.18).
                         # Keys reach the TOML: handler, binds (the consumer's own),

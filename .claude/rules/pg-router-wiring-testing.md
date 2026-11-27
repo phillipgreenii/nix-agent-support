@@ -97,8 +97,10 @@ a SCRATCH target (never the live/real tracker at this pre-land stage).
 wireclient error can still mean the ccpool session never reached `ready`. Separately confirm:
 
 - `claude.plugin_dir` is configured for whatever ccpool pool this role's handler actually
-  dispatches into (`phillipgreenii.programs.ccpool` enabled for that consumer) — the single most
-  common way a brand-new ccpool-type role fails at launch, silently (`pg2-61i00`).
+  dispatches into — the single most common way a brand-new ccpool-type role fails at launch,
+  silently (`pg2-61i00`). ccpool reads only that pool's own `config.toml`: the default pool's comes
+  from `phillipgreenii.programs.ccpool`, and a pool the handler module manages (`pool.enable` or a
+  role's own `ccpool.pool.enable`) pins it itself. A pool managed any other way MUST set it.
 - The session actually reached a real state, not a launch-preflight error: `ccpool list`, and grep
   your scratch `$PG_ROUTER_LOG_DIR/events.jsonl` for `"kind":"dispatch"` entries naming the role —
   a `"level":"warn"` result carrying an `"error"` field is a FAIL even though the listener's own
