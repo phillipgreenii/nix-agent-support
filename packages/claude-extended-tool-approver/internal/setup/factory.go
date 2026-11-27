@@ -27,6 +27,7 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/monorepo"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/nix"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pathsafety"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pb"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgccaudit"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pgconnector"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/rules/pggitlander"
@@ -370,6 +371,13 @@ func RuleChain(eng *engine.Engine, pe *patheval.PathEvaluator, cfg *configrules.
 		// unattended (dontAsk) lander could not abort a stopped land. Starting a
 		// land stays unapproved here.
 		pggitlander.New(pe),
+		// pb approves the verbs and flags the pb command spec models (actor, drain
+		// isolate|reclaim, gate create|check|attach-verified-child, unstick), per the
+		// operator ruling that skill-prescribed pb commands are auto-approved; the
+		// spec alone drives only evaluate/replay, so without it every pb call
+		// abstained live and a dontAsk drain session could not isolate a bead.
+		// Unmodeled forms (gate check --stale-handler, completion, help) abstain.
+		pb.New(),
 		// pg-connector approves the `pg-connector issue show/comment/update/
 		// close` verb family already granted by
 		// PG_ROUTER_CCPOOL_HANDLER_CONFIG's allowedTools (bead pg2-s9zh5),
