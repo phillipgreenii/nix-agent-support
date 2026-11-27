@@ -43,7 +43,22 @@ func TestSurface(t *testing.T) {
 		{"pg-git-lander land drain/x --skip --json --wait 20m", root, true},
 		// --continue/--skip run repo hooks: need a trusted working directory
 		{"pg-git-lander land drain/x --continue --repo " + root, bare, false},
-		// starting an operation, or widening a resume, stays unapproved
+		// starting an operation in the documented shape
+		{"pg-git-lander land drain/x --repo " + root + " --source-worktree " + root + "/wt --wait 20m --json", root, true},
+		{"pg-git-lander land drain/x --repo " + root + " --source-worktree " + root + "/wt --keep-source-worktree", root, true},
+		{"pg-git-lander rebase drain/x --onto main --repo " + root + " --source-worktree " + root + "/wt --json", root, true},
+		{"pg-git-lander land drain/x --repo " + root + " --source-worktree " + root + "/wt", bare, false},
+		{"pg-git-lander land drain/x --repo " + root + " --source-worktree " + root + "/wt --no-verify", root, false},
+		{"pg-git-lander land drain/x --repo rel --source-worktree " + root + "/wt", root, false},
+		{"pg-git-lander land drain/x --repo " + root + " --source-worktree wt", root, false},
+		{"pg-git-lander land drain/x --repo " + root + " --source-worktree " + root + "/wt --frobnicate", root, false},
+		{"pg-git-lander land drain/x --repo " + root + " --source-worktree " + root + "/wt --keep-source-branch", root, false},
+		{"pg-git-lander land drain/x --repo " + root + " --source-worktree " + root + "/wt --into main", root, false},
+		{"pg-git-lander land --repo " + root + " --source-worktree " + root + "/wt", root, false},
+		{"pg-git-lander land drain/x --source-worktree " + root + "/wt", root, false},
+		{"pg-git-lander land drain/x --repo /home/nobody/x --source-worktree " + root + "/wt", root, false},
+		{"pg-git-lander rebase drain/x --repo " + root + " --source-worktree " + root + "/wt", root, false},
+		// starting without the required operands, or widening a resume, stays unapproved
 		{"pg-git-lander land drain/x --repo " + root, root, false},
 		{"pg-git-lander rebase drain/x --onto main", root, false},
 		{"pg-git-lander land drain/x --abort --source-worktree " + root, root, false},

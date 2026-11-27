@@ -27,15 +27,27 @@
 //     --skip run the repository's configured hooks, so they additionally need
 //     the working directory inside a git/go/pn workspace, exactly like the
 //     schema's trusted-checkout Exec fact.
-//   - NOT approved: starting a land or rebase (no resume flag), --no-verify,
-//     --source-worktree, --work-worktree, --target-worktree, --onto, --into,
-//     --keep-*, --context, any unknown flag or verb, an absolute-path
+//   - APPROVE start, in the documented shape only (the ff-merge-to-main
+//     handler's): `land BRANCH --repo P --source-worktree W [--wait D] [--json]
+//     [--keep-source-worktree]` and `rebase BRANCH --onto REF --repo P
+//     --source-worktree W [--wait D] [--json]`. P and W MUST be absolute and
+//     writable by the path evaluator, BRANCH is exactly one positional, and the
+//     working directory MUST be inside a git/go/pn workspace (a start runs the
+//     repository's configured hooks, like --continue). Through ceta's bgrun
+//     unwrapping, `bgrun NAME -- pg-git-lander land ...` is judged by this same
+//     payload rule (operator ruling, Phillip, 2026-11-27, verbatim: "bgrun is a
+//     wrapper, so ceta shoudl parse it such that it is approved/denied based
+//     upon the command being wrapped.").
+//   - NOT approved: --no-verify, --work-worktree, --target-worktree, --into,
+//     --keep-source-branch, --context, a start without --repo or
+//     --source-worktree, any unknown flag or verb, an absolute-path
 //     executable, and any leaf with a redirection, process substitution,
 //     heredoc or live expansion.
 package pggitlander
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
@@ -112,7 +124,7 @@ func (r *Rule) classify(args []string, cwd string) (string, bool) {
 		verb, rest = "config check", rest[1:]
 	}
 	if flags, ok := readOnlyFlags[verb]; ok {
-		resume, positionals, ok := r.scan(rest, flags, verb != "config check")
+		resume, positionals, _, ok := r.scan(rest, flags, verb != "config check")
 		if !ok || len(resume) > 0 || positionals > 1 {
 			return "", false
 		}
@@ -121,7 +133,10 @@ func (r *Rule) classify(args []string, cwd string) (string, bool) {
 	if verb != "land" && verb != "rebase" {
 		return "", false
 	}
-	resume, positionals, ok := r.scan(rest, resumeVerbFlags, true)
+	if !hasResumeFlag(rest) {
+		return r.classifyStart(verb, rest, cwd)
+	}
+	resume, positionals, _, ok := r.scan(rest, resumeVerbFlags, true)
 	if !ok || len(resume) != 1 || positionals > 1 {
 		return "", false
 	}
@@ -133,16 +148,58 @@ func (r *Rule) classify(args []string, cwd string) (string, bool) {
 	return verb + " " + resume[0] + " (resume of an interrupted operation)", true
 }
 
+func hasResumeFlag(args []string) bool {
+	for _, a := range args {
+		if resumeFlags[a] {
+			return true
+		}
+	}
+	return false
+}
+
+// startFlags is the documented start shape per verb; --repo and
+// --source-worktree are required and absolute (see classifyStart).
+var startFlags = map[string]map[string]flagKind{
+	"land": {
+		"--json": boolFlag, "--wait": valueFlag, "--repo": writePathFlag,
+		"--source-worktree": writePathFlag, "--keep-source-worktree": boolFlag,
+	},
+	"rebase": {
+		"--json": boolFlag, "--wait": valueFlag, "--repo": writePathFlag,
+		"--source-worktree": writePathFlag, "--onto": valueFlag,
+	},
+}
+
+// classifyStart approves starting a land or rebase in the documented shape: one
+// BRANCH, absolute --repo and --source-worktree, --onto for rebase, and a
+// trusted working directory (the operation runs the repository's hooks).
+func (r *Rule) classifyStart(verb string, args []string, cwd string) (string, bool) {
+	_, positionals, seen, ok := r.scan(args, startFlags[verb], true)
+	if !ok || positionals != 1 || !seen["--repo"] || !seen["--source-worktree"] || (verb == "rebase" && !seen["--onto"]) {
+		return "", false
+	}
+	for i, a := range args {
+		if (a == "--repo" || a == "--source-worktree") && !filepath.IsAbs(args[i+1]) {
+			return "", false
+		}
+	}
+	if r.pe == nil || cwd == "" || !pathspec.InsideMarkerWorkspace(pathspec.DefaultKinds(), []string{"git", "go", "pn"}, patheval.ResolveRealPath(cwd)) {
+		return "", false
+	}
+	return verb + " start (documented shape)", true
+}
+
 // scan walks args against flags. It returns the resume flags seen and the
 // number of plain positionals; ok is false on anything outside the closed
 // surface. Resume flags are only recognised when the flag table is the resume
 // one or the read-only table never lists them (so they make a read-only verb
 // fail via the returned slice).
-func (r *Rule) scan(args []string, flags map[string]flagKind, allowPositional bool) (resume []string, positionals int, ok bool) {
+func (r *Rule) scan(args []string, flags map[string]flagKind, allowPositional bool) (resume []string, positionals int, seen map[string]bool, ok bool) {
+	seen = map[string]bool{}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if !plain(a) {
-			return nil, 0, false
+			return nil, 0, nil, false
 		}
 		if resumeFlags[a] {
 			resume = append(resume, a)
@@ -150,34 +207,35 @@ func (r *Rule) scan(args []string, flags map[string]flagKind, allowPositional bo
 		}
 		if !strings.HasPrefix(a, "-") {
 			if !allowPositional {
-				return nil, 0, false
+				return nil, 0, nil, false
 			}
 			positionals++
 			continue
 		}
 		kind, known := flags[a]
 		if !known {
-			return nil, 0, false
+			return nil, 0, nil, false
 		}
+		seen[a] = true
 		if kind == boolFlag {
 			continue
 		}
 		if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") || !plain(args[i+1]) {
-			return nil, 0, false
+			return nil, 0, nil, false
 		}
 		i++
 		switch kind {
 		case readPathFlag:
 			if r.pe == nil || !r.pe.Evaluate(args[i]).CanRead() {
-				return nil, 0, false
+				return nil, 0, nil, false
 			}
 		case writePathFlag:
 			if r.pe == nil || !r.pe.Evaluate(args[i]).CanWrite() {
-				return nil, 0, false
+				return nil, 0, nil, false
 			}
 		}
 	}
-	return resume, positionals, true
+	return resume, positionals, seen, true
 }
 
 // plain reports whether tok carries no shell metacharacter, quote, backslash,
