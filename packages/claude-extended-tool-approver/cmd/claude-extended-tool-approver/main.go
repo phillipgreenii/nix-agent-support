@@ -65,6 +65,7 @@ var knownSubcommands = map[string]bool{
 	"specs":                true,
 	"version":              true,
 	"compare-tracker":      true,
+	"corpus-rows":          true,
 	"completion":           true, // cobra builtin
 	"help":                 true, // cobra builtin
 	"-h":                   true,
@@ -91,6 +92,7 @@ and analyzing the decision log.`,
 	root.AddCommand(newBaselineCmd())
 	root.AddCommand(newCompareCmd())
 	root.AddCommand(newCompareTrackerCmd())
+	root.AddCommand(newCorpusRowsCmd())
 	root.AddCommand(newEvaluateCmd())
 	root.AddCommand(newLabelProposeCmd())
 	root.AddCommand(newLintCmd())

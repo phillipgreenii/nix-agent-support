@@ -1,0 +1,29 @@
+[
+  {
+    "case": "seed_one",
+    "tags": ["confirmed-hole"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "true"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve"
+  },
+  {
+    "case": "claimed_I",
+    "tags": ["spec", "shape:tool=Bash|prog=ls|I"],
+    "tool_input": { "tool_name": "Bash", "tool_input": { "command": "ls" } },
+    "cwd_path_state": { "cwd": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve"
+  }
+]
