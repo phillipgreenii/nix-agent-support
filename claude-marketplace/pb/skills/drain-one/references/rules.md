@@ -10,8 +10,10 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   never transcribed content.
 - Subagent dispatch (step 4/6) is ASYNC. Do NOT call `ScheduleWakeup` to wait
   on it — end the turn instead; the task notification resumes you
-  automatically. `ScheduleWakeup` is `/loop`-only and needs a `prompt` this
-  command never has. This is orthogonal to, and MUST NOT be confused with, a
+  automatically. Ending the turn here only means "waiting for this subagent": it
+  never means the drain is finished, and a finished bead is never a reason to end the
+  turn (`drain-beads.md`, C-1 to C-5). `ScheduleWakeup` is `/loop`-only and needs a
+  `prompt` this command never has. This is orthogonal to, and MUST NOT be confused with, a
   DISPATCHED subagent's own backgrounded Bash/Monitor calls (e.g. an
   implementer's backgrounded `nix build .#checks.<system>.<name>`) — the
   notification-resumes-you mechanism covers an agent waiting on its own Agent-tool dispatch, which

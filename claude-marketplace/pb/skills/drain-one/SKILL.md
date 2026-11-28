@@ -11,6 +11,16 @@ claim one, self-check freshness, drill down into epics, or loop: the caller does
 those. It returns to the caller with an outcome (see "Outcomes"). Step numbers
 continue from the caller's step 1 (CLAIM).
 
+**Returning an outcome is NOT the end of the drain.** Every outcome (`closed`, `released`,
+`container-hit`, `not-mine`, including a STUCK exit) is the end of ONE bead only. Where the
+caller is a looping drain (`/drain-beads`), the session MUST go straight back to the caller's
+CLAIM step in the same turn, and MUST NOT stop, wait for the operator, or treat a finished bead
+as a stopping point; the only things that end that loop are the stop reasons the caller names
+(`drain-beads.md`'s "Goal / termination", C-1 to C-5). A short per-bead summary (bead id,
+outcome, landed commit or release reason) is welcome after the outcome and is never a reason to
+stop. A caller that drains exactly one bead by design (a pg-router drain worker) ends after its
+one bead.
+
 If the skill text you hold ends with `skill content truncated for compaction`,
 or you cannot quote the step you need, Read this file's path in full (and the
 `references/` file the step names) before acting.
@@ -34,7 +44,9 @@ state takes the default, which is exactly what /drain-beads does.
   `human`), which every drain queue excludes, with the claim released in the same update.
 - **session mode** (default `loop`): `loop` — an operator is reachable, and async
   subagents follow the rule in `references/rules.md` (end the turn, the task
-  notification resumes you). `unattended` — no operator is present: every
+  notification resumes you). Ending the turn is allowed ONLY to wait for an outstanding
+  subagent, never because a bead finished; when the notification arrives, carry on with the
+  bead or, after its outcome, with the caller's next CLAIM. `unattended` — no operator is present: every
   "report to the operator" line becomes a bead comment plus your final message,
   and you MUST NOT end your turn while any subagent or background task is
   outstanding — await it inside the turn (a `Monitor` until-loop, loaded first
@@ -321,7 +333,8 @@ and the container's own priority, then:
      **POST-DEPLOY VERIFICATION GATE** (`references/post-deploy-gate.md`); exit 0 → cleanup + close; exit 5/21
      → do NOT close, route to STUCK.
 
-8. Return to the caller with the outcome (see "Outcomes").
+8. Return to the caller with the outcome (see "Outcomes"), then continue as the opening
+   paragraph says: a looping caller claims the next bead at once.
 
 ## STUCK — cannot complete a claimed bead
 

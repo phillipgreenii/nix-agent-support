@@ -86,6 +86,35 @@ last resort.
 
 ## Goal / termination
 
+The goal of this command is to KEEP DRAINING beads for as long as one can be drained. It is a
+loop, not a batch: finishing one bead (closed or released) is never a reason to stop, and the
+only things that end it are the two stop reasons below.
+
+- **C-1 (continue).** After every bead outcome (`closed`, `released`, `container-hit`,
+  `not-mine`, a STUCK exit), the session MUST go straight back to CLAIM in the same turn. It
+  MUST NOT stop, hand control back, or ask the operator whether to continue.
+- **C-2 (stop reasons).** The session MUST stop only when (a) the Goal below is met (a
+  SUCCESSFUL query returns no agent-workable, non-template bead), or (b) the operator tells it
+  to stop (`/pb:stop-draining-beads`, or an explicit instruction in the conversation such as
+  "stop" or "just one"), or (c) a persistent `bd` failure (see below) or an unattended
+  stale-command halt (see CLAIM step 1) forces it. Nothing else is a stop reason. In
+  particular, these are NOT stop reasons: the number of beads already drained, elapsed time,
+  context size (compaction handles it), a long remaining queue, a sense of a "good stopping
+  point", a bead that was escalated, released, deferred or blocked, and a skipped container
+  bead. When unsure whether to stop, the session MUST continue.
+- **C-3 (per-bead summary, nice to have).** After each bead's outcome the session SHOULD write
+  a short summary (bead id, outcome, landed commit or the reason it was released) and then
+  continue with C-1 in the same turn. A partial or interim summary is fine at any time and is
+  never a reason to stop.
+- **C-4 (final summary, required).** When the session stops for ANY reason in C-2, it MUST end
+  with a final summary: why it stopped (naming the stop reason), each bead handled this
+  session with its outcome, follow-up and verification beads filed, beads left released or
+  blocked and why, and anything the operator must act on. A session that stops without this
+  summary has not finished.
+- **C-5 (defect).** A turn that ends without the Goal met and without an operator stop is a
+  defect of the session, not a valid outcome. The session MUST NOT present such an end as
+  "done" or "paused", and when it notices it has stopped early it MUST resume the loop.
+
 You are DONE only when a SUCCESSFUL query returns no agent-workable, non-template bead:
 
 <!-- pb-queue:drain-termination -->
@@ -99,8 +128,8 @@ refactor spec §3). Filter out any `is_template=true` entry client-side before j
 the result is empty (see "Template/formula exclusion" above) — a template left in the result is
 not agent-workable and MUST NOT be claimed.
 
-If that command SUCCEEDS (exit 0) and has no non-template entry, STOP (see "Unpushed commits when
-you STOP") — UNLESS this session was invoked with `--monitor-if-empty` (see
+If that command SUCCEEDS (exit 0) and has no non-template entry, STOP after writing the final summary (C-4; see also "Unpushed
+commits when you STOP") — UNLESS this session was invoked with `--monitor-if-empty` (see
 "--monitor-if-empty" below), in which case an empty result ARMS a recurring
 check instead of stopping. If it ERRORS (a bd/dolt blip), that is NOT "empty" →
 back off briefly and retry; never exit on an error — EXCEPT a persistent condition that
@@ -200,6 +229,9 @@ condition that otherwise means Goal met and STOP.
 
 ## Main loop — repeat until the Goal is met
 
+This loop obeys C-1 to C-5 in "Goal / termination": it runs until a stop reason in C-2
+applies, and every pass through step 2 below ends by returning to step 1.
+
 1. **CLAIM** — the preview-then-claim sequence from "Template/formula exclusion" above (the
    ONLY claim path; NEVER the bare atomic `bd ready --claim`, which can claim an unreleasable
    template):
@@ -278,7 +310,7 @@ proceeding on currently loaded text (direct interactive invocation).`)
    ```
 
    This claims the highest-priority NON-TEMPLATE ready bead (assignee=ID, status=in_progress)
-   and returns it. A SUCCESSFUL list with no non-template candidate → Goal met → STOP (also run
+   and returns it. A SUCCESSFUL list with no non-template candidate → Goal met → write the final summary (C-4), then STOP (also run
    `session-mode set-status finished`, best-effort — this is the loop's own natural,
    deterministic termination point; no hook is used or needed for this) — UNLESS this session
    was invoked with `--monitor-if-empty`, in which case take the ARM path in
@@ -439,7 +471,9 @@ proceeding on currently loaded text (direct interactive invocation).`)
    `~/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/pb/skills/drain-one/SKILL.md`
    and the `references/` file the step names.
 
-   Its outcome decides what you do next:
+   Its outcome decides what you do next. EVERY outcome ends in step 1 in the same turn
+   (C-1); none of them is a stop reason, and each MAY be preceded by a short per-bead
+   summary line (C-3):
    - `closed` or `released` → go to step 1 (CLAIM).
    - `container-hit` → the Container guard's loop response above, then step 1.
    - `not-mine` → the claim is not yours, which should not happen: report it,
@@ -493,7 +527,10 @@ arguments, behavior is otherwise unchanged.
   bead this command drains.
 - The orchestrator's top-level turn handling: dispatched subagent work is ASYNC.
   Do NOT call `ScheduleWakeup` to wait on it — end the turn instead; the task
-  notification resumes you automatically. `ScheduleWakeup` is `/loop`-only and needs
+  notification resumes you automatically. This is the ONLY time ending the turn is
+  allowed before a C-2 stop reason: it means "waiting for an outstanding subagent",
+  never "finished". When the notification arrives, continue the bead (or, after its
+  outcome, CLAIM the next one per C-1); a resume is never a chance to wrap up. `ScheduleWakeup` is `/loop`-only and needs
   a `prompt` this command never has. It is
   also orthogonal to `--monitor-if-empty` (see that section above): arming
   that flag's recurring check hands the `loop` skill a prompt to re-run and
