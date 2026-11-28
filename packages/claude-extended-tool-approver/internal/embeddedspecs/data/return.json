@@ -1,0 +1,40 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "return",
+  "command": {
+    "name": "return",
+    "provenance": "bash builtin, bash -c 'help return'",
+    "citations": {
+      "provenance": {
+        "source": "bash builtin help return: \"return: return [n]\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "bash builtin help return: \"return: return [n]\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "bash builtin help return: \"return: return [n]\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "bash builtin help return: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "bash builtin help return: \"return: return [n]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

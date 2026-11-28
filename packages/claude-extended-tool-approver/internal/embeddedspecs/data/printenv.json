@@ -1,0 +1,66 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "printenv",
+  "command": {
+    "name": "printenv",
+    "provenance": "printenv (GNU coreutils) 9.11, printenv --help",
+    "citations": {
+      "provenance": {
+        "source": "printenv --help: \"Usage: printenv [OPTION] [VARIABLE]...\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "printenv --help: \"Usage: printenv [OPTION] [VARIABLE]...\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "printenv --help: \"Usage: printenv [OPTION] [VARIABLE]...\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "printenv --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--null": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "printenv --help: \"-0, --null\""
+        }
+      },
+      "-0": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "printenv --help: \"-0, --null\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "printenv --help: \"Usage: printenv [OPTION] [VARIABLE]...\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

@@ -1060,3 +1060,54 @@ func (r *P15CWDReport) Markdown() string {
 	}
 	return b.String()
 }
+
+// phase4Packet18Programs lists the programs the safe-commands "no schema"
+// packet gave a schema (internal/cmddesc/registry_safecmds_nospec.go), with the
+// operand suffix each flag probe is followed by so the probe is a complete
+// invocation of the command.
+var phase4Packet18Programs = []struct{ name, suffix string }{
+	{"base64", " f.txt"},
+	{"basename", " f.txt"},
+	{"break", ""},
+	{"chmod", " +x f.txt"},
+	{"continue", ""},
+	{"dirname", " f.txt"},
+	{"env", ""},
+	{"id", ""},
+	{"mv", " a.txt b.txt"},
+	{"paste", " f.txt"},
+	{"printenv", ""},
+	{"realpath", " f.txt"},
+	{"return", ""},
+	{"set", ""},
+	{"stat", " f.txt"},
+	{"touch", " f.txt"},
+	{"type", " ls"},
+	{"uname", ""},
+	{"uniq", " f.txt"},
+	{"uptime", ""},
+	{"whoami", ""},
+}
+
+// GeneratePhase4Packet18P15 builds the P15 report for the safe-commands
+// "no schema" packet: every flag of every schema it added, probed through the
+// real engine as `<program> <flag> [x]<operands>` in the project root, plus the
+// plain invocation of each program. Verdicts come from Evaluate, never from
+// reading a spec value (P14). root is a project root the probes run in.
+func GeneratePhase4Packet18P15(root string) (*P15Report, error) {
+	reg := cmddesc.DefaultRegistry()
+	rep := &P15Report{
+		Subject:   "safe-commands programs without a schema (uniq, env, basename, ...)",
+		Generator: "GeneratePhase4Packet18P15",
+		Test:      "TestP15ReportPhase4Packet18",
+	}
+	for _, p := range phase4Packet18Programs {
+		schema, ok := reg.Lookup(p.name)
+		if !ok {
+			return nil, fmt.Errorf("p15: no %s schema registered", p.name)
+		}
+		rep.probe(root, reg, p.name+" (plain invocation)", p.name+p.suffix)
+		rep.probeFlags(root, reg, schema, p.name, p.suffix)
+	}
+	return rep, nil
+}

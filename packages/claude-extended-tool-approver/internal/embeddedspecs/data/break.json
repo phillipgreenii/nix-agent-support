@@ -1,0 +1,40 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "break",
+  "command": {
+    "name": "break",
+    "provenance": "bash builtin, bash -c 'help break'",
+    "citations": {
+      "provenance": {
+        "source": "bash builtin help break: \"break: break [n]\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "bash builtin help break: \"break: break [n]\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "bash builtin help break: \"break: break [n]\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "bash builtin help break: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "bash builtin help break: \"break: break [n]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

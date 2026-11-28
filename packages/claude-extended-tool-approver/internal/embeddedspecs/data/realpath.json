@@ -1,0 +1,270 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "realpath",
+  "command": {
+    "name": "realpath",
+    "provenance": "realpath (GNU coreutils) 9.11, realpath --help",
+    "citations": {
+      "provenance": {
+        "source": "realpath --help: \"Usage: realpath [OPTION]... FILE...\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "realpath --help: \"Usage: realpath [OPTION]... FILE...\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "realpath --help: \"Usage: realpath [OPTION]... FILE...\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "realpath --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--canonicalize": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-E, --canonicalize all but the last component must exist (default)\""
+        }
+      },
+      "--canonicalize-existing": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-e, --canonicalize-existing all components of the path must exist\""
+        }
+      },
+      "--canonicalize-missing": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-m, --canonicalize-missing no path components need exist or be a directory\""
+        }
+      },
+      "--logical": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-L, --logical resolve '..' components before symlinks\""
+        }
+      },
+      "--no-symlinks": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-s, --strip, --no-symlinks don't expand symlinks\""
+        }
+      },
+      "--physical": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-P, --physical resolve symlinks as encountered (default)\""
+        }
+      },
+      "--quiet": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-q, --quiet suppress most error messages\""
+        }
+      },
+      "--relative-base": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"--relative-base=DIR print absolute paths unless paths below DIR\""
+        }
+      },
+      "--relative-to": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"--relative-to=DIR print the resolved path relative to DIR\""
+        }
+      },
+      "--strip": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-s, --strip, --no-symlinks don't expand symlinks\""
+        }
+      },
+      "--zero": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-z, --zero end each output line with NUL, not newline\""
+        }
+      },
+      "-E": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-E, --canonicalize all but the last component must exist (default)\""
+        }
+      },
+      "-L": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-L, --logical resolve '..' components before symlinks\""
+        }
+      },
+      "-P": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-P, --physical resolve symlinks as encountered (default)\""
+        }
+      },
+      "-e": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-e, --canonicalize-existing all components of the path must exist\""
+        }
+      },
+      "-m": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-m, --canonicalize-missing no path components need exist or be a directory\""
+        }
+      },
+      "-q": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-q, --quiet suppress most error messages\""
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-s, --strip, --no-symlinks don't expand symlinks\""
+        }
+      },
+      "-z": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "realpath --help: \"-z, --zero end each output line with NUL, not newline\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "realpath --help: \"Usage: realpath [OPTION]... FILE...\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

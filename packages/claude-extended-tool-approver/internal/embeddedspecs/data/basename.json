@@ -1,0 +1,114 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "basename",
+  "command": {
+    "name": "basename",
+    "provenance": "basename (GNU coreutils) 9.11, basename --help",
+    "citations": {
+      "provenance": {
+        "source": "basename --help: \"Usage: basename NAME [SUFFIX]\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "basename --help: \"Usage: basename NAME [SUFFIX]\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "basename --help: \"Usage: basename NAME [SUFFIX]\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "basename --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--multiple": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "basename --help: \"-a, --multiple\""
+        }
+      },
+      "--suffix": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "basename --help: \"-s, --suffix=SUFFIX\""
+        }
+      },
+      "--zero": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "basename --help: \"-z, --zero\""
+        }
+      },
+      "-a": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "basename --help: \"-a, --multiple\""
+        }
+      },
+      "-s": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "basename --help: \"-s, --suffix=SUFFIX\""
+        }
+      },
+      "-z": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "basename --help: \"-z, --zero\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "basename --help: \"Usage: basename NAME [SUFFIX]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

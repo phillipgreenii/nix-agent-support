@@ -1,0 +1,205 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "mv",
+  "command": {
+    "name": "mv",
+    "provenance": "mv (GNU coreutils) 9.11, mv --help",
+    "citations": {
+      "provenance": {
+        "source": "mv --help: \"Usage: mv [OPTION]... [-T] SOURCE DEST\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "mv --help: \"Usage: mv [OPTION]... [-T] SOURCE DEST\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "mv --help: \"Usage: mv [OPTION]... [-T] SOURCE DEST\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "mv --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--force": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"-f, --force\""
+        }
+      },
+      "--interactive": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"-i, --interactive\""
+        }
+      },
+      "--no-clobber": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "no-clobber"
+        },
+        "citation": {
+          "source": "mv --help: \"-n, --no-clobber\""
+        }
+      },
+      "--no-target-directory": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"-T, --no-target-directory\""
+        }
+      },
+      "--strip-trailing-slashes": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"--strip-trailing-slashes\""
+        }
+      },
+      "--target-directory": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-modify"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"-t, --target-directory=DIRECTORY\""
+        }
+      },
+      "--verbose": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"-v, --verbose\""
+        }
+      },
+      "-T": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"Usage: mv [OPTION]... [-T] SOURCE DEST\""
+        }
+      },
+      "-f": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"-f, --force\""
+        }
+      },
+      "-i": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"-i, --interactive\""
+        }
+      },
+      "-n": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "no-clobber"
+        },
+        "citation": {
+          "source": "mv --help: \"-n, --no-clobber\""
+        }
+      },
+      "-t": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-modify"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"or: mv [OPTION]... -t DIRECTORY SOURCE...\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "mv --help: \"explain how a file is copied. Implies -v\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-delete"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "minRest": 1,
+      "trailing": [
+        {
+          "kind": "path-truncate"
+        }
+      ],
+      "trailingSkippedByFlags": ["-t", "--target-directory"],
+      "citation": {
+        "source": "mv --help: \"Usage: mv [OPTION]... [-T] SOURCE DEST\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

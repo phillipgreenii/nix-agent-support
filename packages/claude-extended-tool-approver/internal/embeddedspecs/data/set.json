@@ -1,0 +1,174 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "set",
+  "command": {
+    "name": "set",
+    "provenance": "bash builtin, bash -c 'help set'",
+    "citations": {
+      "provenance": {
+        "source": "bash builtin help set: \"set: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [arg ...]\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "bash builtin help set: \"set: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [arg ...]\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "bash builtin help set: \"set: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [arg ...]\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "bash builtin help set: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "-B": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"braceexpand same as -B\""
+        }
+      },
+      "-C": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"noclobber same as -C\""
+        }
+      },
+      "-E": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"errtrace same as -E\""
+        }
+      },
+      "-H": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"histexpand same as -H\""
+        }
+      },
+      "-T": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"functrace same as -T\""
+        }
+      },
+      "-e": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"-e Exit immediately if a command exits with a non-zero status.\""
+        }
+      },
+      "-f": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"-f Disable file name generation (globbing).\""
+        }
+      },
+      "-o": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"set: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [arg ...]\""
+        }
+      },
+      "-u": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"nounset same as -u\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"verbose same as -v\""
+        }
+      },
+      "-x": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help set: \"xtrace same as -x\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "bash builtin help set: \"set: set [-abefhkmnptuvxBCEHPT] [-o option-name] [--] [-] [arg ...]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

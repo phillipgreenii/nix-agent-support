@@ -1,0 +1,222 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "id",
+  "command": {
+    "name": "id",
+    "provenance": "id (GNU coreutils) 9.11, id --help",
+    "citations": {
+      "provenance": {
+        "source": "id --help: \"Usage: id [OPTION]... [USER]...\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "id --help: \"Usage: id [OPTION]... [USER]...\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "id --help: \"Usage: id [OPTION]... [USER]...\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "id --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--context": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-Z, --context\""
+        }
+      },
+      "--group": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-g, --group\""
+        }
+      },
+      "--groups": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-G, --groups\""
+        }
+      },
+      "--name": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-n, --name\""
+        }
+      },
+      "--real": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-r, --real\""
+        }
+      },
+      "--user": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-u, --user\""
+        }
+      },
+      "--zero": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-z, --zero\""
+        }
+      },
+      "-G": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-G, --groups\""
+        }
+      },
+      "-Z": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-Z, --context\""
+        }
+      },
+      "-a": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-a\""
+        }
+      },
+      "-g": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-g, --group\""
+        }
+      },
+      "-n": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-n, --name\""
+        }
+      },
+      "-r": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-r, --real\""
+        }
+      },
+      "-u": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"print a name instead of a number, for -u,-g,-G\""
+        }
+      },
+      "-z": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "id --help: \"-z, --zero\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "id --help: \"Usage: id [OPTION]... [USER]...\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

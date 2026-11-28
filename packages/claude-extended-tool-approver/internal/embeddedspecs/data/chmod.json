@@ -1,0 +1,265 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "chmod",
+  "command": {
+    "name": "chmod",
+    "provenance": "chmod (GNU coreutils) 9.11, chmod --help",
+    "citations": {
+      "provenance": {
+        "source": "chmod --help: \"Usage: chmod [OPTION]... MODE[,MODE]... FILE...\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "chmod --help: \"Usage: chmod [OPTION]... MODE[,MODE]... FILE...\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "chmod --help: \"Usage: chmod [OPTION]... MODE[,MODE]... FILE...\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "chmod --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--changes": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-c, --changes\""
+        }
+      },
+      "--dereference": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"--dereference\""
+        }
+      },
+      "--no-dereference": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-h, --no-dereference\""
+        }
+      },
+      "--no-preserve-root": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"--no-preserve-root\""
+        }
+      },
+      "--preserve-root": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"--preserve-root\""
+        }
+      },
+      "--quiet": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-f, --silent, --quiet\""
+        }
+      },
+      "--recursive": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-R, --recursive\""
+        }
+      },
+      "--reference": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"or: chmod [OPTION]... --reference=RFILE FILE...\""
+        }
+      },
+      "--silent": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-f, --silent, --quiet\""
+        }
+      },
+      "--verbose": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-v, --verbose\""
+        }
+      },
+      "-H": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"one takes effect. -H is the default.\""
+        }
+      },
+      "-L": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-L\""
+        }
+      },
+      "-P": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-P\""
+        }
+      },
+      "-R": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-R, --recursive\""
+        }
+      },
+      "-c": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-c, --changes\""
+        }
+      },
+      "-f": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-f, --silent, --quiet\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-h, --no-dereference\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chmod --help: \"-v, --verbose\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        }
+      ],
+      "leadingSkippedByFlags": ["--reference"],
+      "rest": {
+        "kind": "path-modify"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "minRest": 1,
+      "citation": {
+        "source": "chmod --help: \"Usage: chmod [OPTION]... MODE[,MODE]... FILE...\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

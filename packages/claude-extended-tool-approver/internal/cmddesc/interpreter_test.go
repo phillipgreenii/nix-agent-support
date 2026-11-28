@@ -310,6 +310,11 @@ func TestRegistryNames(t *testing.T) {
 	want = append(want, "sqlite3")
 	// pg2-02knr: the session/actor id idiom's pure filters.
 	want = append(want, "tr", "uuidgen")
+	// Phase 4 safe-commands specs for programs that had no schema
+	// (registry_safecmds_nospec.go).
+	want = append(want, "uniq", "env", "basename", "dirname", "realpath", "printenv", "id",
+		"whoami", "uname", "uptime", "stat", "base64", "paste", "touch", "chmod", "mv",
+		"break", "continue", "return", "type", "set")
 	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)

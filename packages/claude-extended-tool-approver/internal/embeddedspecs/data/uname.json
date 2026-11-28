@@ -1,0 +1,258 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "uname",
+  "command": {
+    "name": "uname",
+    "provenance": "uname (GNU coreutils) 9.11, uname --help",
+    "citations": {
+      "provenance": {
+        "source": "uname --help: \"Usage: uname [OPTION]...\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "uname --help: \"Usage: uname [OPTION]...\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "uname --help: \"Usage: uname [OPTION]...\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "uname --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--all": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-a, --all print all information, in the following order,\""
+        }
+      },
+      "--hardware-platform": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-i, --hardware-platform print the hardware platform (non-portable)\""
+        }
+      },
+      "--kernel-name": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-s, --kernel-name print the kernel name\""
+        }
+      },
+      "--kernel-release": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-r, --kernel-release print the kernel release\""
+        }
+      },
+      "--kernel-version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-v, --kernel-version print the kernel version\""
+        }
+      },
+      "--machine": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-m, --machine print the machine hardware name\""
+        }
+      },
+      "--nodename": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-n, --nodename print the network node hostname\""
+        }
+      },
+      "--operating-system": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-o, --operating-system print the operating system\""
+        }
+      },
+      "--processor": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-p, --processor print the processor type (non-portable)\""
+        }
+      },
+      "-a": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-a, --all print all information, in the following order,\""
+        }
+      },
+      "-i": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"except omit -p and -i if unknown\""
+        }
+      },
+      "-m": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-m, --machine print the machine hardware name\""
+        }
+      },
+      "-n": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-n, --nodename print the network node hostname\""
+        }
+      },
+      "-o": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-o, --operating-system print the operating system\""
+        }
+      },
+      "-p": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"except omit -p and -i if unknown\""
+        }
+      },
+      "-r": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-r, --kernel-release print the kernel release\""
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-s, --kernel-name print the kernel name\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "uname --help: \"-v, --kernel-version print the kernel version\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "uname --help: \"Usage: uname [OPTION]...\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

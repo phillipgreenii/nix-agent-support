@@ -25,7 +25,7 @@ func TestPgReviewDecisions(t *testing.T) {
 		{"pg-review --output json agent q ccaudit error-rate-by-tool", evalcontract.Approve, ""},
 		{"pg-review agent q ccaudit error-rate-by-tool \"two words\"", evalcontract.Approve, ""},
 
-		{"pg-review agent q ccaudit q1; id", evalcontract.Abstain, "a semicolon starts a second command"},
+		{"pg-review agent q ccaudit q1; lsblk", evalcontract.Abstain, "a semicolon starts a second command"},
 		{"pg-review agent q ccaudit 'a;b'", evalcontract.Abstain, "a quoted semicolon"},
 		{"pg-review agent q ccaudit q1 $(id)", evalcontract.Abstain, "command substitution"},
 		{"pg-review agent q ccaudit q1 '$(id)'", evalcontract.Abstain, "a quoted dollar-paren"},
@@ -33,7 +33,7 @@ func TestPgReviewDecisions(t *testing.T) {
 		{"pg-review agent q ccaudit q1 '`id`'", evalcontract.Abstain, "a quoted backtick"},
 		{"pg-review agent q ccaudit q1 | sh", evalcontract.Abstain, "a pipe into a shell"},
 		{"pg-review agent q ccaudit q1 'a|b'", evalcontract.Abstain, "a quoted pipe"},
-		{"pg-review agent q ccaudit q1 && id", evalcontract.Abstain, "an and-list"},
+		{"pg-review agent q ccaudit q1 && lsblk", evalcontract.Abstain, "an and-list"},
 		{"pg-review agent q ccaudit q1 'a&&b'", evalcontract.Abstain, "a quoted and-list"},
 		{"pg-review agent q ccaudit q1 'a>b'", evalcontract.Abstain, "a quoted redirect"},
 		{"pg-review agent q ccaudit q1 \"a'b\"", evalcontract.Abstain, "a quote inside an argument"},

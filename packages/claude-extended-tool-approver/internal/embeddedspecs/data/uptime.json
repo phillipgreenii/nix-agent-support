@@ -1,0 +1,40 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "uptime",
+  "command": {
+    "name": "uptime",
+    "provenance": "uptime (GNU coreutils) 9.11, uptime --help",
+    "citations": {
+      "provenance": {
+        "source": "uptime --help: \"Usage: uptime [OPTION]... [FILE]\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "uptime --help: \"Usage: uptime [OPTION]... [FILE]\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "uptime --help: \"Usage: uptime [OPTION]... [FILE]\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "uptime --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "uptime --help: \"Usage: uptime [OPTION]... [FILE]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

@@ -1,0 +1,199 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "touch",
+  "command": {
+    "name": "touch",
+    "provenance": "touch (GNU coreutils) 9.11, touch --help",
+    "citations": {
+      "provenance": {
+        "source": "touch --help: \"Usage: touch [OPTION]... FILE...\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "touch --help: \"Usage: touch [OPTION]... FILE...\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "touch --help: \"Usage: touch [OPTION]... FILE...\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "touch --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--date": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-d, --date=STRING\""
+        }
+      },
+      "--no-create": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-c, --no-create\""
+        }
+      },
+      "--no-dereference": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-h, --no-dereference\""
+        }
+      },
+      "--reference": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-r, --reference=FILE\""
+        }
+      },
+      "--time": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"--time=WORD\""
+        }
+      },
+      "-a": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-a\""
+        }
+      },
+      "-c": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"A FILE argument that does not exist is created empty, unless -c or -h\""
+        }
+      },
+      "-d": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-d, --date=STRING\""
+        }
+      },
+      "-f": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-f\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"A FILE argument that does not exist is created empty, unless -c or -h\""
+        }
+      },
+      "-m": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-m\""
+        }
+      },
+      "-r": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-r, --reference=FILE\""
+        }
+      },
+      "-t": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "touch --help: \"-t [[CC]YY]MMDDhhmm[.ss]\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-create"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "minRest": 1,
+      "citation": {
+        "source": "touch --help: \"Usage: touch [OPTION]... FILE...\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

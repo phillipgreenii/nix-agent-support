@@ -1,0 +1,115 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "base64",
+  "command": {
+    "name": "base64",
+    "provenance": "base64 (GNU coreutils) 9.11, base64 --help",
+    "citations": {
+      "provenance": {
+        "source": "base64 --help: \"Usage: base64 [OPTION]... [FILE]\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "base64 --help: \"Usage: base64 [OPTION]... [FILE]\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "base64 --help: \"Usage: base64 [OPTION]... [FILE]\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "base64 --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--decode": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "base64 --help: \"-d, --decode\""
+        }
+      },
+      "--ignore-garbage": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "base64 --help: \"-i, --ignore-garbage\""
+        }
+      },
+      "--wrap": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "base64 --help: \"-w, --wrap=COLS\""
+        }
+      },
+      "-d": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "base64 --help: \"-d, --decode\""
+        }
+      },
+      "-i": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "base64 --help: \"-i, --ignore-garbage\""
+        }
+      },
+      "-w": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "base64 --help: \"-w, --wrap=COLS\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "stdinToken": "-",
+      "citation": {
+        "source": "base64 --help: \"Usage: base64 [OPTION]... [FILE]\""
+      }
+    },
+    "stdin": "when-no-path-operands",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

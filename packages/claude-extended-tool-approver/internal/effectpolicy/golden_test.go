@@ -1504,7 +1504,7 @@ var goldenCases = []goldenCase{
 	// per-case below only where the brief that scoped this slice
 	// anticipated a different outcome (its own "do not force, record any
 	// actual difference").
-	{"ssh_uptime_no_schema", "ssh host uptime", evalcontract.Abstain, nil},
+	{"ssh_lsblk_no_schema", "ssh host lsblk", evalcontract.Abstain, nil},
 	{"ssh_cat_etc_passwd", "ssh host cat /etc/passwd", evalcontract.Abstain, nil},
 	// ssh_rm_rf_root: the ruling is explicit that this abstains, NOT
 	// rejects, by default — DeleteAccess (wrapped in remotePathGuard) never
@@ -1516,12 +1516,12 @@ var goldenCases = []goldenCase{
 	// all) is insufficient — sshInterpreter still emits the connection's
 	// own EffectNet, but marks the node insufficient separately.
 	{"ssh_no_remote_command", "ssh host", evalcontract.Abstain, nil},
-	// ssh_i_key_uptime: -i is modeled as EffectKeyMaterial, not an ordinary
+	// ssh_i_key_lsblk: -i is modeled as EffectKeyMaterial, not an ordinary
 	// PathRead, specifically so this does NOT reach NoReadOfSecretPath and
 	// Reject (see cmddesc.KindKeyMaterial's own doc comment) — actual is
 	// Abstain (no policy judges EffectKeyMaterial; "uptime" also has no
 	// schema, doubly insufficient), never Reject.
-	{"ssh_i_key_uptime", "ssh -i ~/.ssh/id_rsa host uptime", evalcontract.Abstain, nil},
+	{"ssh_i_key_lsblk", "ssh -i ~/.ssh/id_rsa host lsblk", evalcontract.Abstain, nil},
 	// ssh_pipe_local_tee_nix_store: the SECOND pipeline stage (`tee
 	// /nix/store/x`) is an ordinary LOCAL write to a read-only zone — Reject
 	// comes from tee's own node, entirely independent of ssh's remote scope
@@ -1648,7 +1648,7 @@ var goldenCases = []goldenCase{
 	// effects, one per host.
 	{"scp_remote_to_remote", "scp a:/x b:/y", evalcontract.Abstain, nil},
 	// scp_i_key_upload: -i is EffectKeyMaterial, not an ordinary PathRead —
-	// the identical rationale ssh_i_key_uptime documents (cmddesc.
+	// the identical rationale ssh_i_key_lsblk documents (cmddesc.
 	// KindKeyMaterial's own doc comment) — so this is Abstain (no policy
 	// judges EffectKeyMaterial), never Reject.
 	{"scp_i_key_upload", "scp -i ~/.ssh/id_rsa README.md host:/tmp/", evalcontract.Abstain, nil},

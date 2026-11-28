@@ -85,7 +85,7 @@ func TestShellStatementForms(t *testing.T) {
 		{"for: substitution list not approved", `for f in $(rm -rf foo); do echo "$f"; done`, evalcontract.Abstain, "rm"},
 		{"for: body not approved", `for f in a b; do rm -rf "$f"; done`, evalcontract.Abstain, "rm"},
 		{"for: body secret read", `for f in a b; do cat ~/.ssh/id_rsa; done`, evalcontract.Reject, "credential"},
-		{"while: test condition", `while [ -d /tmp ]; do echo hi; break; done`, evalcontract.Abstain, "break"},
+		{"while: test condition", `while [ -d /tmp ]; do echo hi; lsblk; done`, evalcontract.Abstain, "lsblk"},
 		{"while read: stdin", `while read -r l; do echo "$l"; done`, evalcontract.Approve, ""},
 		{"while read: IFS prefix and file", `while IFS='=' read -r k v; do echo "$k"; done < README.md`, evalcontract.Approve, ""},
 		{"while read: secret input file", `while read -r l; do echo "$l"; done < ~/.ssh/id_rsa`, evalcontract.Reject, "credential"},

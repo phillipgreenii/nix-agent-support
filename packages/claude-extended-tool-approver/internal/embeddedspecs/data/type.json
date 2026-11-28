@@ -1,0 +1,102 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "type",
+  "command": {
+    "name": "type",
+    "provenance": "bash builtin, bash -c 'help type'",
+    "citations": {
+      "provenance": {
+        "source": "bash builtin help type: \"type: type [-afptP] name [name ...]\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "bash builtin help type: \"type: type [-afptP] name [name ...]\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "bash builtin help type: \"type: type [-afptP] name [name ...]\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "bash builtin help type: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "-P": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help type: \"-P force a PATH search for each NAME, even if it is an alias,\""
+        }
+      },
+      "-a": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help type: \"-a display all locations containing an executable named NAME;\""
+        }
+      },
+      "-f": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help type: \"-f suppress shell function lookup\""
+        }
+      },
+      "-p": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help type: \"-p returns either the name of the disk file that would be executed,\""
+        }
+      },
+      "-t": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash builtin help type: \"or nothing if `type -t NAME' would not return `file'\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "bash builtin help type: \"type: type [-afptP] name [name ...]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

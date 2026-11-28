@@ -38,6 +38,9 @@ var Exempt = map[string]bool{
 	"read":  true,
 	"shift": true,
 	"exit":  true,
+	// Phase 4 safe-commands specs: bash builtins with no on-PATH binary (evidence is
+	// bash `help <name>`).
+	"break": true, "continue": true, "return": true, "type": true, "set": true,
 	// pg2-cjfpy.2: launchctl is a macOS system tool absent from a linux (and a
 	// nix-sandboxed darwin) PATH, and `man` is man-db on linux but a different
 	// implementation on darwin, so neither has ONE pinned --help text to hash —

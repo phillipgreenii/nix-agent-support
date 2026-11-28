@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: ssh host lsblk<br/>- stdio:stdin content<br/>- stdio:stdout content<br/>- net:outbound host {ssh} [arg 0]<br/>mark=insufficient: net:outbound host {ssh} [arg 0]: network-access (host is not vetted)<br/>graph: no-content-flow-to-unvetted-network: unknown (content flows to unvetted host host)"]
+    subgraph sg_s0["ssh host"]
+        n1["command: lsblk<br/>- opaque (no schema for lsblk)<br/>mark=insufficient: no schema for lsblk"]
+    end
+    n1 -->|"executes: ssh host"| n0

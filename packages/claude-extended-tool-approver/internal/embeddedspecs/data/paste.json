@@ -1,0 +1,115 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "paste",
+  "command": {
+    "name": "paste",
+    "provenance": "paste (GNU coreutils) 9.11, paste --help",
+    "citations": {
+      "provenance": {
+        "source": "paste --help: \"Usage: paste [OPTION]... [FILE]...\" (tool version as installed on the reviewing host)"
+      },
+      "stdin": {
+        "source": "paste --help: \"Usage: paste [OPTION]... [FILE]...\" (classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "paste --help: \"Usage: paste [OPTION]... [FILE]...\" (stdout classification from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "paste --help: full option listing reviewed; the reviewed text documents no behavior for an unmodeled flag, so the fail-closed default (insufficient) applies"
+      }
+    },
+    "flags": {
+      "--delimiters": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "paste --help: \"-d, --delimiters=LIST\""
+        }
+      },
+      "--serial": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "paste --help: \"-s, --serial\""
+        }
+      },
+      "--zero-terminated": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "paste --help: \"-z, --zero-terminated\""
+        }
+      },
+      "-d": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "paste --help: \"-d, --delimiters=LIST\""
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "paste --help: \"-s, --serial\""
+        }
+      },
+      "-z": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "paste --help: \"-z, --zero-terminated\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "stdinToken": "-",
+      "citation": {
+        "source": "paste --help: \"Usage: paste [OPTION]... [FILE]...\""
+      }
+    },
+    "stdin": "when-no-path-operands",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

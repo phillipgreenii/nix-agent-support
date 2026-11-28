@@ -416,3 +416,31 @@ func TestP15ReportEffectiveCWD(t *testing.T) {
 	}
 	compareGolden(t, filepath.Join("testdata", "p15", "effective-cwd.md"), md)
 }
+
+// TestP15ReportPhase4Packet18 pins the committed P15 approve-reachability
+// report for the safe-commands programs that gained a schema (uniq, env,
+// basename, dirname, realpath, printenv, id, whoami, uname, uptime, stat,
+// base64, paste, touch, chmod, mv and the break/continue/return/type/set
+// builtins) and asserts the report does not leak the fixture root. Regenerate
+// with: go test ./internal/effectpolicy -run TestP15ReportPhase4Packet18 -update
+func TestP15ReportPhase4Packet18(t *testing.T) {
+	root, _ := fixture(t)
+	rep, err := GeneratePhase4Packet18P15(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	permitted := map[string]bool{}
+	for _, e := range rep.PermittedEntries() {
+		permitted[e.Fact] = true
+	}
+	for _, want := range []string{"uniq (plain invocation)", "basename (plain invocation)", "whoami (plain invocation)"} {
+		if !permitted[want] {
+			t.Errorf("P15 report does not list %q as feeding a Permitted path", want)
+		}
+	}
+	md := rep.Markdown()
+	if strings.Contains(md, root) {
+		t.Error("report leaks the fixture root")
+	}
+	compareGolden(t, filepath.Join("testdata", "p15", "phase4-18.md"), md)
+}
