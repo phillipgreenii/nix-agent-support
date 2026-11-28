@@ -30,7 +30,7 @@ session — its own Preamble cancels any live `--monitor-if-empty` monitor
 again, unconditionally, as a backstop; that is expected and not a sign the
 step above was skipped.
 
-Finally, report the final summary `drain-beads.md`'s C-4 requires — wrap-up-session
+Finally, report the final summary `drain-beads.md`'s DL-4 requires — wrap-up-session
 already reports beads closed/filed and repos landed; add why the drain stopped (the
 operator's stop), every bead handled this session with its outcome, and any bead this
 session parked. Do not report on unpushed local commits.

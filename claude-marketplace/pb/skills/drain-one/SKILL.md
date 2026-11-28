@@ -14,12 +14,13 @@ continue from the caller's step 1 (CLAIM).
 **Returning an outcome is NOT the end of the drain.** Every outcome (`closed`, `released`,
 `container-hit`, `not-mine`, including a STUCK exit) is the end of ONE bead only. Where the
 caller is a looping drain (`/drain-beads`), the session MUST go straight back to the caller's
-CLAIM step in the same turn, and MUST NOT stop, wait for the operator, or treat a finished bead
-as a stopping point; the only things that end that loop are the stop reasons the caller names
-(`drain-beads.md`'s "Goal / termination", C-1 to C-5). A short per-bead summary (bead id,
+CLAIM step without stopping (same turn, or the resumed turn after a pending subagent
+notification), and MUST NOT stop, wait for the operator, or treat a finished bead as a
+stopping point; the only things that end that loop are the stop reasons the caller names
+(`drain-beads.md`'s "Goal / termination", DL-1 to DL-5). A short per-bead summary (bead id,
 outcome, landed commit or release reason) is welcome after the outcome and is never a reason to
 stop. A caller that drains exactly one bead by design (a pg-router drain worker) ends after its
-one bead.
+one bead and returns the outcome to its supervisor.
 
 If the skill text you hold ends with `skill content truncated for compaction`,
 or you cannot quote the step you need, Read this file's path in full (and the

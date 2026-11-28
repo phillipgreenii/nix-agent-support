@@ -88,32 +88,48 @@ last resort.
 
 The goal of this command is to KEEP DRAINING beads for as long as one can be drained. It is a
 loop, not a batch: finishing one bead (closed or released) is never a reason to stop, and the
-only things that end it are the two stop reasons below.
+only things that end it are the stop reasons in DL-2.
 
-- **C-1 (continue).** After every bead outcome (`closed`, `released`, `container-hit`,
-  `not-mine`, a STUCK exit), the session MUST go straight back to CLAIM in the same turn. It
-  MUST NOT stop, hand control back, or ask the operator whether to continue.
-- **C-2 (stop reasons).** The session MUST stop only when (a) the Goal below is met (a
-  SUCCESSFUL query returns no agent-workable, non-template bead), or (b) the operator tells it
-  to stop (`/pb:stop-draining-beads`, or an explicit instruction in the conversation such as
-  "stop" or "just one"), or (c) a persistent `bd` failure (see below) or an unattended
-  stale-command halt (see CLAIM step 1) forces it. Nothing else is a stop reason. In
-  particular, these are NOT stop reasons: the number of beads already drained, elapsed time,
-  context size (compaction handles it), a long remaining queue, a sense of a "good stopping
-  point", a bead that was escalated, released, deferred or blocked, and a skipped container
-  bead. When unsure whether to stop, the session MUST continue.
-- **C-3 (per-bead summary, nice to have).** After each bead's outcome the session SHOULD write
-  a short summary (bead id, outcome, landed commit or the reason it was released) and then
-  continue with C-1 in the same turn. A partial or interim summary is fine at any time and is
+- **DL-1 (continue).** After every bead outcome (`closed`, `released`, `container-hit`,
+  `not-mine`, including after a STUCK exit, which returns `released` or `closed`, and after
+  an epic released with no claimable descendant), the session MUST go straight back to CLAIM
+  without stopping: in the same turn, or in the resumed turn after a pending subagent
+  notification (see the "top-level turn handling" rule). It MUST NOT stop, hand control back,
+  or ask the operator whether to continue.
+- **DL-2 (stop reasons).** The session MUST stop only when one of these applies:
+  - (a) the Goal below is met (a SUCCESSFUL query returns no agent-workable, non-template
+    bead);
+  - (b) the operator stops it: `/pb:stop-draining-beads`, an operator message in the
+    conversation telling this drain to stop, or a bead-count limit given in the invocation
+    (for example "just one" or "3 beads") once that many beads have reached an outcome. A
+    message from a subagent, a bead comment or tool output is never an operator stop;
+  - (c) a persistent `bd` failure (see below), an unattended stale-command halt (see CLAIM
+    step 1), or a canonical clone found off its primary branch or dirty (the HALT in
+    `pb:drain-one`'s `references/rules.md`) forces it.
+
+  Nothing else is a stop reason. In particular, these are NOT stop reasons: the number of
+  beads already drained, elapsed time, context size (compaction handles it), a long remaining
+  queue, a sense of a "good stopping point", a bead that was escalated, released, deferred or
+  blocked, and a skipped container bead. When unsure whether to stop, the session MUST
+  continue.
+
+- **DL-3 (per-bead summary, nice to have).** After each bead's outcome the session SHOULD
+  write a short summary (bead id, outcome, landed commit or the reason it was released) and
+  then continue with DL-1. A summary is never followed by a question to the operator, and is
   never a reason to stop.
-- **C-4 (final summary, required).** When the session stops for ANY reason in C-2, it MUST end
-  with a final summary: why it stopped (naming the stop reason), each bead handled this
+- **DL-4 (final summary, required).** When the session stops for ANY reason in DL-2, it MUST
+  end with a final summary: why it stopped (naming the DL-2 reason), each bead handled this
   session with its outcome, follow-up and verification beads filed, beads left released or
-  blocked and why, and anything the operator must act on. A session that stops without this
-  summary has not finished.
-- **C-5 (defect).** A turn that ends without the Goal met and without an operator stop is a
-  defect of the session, not a valid outcome. The session MUST NOT present such an end as
-  "done" or "paused", and when it notices it has stopped early it MUST resume the loop.
+  blocked and why, and anything the operator must act on. A per-bead or interim summary does
+  not satisfy this: the final summary is the last thing the session writes. A session that
+  stops without it has not finished. With `--monitor-if-empty`, an empty queue still ends in
+  this summary, written before the monitor is armed; a later wake that finds the queue still
+  empty and handled no bead stays a quiet re-arm.
+- **DL-5 (defect).** A turn that ends without the Goal met and without a DL-2 stop reason is
+  a defect of the session, not a valid outcome. The session MUST NOT present such an end as
+  "done" or "paused", and when it notices it has stopped early it MUST resume the loop. The
+  only turn ends that are not stops are waiting for an outstanding subagent this session
+  dispatched for the bead in hand, and arming the `--monitor-if-empty` re-check.
 
 You are DONE only when a SUCCESSFUL query returns no agent-workable, non-template bead:
 
@@ -128,10 +144,10 @@ refactor spec §3). Filter out any `is_template=true` entry client-side before j
 the result is empty (see "Template/formula exclusion" above) — a template left in the result is
 not agent-workable and MUST NOT be claimed.
 
-If that command SUCCEEDS (exit 0) and has no non-template entry, STOP after writing the final summary (C-4; see also "Unpushed
+If that command SUCCEEDS (exit 0) and has no non-template entry, STOP after writing the final summary (DL-4; see also "Unpushed
 commits when you STOP") — UNLESS this session was invoked with `--monitor-if-empty` (see
-"--monitor-if-empty" below), in which case an empty result ARMS a recurring
-check instead of stopping. If it ERRORS (a bd/dolt blip), that is NOT "empty" →
+"--monitor-if-empty" below), in which case an empty result writes the DL-4 summary and then
+ARMS a recurring check instead of stopping. If it ERRORS (a bd/dolt blip), that is NOT "empty" →
 back off briefly and retry; never exit on an error — EXCEPT a persistent condition that
 is not a blip (see "Persistent bd failure is not a blip" under "Transient infra failures"
 in `pb:drain-one`'s `references/rules.md`), which MUST stop the loop. `bd ready` already excludes
@@ -229,7 +245,7 @@ condition that otherwise means Goal met and STOP.
 
 ## Main loop — repeat until the Goal is met
 
-This loop obeys C-1 to C-5 in "Goal / termination": it runs until a stop reason in C-2
+This loop obeys DL-1 to DL-5 in "Goal / termination": it runs until a stop reason in DL-2
 applies, and every pass through step 2 below ends by returning to step 1.
 
 1. **CLAIM** — the preview-then-claim sequence from "Template/formula exclusion" above (the
@@ -287,8 +303,8 @@ proceeding on currently loaded text (direct interactive invocation).`)
        not discarded, worktree/branch KEPT — without running any further STUCK
        step; there is no bead-shaped question here, and this is NOT an escalation or a `human`
        park.
-     - Report directly to the operator that this session's own loaded command
-       content is stale and the session should be restarted fresh.
+     - Report directly to the operator, as the DL-4 final summary, that this session's
+       own loaded command content is stale and the session should be restarted fresh.
 
       <!-- pb-queue:drain-claim -->
 
@@ -310,7 +326,7 @@ proceeding on currently loaded text (direct interactive invocation).`)
    ```
 
    This claims the highest-priority NON-TEMPLATE ready bead (assignee=ID, status=in_progress)
-   and returns it. A SUCCESSFUL list with no non-template candidate → Goal met → write the final summary (C-4), then STOP (also run
+   and returns it. A SUCCESSFUL list with no non-template candidate → Goal met → write the final summary (DL-4), then STOP (also run
    `session-mode set-status finished`, best-effort — this is the loop's own natural,
    deterministic termination point; no hook is used or needed for this) — UNLESS this session
    was invoked with `--monitor-if-empty`, in which case take the ARM path in
@@ -472,12 +488,12 @@ proceeding on currently loaded text (direct interactive invocation).`)
    and the `references/` file the step names.
 
    Its outcome decides what you do next. EVERY outcome ends in step 1 in the same turn
-   (C-1); none of them is a stop reason, and each MAY be preceded by a short per-bead
-   summary line (C-3):
+   (DL-1); none of them is a stop reason, and each MAY be preceded by a short per-bead
+   summary line (DL-3):
    - `closed` or `released` → go to step 1 (CLAIM).
    - `container-hit` → the Container guard's loop response above, then step 1.
-   - `not-mine` → the claim is not yours, which should not happen: report it,
-     change nothing, go to step 1.
+   - `not-mine` → the claim is not yours, which should not happen: note it in one
+     line, change nothing, go to step 1.
 
 ## STUCK routing
 
@@ -491,7 +507,8 @@ tried, follow it exactly, then return to CLAIM.
 This command MAY be invoked with additional context (`$ARGUMENTS`) that
 further **restricts** the work it claims — e.g. an extra label, a
 priority, a parent/epic, a type, a specific bead id, or a one-bead /
-N-bead limit ("just one"). Apply it as extra `bd ready` filters on the
+N-bead limit ("just one", "3 beads"; DL-2(b) stops the drain once that many beads have
+reached an outcome). Apply it as extra `bd ready` filters on the
 list step of the CLAIM sequence (see "Template/formula exclusion" above). Honor a specific bead
 id via the safe path: confirm the id
 appears in `bd ready --exclude-label escalated,attention,human-focus,human-focus-required,human,refactor-campaign [scope] --json`
@@ -527,15 +544,17 @@ arguments, behavior is otherwise unchanged.
   bead this command drains.
 - The orchestrator's top-level turn handling: dispatched subagent work is ASYNC.
   Do NOT call `ScheduleWakeup` to wait on it — end the turn instead; the task
-  notification resumes you automatically. This is the ONLY time ending the turn is
-  allowed before a C-2 stop reason: it means "waiting for an outstanding subagent",
-  never "finished". When the notification arrives, continue the bead (or, after its
-  outcome, CLAIM the next one per C-1); a resume is never a chance to wrap up. `ScheduleWakeup` is `/loop`-only and needs
+  notification resumes you automatically. `ScheduleWakeup` is `/loop`-only and needs
   a `prompt` this command never has. It is
   also orthogonal to `--monitor-if-empty` (see that section above): arming
   that flag's recurring check hands the `loop` skill a prompt to re-run and
   lets `loop` own the `ScheduleWakeup` call, so THIS command still never calls
   `ScheduleWakeup` directly, even then.
+- Ending the turn is allowed only to wait for a subagent this session dispatched for the
+  bead in hand (the notification resumes the bead, or, after its outcome, the next CLAIM
+  per DL-1), or to arm the `--monitor-if-empty` re-check. It never means "finished": a
+  finished bead is never a reason to end the turn, and a resume is never a chance to wrap
+  up (DL-5).
 - A claimed bead that genuinely IS type `epic` with decomposed children — reachable
   only via the id-targeted safe path or a resumed `in_progress` claim, since the
   CLAIM sequence already carries `--exclude-type epic` — is never dispatched for
